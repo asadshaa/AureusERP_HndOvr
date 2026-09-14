@@ -34,6 +34,20 @@ it('returns the existing device when the same public key is registered again', f
         ->and(UserDevice::query()->count())->toBe(1);
 });
 
+it('refuses to register a public key already registered to another user', function () {
+    $userA = documentTestUser();
+    $userB = documentTestUser();
+
+    $deviceA = $this->service->register($userA, 'User A Laptop', 'SHARED-KEY');
+
+    expect(fn () => $this->service->register($userB, 'User B Laptop', 'SHARED-KEY'))
+        ->toThrow(RuntimeException::class, 'This device key is already registered to another user.');
+
+    expect($deviceA->fresh()->user_id)->toBe($userA->id)
+        ->and($deviceA->fresh()->label)->toBe('User A Laptop')
+        ->and(UserDevice::query()->count())->toBe(1);
+});
+
 it('revokes a device the actor owns', function () {
     $user = documentTestUser();
     $device = $this->service->register($user, 'Laptop', 'KEY');
