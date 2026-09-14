@@ -62,7 +62,12 @@ class GoogleDriveClient implements DriveClient
 
         $files = $result->getFiles();
 
-        return $files[0]?->getId();
+        // ?-> alone isn't enough here: with zero matches $files is an
+        // empty array, and accessing offset 0 on it directly (rather
+        // than a null value at that offset) is what actually triggers
+        // PHP's "undefined array key" warning -- caught live during
+        // manual verification against the real Drive API.
+        return ($files[0] ?? null)?->getId();
     }
 
     /**

@@ -3,6 +3,7 @@
 return [
     'invoice'          => 'Invoice',
     'bill'             => 'Bill',
+    'journal-entry'    => 'Journal Entry',
     'receipt'          => 'Receipt',
     'bank-statement'   => 'Bank Statement',
     'payment-evidence' => 'Payment Evidence',

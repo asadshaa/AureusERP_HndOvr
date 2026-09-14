@@ -95,7 +95,9 @@ class AttendanceRecordResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(HrPermissions::ManageAttendance) ?? false;
+        $user = Auth::user();
+
+        return $user !== null && ($user->can(HrPermissions::ManageAttendance) || $user->can(HrPermissions::ViewAttendance));
     }
 
     public static function getPages(): array

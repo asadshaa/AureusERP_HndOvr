@@ -68,10 +68,12 @@ return [
     |
     */
     'path_templates' => [
-        DocumentType::Invoice->value       => ['{company}', 'Accounting', 'Invoices', '{identifier}'],
-        DocumentType::Bill->value          => ['{company}', 'Accounting', 'Bills', '{identifier}'],
-        DocumentType::BankStatement->value => ['{company}', 'Accounting', 'Bank Statements', '{identifier}'],
-        'default'                          => ['{company}', 'Accounting', 'Other Documents'],
+        DocumentType::Invoice->value         => ['{company}', 'Accounting', 'Invoices', '{identifier}'],
+        DocumentType::Bill->value            => ['{company}', 'Accounting', 'Bills', '{identifier}'],
+        DocumentType::JournalEntry->value    => ['{company}', 'Accounting', 'Journal Entries', '{identifier}'],
+        DocumentType::PaymentEvidence->value => ['{company}', 'Accounting', 'Payments', '{identifier}'],
+        DocumentType::BankStatement->value   => ['{company}', 'Accounting', 'Bank Statements', '{identifier}'],
+        'default'                            => ['{company}', 'Accounting', 'Other Documents'],
     ],
 
 ];

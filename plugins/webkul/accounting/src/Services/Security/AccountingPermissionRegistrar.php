@@ -11,11 +11,74 @@ use Webkul\Security\PermissionRegistrar;
 class AccountingPermissionRegistrar
 {
     /**
-     * @return array{permissions: int, admin_roles: int, manager_roles: int, accountant_roles: int}
+     * Role-name -> permission-bundle map for the finance role catalogue.
+     * Deliberately name-matched, exactly like the pre-existing
+     * admin/manager/accountant tiers below -- extending the established
+     * mechanism rather than inventing a new one. A role is only ever
+     * granted a bundle here if a Role row with one of these names already
+     * exists (created by FinanceRoleSeeder, or by hand); this registrar
+     * never creates roles itself.
+     *
+     * @return array<string, array{names: array<int, string>, permissions: array<int, string>}>
+     */
+    private function financeRoleBundles(): array
+    {
+        return [
+            'finance_operator' => [
+                'names'       => ['finance_operator', 'finance operator'],
+                'permissions' => AccountingPermissions::financeOperator(),
+            ],
+            'ap_officer' => [
+                'names'       => ['ap_officer', 'ap officer', 'accounts_payable_officer', 'accounts payable officer'],
+                'permissions' => AccountingPermissions::apOfficer(),
+            ],
+            'ar_officer' => [
+                'names'       => ['ar_officer', 'ar officer', 'accounts_receivable_officer', 'accounts receivable officer'],
+                'permissions' => AccountingPermissions::arOfficer(),
+            ],
+            'treasury_officer' => [
+                'names'       => ['treasury_officer', 'treasury officer'],
+                'permissions' => AccountingPermissions::treasuryOfficer(),
+            ],
+            'reconciliation_officer' => [
+                'names'       => ['reconciliation_officer', 'reconciliation officer'],
+                'permissions' => AccountingPermissions::reconciliationOfficer(),
+            ],
+            'tax_officer' => [
+                'names'       => ['tax_officer', 'tax officer'],
+                'permissions' => AccountingPermissions::taxOfficer(),
+            ],
+            'controller' => [
+                'names'       => ['controller'],
+                'permissions' => AccountingPermissions::controller(),
+            ],
+            'fpa_analyst' => [
+                'names'       => ['fpa_analyst', 'fpa analyst', 'fp&a_analyst', 'fp&a analyst'],
+                'permissions' => AccountingPermissions::fpaAnalyst(),
+            ],
+            'vp_finance' => [
+                'names'       => ['vp_finance', 'vp finance'],
+                'permissions' => AccountingPermissions::vpFinance(),
+            ],
+            'cfo' => [
+                'names'       => ['cfo'],
+                'permissions' => AccountingPermissions::cfo(),
+            ],
+            'internal_auditor' => [
+                'names'       => ['internal_auditor', 'internal auditor', 'auditor'],
+                'permissions' => AccountingPermissions::internalAuditor(),
+            ],
+        ];
+    }
+
+    /**
+     * @return array{permissions: int, admin_roles: int, manager_roles: int, accountant_roles: int, finance_role_grants: array<string, int>}
      */
     public function synchronize(): array
     {
         $now = now();
+        $bundles = $this->financeRoleBundles();
+
         $names = collect(AccountingPermissions::all())->unique()->values();
 
         Permission::query()->insertOrIgnore($names->map(fn (string $name): array => [
@@ -41,13 +104,26 @@ class AccountingPermissionRegistrar
             $permissionIds->only(AccountingPermissions::accountant())->values()->all(),
         );
 
+        $financeRoleGrants = [];
+        foreach ($bundles as $key => $bundle) {
+            $roles = $this->rolesNamed($bundle['names']);
+
+            $this->grant(
+                $roles->pluck('id')->all(),
+                $permissionIds->only($bundle['permissions'])->values()->all(),
+            );
+
+            $financeRoleGrants[$key] = $roles->count();
+        }
+
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         return [
-            'permissions'      => $permissionIds->count(),
-            'admin_roles'      => $adminRoles->count(),
-            'manager_roles'    => $managerRoles->count(),
-            'accountant_roles' => $accountantRoles->count(),
+            'permissions'         => $permissionIds->count(),
+            'admin_roles'         => $adminRoles->count(),
+            'manager_roles'       => $managerRoles->count(),
+            'accountant_roles'    => $accountantRoles->count(),
+            'finance_role_grants' => $financeRoleGrants,
         ];
     }
 

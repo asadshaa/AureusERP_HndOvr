@@ -39,12 +39,17 @@ use Webkul\Accounting\Filament\Clusters\Accounting\Resources\JournalEntryResourc
 use Webkul\Accounting\Filament\Clusters\Accounting\Resources\JournalEntryResource\Pages\ViewJournalEntry;
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource as AccountingInvoiceResource;
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\ViewInvoice as AccountingViewInvoice;
+use Webkul\Accounting\Filament\Clusters\Customers\Resources\PaymentResource as CustomerPaymentResource;
+use Webkul\Accounting\Filament\Clusters\Customers\Resources\PaymentResource\Pages\ViewPayment as ViewCustomerPayment;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource as AccountingBillResource;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource\Pages\ViewBill as AccountingViewBill;
+use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource as VendorPaymentResource;
+use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\ViewPayment as ViewVendorPayment;
 use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Models\Bill as AccountingBill;
 use Webkul\Accounting\Models\Invoice as AccountingInvoice;
 use Webkul\Accounting\Models\JournalEntry;
+use Webkul\Accounting\Models\Payment as AccountingPayment;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Invoice\Filament\Clusters\Customers\Resources\InvoiceResource as InvoicePluginInvoiceResource;
 use Webkul\Invoice\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\ViewInvoice as InvoicePluginViewInvoice;
@@ -166,6 +171,49 @@ it('shows a working Supporting documents relation manager on the Journal Entry v
     Livewire::test(DocumentAttachmentsRelationManager::class, [
         'ownerRecord' => $entry,
         'pageClass'   => ViewJournalEntry::class,
+    ])
+        ->assertOk()
+        ->assertSeeText('Upload document');
+});
+
+it('shows a working Supporting documents relation manager on the Customers > Payment view page', function () {
+    // Found missing during the Google Drive integration inspection:
+    // unlike Invoice/Bill/JournalEntry/BankStatement, neither Payment
+    // resource had this tab at all -- Payment isn't a Move subclass, so
+    // it never inherited the relation Move::resolveRelationUsing()
+    // registers. Only 'company_id' and 'state' are NOT NULL on this
+    // table; everything else genuinely is optional, so this stays a bare
+    // fixture matching bareMoveFor()'s "rendering only" philosophy above.
+    $payment = AccountingPayment::query()->create([
+        'company_id' => $this->company->id,
+        'state'      => 'draft',
+        'name'       => 'PAY/2026/00001',
+    ]);
+
+    expect(CustomerPaymentResource::getRelations())->toContain(DocumentAttachmentsRelationManager::class);
+    expect(DocumentAttachmentsRelationManager::canViewForRecord($payment, ViewCustomerPayment::class))->toBeTrue();
+
+    Livewire::test(DocumentAttachmentsRelationManager::class, [
+        'ownerRecord' => $payment,
+        'pageClass'   => ViewCustomerPayment::class,
+    ])
+        ->assertOk()
+        ->assertSeeText('Upload document');
+});
+
+it('shows a working Supporting documents relation manager on the Vendors > Payment view page', function () {
+    $payment = AccountingPayment::query()->create([
+        'company_id' => $this->company->id,
+        'state'      => 'draft',
+        'name'       => 'PAY/2026/00002',
+    ]);
+
+    expect(VendorPaymentResource::getRelations())->toContain(DocumentAttachmentsRelationManager::class);
+    expect(DocumentAttachmentsRelationManager::canViewForRecord($payment, ViewVendorPayment::class))->toBeTrue();
+
+    Livewire::test(DocumentAttachmentsRelationManager::class, [
+        'ownerRecord' => $payment,
+        'pageClass'   => ViewVendorPayment::class,
     ])
         ->assertOk()
         ->assertSeeText('Upload document');

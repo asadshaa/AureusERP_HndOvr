@@ -101,7 +101,9 @@ class EmployeeRequestTypeResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(HrPermissions::ManageEmployeeRequests) ?? false;
+        $user = Auth::user();
+
+        return $user !== null && ($user->can(HrPermissions::ManageEmployeeRequests) || $user->can(HrPermissions::ViewEmployeeRequestTypes));
     }
 
     public static function getPages(): array

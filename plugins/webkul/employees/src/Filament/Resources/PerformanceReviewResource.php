@@ -80,7 +80,9 @@ class PerformanceReviewResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(HrPermissions::ManagePerformance) ?? false;
+        $user = Auth::user();
+
+        return $user !== null && ($user->can(HrPermissions::ManagePerformance) || $user->can(HrPermissions::ViewPerformance));
     }
 
     public static function getPages(): array

@@ -10,10 +10,62 @@ use Webkul\Security\PermissionRegistrar;
 
 class HrPermissionRegistrar
 {
-    /** @return array{permissions: int, admin_roles: int, hr_roles: int, manager_roles: int} */
+    /**
+     * Role-name -> permission-bundle map for the HR role catalogue.
+     * Extends the same name-matched mechanism already used for the
+     * admin/hr/manager tiers below, following the exact pattern
+     * AccountingPermissionRegistrar established for finance roles. A
+     * role is only ever granted a bundle here if a Role row with one of
+     * these names already exists (created by HrRoleSeeder); this
+     * registrar never creates roles itself.
+     *
+     * @return array<string, array{names: array<int, string>, permissions: array<int, string>}>
+     */
+    private function hrRoleBundles(): array
+    {
+        return [
+            'hr_administrator' => [
+                'names'       => ['hr_administrator', 'hr administrator'],
+                'permissions' => HrPermissions::hrAdministrator(),
+            ],
+            // Deliberately NOT named "hr_manager"/"hr manager" -- those
+            // names already match the pre-existing $hrRoles tier below
+            // and get the FULL HrPermissions::all() (admin-equivalent)
+            // bundle. "HR Operations Manager" is this work's genuinely
+            // new, correctly-scoped senior-but-not-admin role.
+            'hr_ops_manager' => [
+                'names'       => ['hr_ops_manager', 'hr ops manager', 'hr operations manager'],
+                'permissions' => HrPermissions::hrManager(),
+            ],
+            'hr_officer' => [
+                'names'       => ['hr_officer', 'hr officer'],
+                'permissions' => HrPermissions::hrOfficer(),
+            ],
+            'sensitive_data_custodian' => [
+                'names'       => ['sensitive_data_custodian', 'sensitive data custodian'],
+                'permissions' => HrPermissions::sensitiveDataCustodian(),
+            ],
+            'recruiter' => [
+                'names'       => ['recruiter'],
+                'permissions' => HrPermissions::recruiter(),
+            ],
+            'hiring_manager' => [
+                'names'       => ['hiring_manager', 'hiring manager'],
+                'permissions' => HrPermissions::hiringManager(),
+            ],
+            'hr_auditor' => [
+                'names'       => ['hr_auditor', 'hr auditor'],
+                'permissions' => HrPermissions::hrAuditor(),
+            ],
+        ];
+    }
+
+    /** @return array{permissions: int, admin_roles: int, hr_roles: int, manager_roles: int, hr_role_grants: array<string, int>} */
     public function synchronize(): array
     {
         $now = now();
+        $bundles = $this->hrRoleBundles();
+
         $names = collect(HrPermissions::all())->unique()->values();
         Permission::query()->insertOrIgnore($names->map(fn (string $name): array => [
             'name'       => $name,
@@ -31,13 +83,22 @@ class HrPermissionRegistrar
         $this->grant($adminRoles->pluck('id')->all(), $permissionIds->values()->all());
         $this->grant($hrRoles->pluck('id')->all(), $permissionIds->values()->all());
         $this->grant($managerRoles->pluck('id')->all(), $permissionIds->only(HrPermissions::manager())->values()->all());
+
+        $hrRoleGrants = [];
+        foreach ($bundles as $key => $bundle) {
+            $roles = $this->rolesNamed($bundle['names']);
+            $this->grant($roles->pluck('id')->all(), $permissionIds->only($bundle['permissions'])->values()->all());
+            $hrRoleGrants[$key] = $roles->count();
+        }
+
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         return [
-            'permissions'   => $permissionIds->count(),
-            'admin_roles'   => $adminRoles->count(),
-            'hr_roles'      => $hrRoles->count(),
-            'manager_roles' => $managerRoles->count(),
+            'permissions'    => $permissionIds->count(),
+            'admin_roles'    => $adminRoles->count(),
+            'hr_roles'       => $hrRoles->count(),
+            'manager_roles'  => $managerRoles->count(),
+            'hr_role_grants' => $hrRoleGrants,
         ];
     }
 

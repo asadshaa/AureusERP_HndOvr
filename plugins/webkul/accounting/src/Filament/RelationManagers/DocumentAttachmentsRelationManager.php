@@ -66,8 +66,6 @@ class DocumentAttachmentsRelationManager extends RelationManager
      */
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
     {
-        \Log::info('DEBUG2 canViewForRecord called', ['owner' => $ownerRecord::class, 'page' => $pageClass]);
-
         return Auth::user()?->can(AccountingPermissions::ViewDocuments) ?? false;
     }
 

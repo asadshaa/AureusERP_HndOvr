@@ -19,6 +19,7 @@ use Webkul\Accounting\Models\Bill as AccountingBill;
 use Webkul\Accounting\Models\Document;
 use Webkul\Accounting\Models\DocumentAttachment;
 use Webkul\Accounting\Models\Invoice as AccountingInvoice;
+use Webkul\Accounting\Models\JournalEntry;
 use Webkul\Accounting\Support\DriveFolderPathResolver;
 use Webkul\PluginManager\Models\Plugin;
 use Webkul\PluginManager\Package;
@@ -103,6 +104,66 @@ it('resolves the Bill template with its own identifier, distinct from Invoice', 
         'Accounting',
         'Bills',
         'BILL-2026-00017',
+    ]);
+});
+
+it('resolves the Journal Entry template with its own identifier, distinct from Invoice and Bill', function () {
+    // Found missing during the Google Drive integration inspection:
+    // JournalEntryResource already supported attaching documents, but
+    // DocumentType had no case of its own for it, so an attached
+    // document always fell through to the generic 'default' template
+    // ("Other Documents") instead of its own "Journal Entries" folder.
+    $move = Move::factory()->create([
+        'name'        => 'JE/2026/00042',
+        'move_type'   => MoveType::ENTRY,
+        'company_id'  => $this->company->id,
+        'currency_id' => Currency::query()->firstOrFail()->id,
+    ]);
+    $entry = JournalEntry::query()->findOrFail($move->id);
+
+    $document = Document::factory()->create([
+        'company_id'    => $this->company->id,
+        'document_type' => DocumentType::JournalEntry,
+    ]);
+    DocumentAttachment::factory()->create([
+        'company_id'      => $this->company->id,
+        'document_id'     => $document->id,
+        'attachable_type' => JournalEntry::class,
+        'attachable_id'   => $entry->id,
+    ]);
+
+    $path = $this->resolver->resolve($document);
+
+    expect($path)->toBe([
+        'Aureus',
+        "{$this->company->name} ({$this->company->id})",
+        'Accounting',
+        'Journal Entries',
+        'JE-2026-00042',
+    ]);
+});
+
+it('resolves the Payment Evidence template to its own "Payments" folder', function () {
+    // Same gap as Journal Entry above, for the Customers/Vendors Payment
+    // resources: PaymentEvidence already existed as a DocumentType, but
+    // had no path template of its own. Unattached here (a fully valid
+    // Payment fixture needs a journal/payment-method-line/outstanding &
+    // destination accounts unrelated to what this test verifies) --
+    // covers the template resolution itself, matching the existing
+    // "falls back to document-{id}" case's own unattached pattern below.
+    $document = Document::factory()->create([
+        'company_id'    => $this->company->id,
+        'document_type' => DocumentType::PaymentEvidence,
+    ]);
+
+    $path = $this->resolver->resolve($document);
+
+    expect($path)->toBe([
+        'Aureus',
+        "{$this->company->name} ({$this->company->id})",
+        'Accounting',
+        'Payments',
+        "document-{$document->id}",
     ]);
 });
 

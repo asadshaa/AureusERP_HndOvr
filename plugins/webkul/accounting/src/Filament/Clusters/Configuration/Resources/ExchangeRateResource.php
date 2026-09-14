@@ -17,6 +17,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Throwable;
 use Webkul\Accounting\Enums\ExchangeRateApprovalStatus;
 use Webkul\Accounting\Enums\ExchangeRateSource;
 use Webkul\Accounting\Enums\ExchangeRateType;
@@ -28,8 +29,6 @@ use Webkul\Accounting\Models\ExchangeRate;
 use Webkul\Accounting\Services\Currency\ExchangeRateApprovalService;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Support\Models\Currency;
-use Throwable;
-
 
 class ExchangeRateResource extends Resource
 {
@@ -148,10 +147,32 @@ class ExchangeRateResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
+        $user = Auth::user();
+
+        // ManageExchangeRates alone used to gate this -- meaning a role
+        // that can only approve (ApproveExchangeRates) or only needs
+        // read-only visibility (ViewExchangeRates, e.g. Internal Auditor,
+        // VP Finance, CFO) couldn't see the list at all. Neither addition
+        // widens what ManageExchangeRates-holders can already do.
+        return $user !== null && ($user->can(AccountingPermissions::ManageExchangeRates)
+            || $user->can(AccountingPermissions::ApproveExchangeRates)
+            || $user->can(AccountingPermissions::ViewExchangeRates));
     }
 
     public static function canCreate(): bool
+    {
+        return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
+    }
+
+    /**
+     * canEdit() already existed (below) and correctly gates on
+     * ManageExchangeRates. canDelete() did not exist at all -- same gap
+     * as ManualAdjustmentResource, just partial here: no Policy class
+     * exists for ExchangeRate, so without an explicit override Filament
+     * defaults to allowing delete for any authenticated user regardless
+     * of permissions.
+     */
+    public static function canDelete($record): bool
     {
         return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
     }

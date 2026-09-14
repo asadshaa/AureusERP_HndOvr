@@ -19,6 +19,8 @@ class DatabaseSeeder extends Seeder
             SupportDatabaseSeeder::class,
             PluginSeeder::class,
             PermissionSeeder::class,
+            FinanceRoleSeeder::class,
+            HrRoleSeeder::class,
         ]);
     }
 }

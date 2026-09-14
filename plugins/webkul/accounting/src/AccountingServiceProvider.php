@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Webkul\Account\Models\BankStatement;
 use Webkul\Account\Models\Move;
+use Webkul\Account\Models\Payment as BaseAccountPayment;
 use Webkul\Accounting\Console\Commands\AuthorizeDriveCommand;
 use Webkul\Accounting\Console\Commands\CheckDocumentIntegrityCommand;
 use Webkul\Accounting\Contracts\DocumentStorageProvider;
@@ -25,6 +26,7 @@ use Webkul\Accounting\Models\Bill;
 use Webkul\Accounting\Models\DocumentAttachment;
 use Webkul\Accounting\Models\Invoice as AccountingInvoice;
 use Webkul\Accounting\Models\JournalEntry;
+use Webkul\Accounting\Models\Payment as AccountingPayment;
 use Webkul\Accounting\Repositories\LedgerBalanceRepository;
 use Webkul\Accounting\Services\Bank\BankStatementParserRegistry;
 use Webkul\Accounting\Services\Bank\CommonWorkbookBankStatementParser;
@@ -189,6 +191,24 @@ class AccountingServiceProvider extends PackageServiceProvider
         );
 
         AccountingInvoice::resolveRelationUsing(
+            'documentAttachments',
+            fn ($model) => $model->morphMany(DocumentAttachment::class, 'attachable'),
+        );
+
+        // Payment is NOT a Move subclass (unlike Bill/JournalEntry/Invoice)
+        // -- it's its own plain Eloquent model, so it never inherited the
+        // relation from the Move registration above. Found missing during
+        // the Google Drive integration inspection: neither the Customers >
+        // Payments nor Vendors > Payments screen had a "Supporting
+        // documents" tab at all. Same base+subclass dual registration as
+        // Move/AccountingInvoice, for the same reason (resolveRelationUsing()
+        // isn't inherited down a hierarchy).
+        BaseAccountPayment::resolveRelationUsing(
+            'documentAttachments',
+            fn ($model) => $model->morphMany(DocumentAttachment::class, 'attachable'),
+        );
+
+        AccountingPayment::resolveRelationUsing(
             'documentAttachments',
             fn ($model) => $model->morphMany(DocumentAttachment::class, 'attachable'),
         );
