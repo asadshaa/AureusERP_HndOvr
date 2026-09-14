@@ -39,7 +39,7 @@ class DocumentTransferService
 
         // Resolves within the sender's own company and throws otherwise,
         // so cross-company sends fail before anything else happens.
-        $document = $this->documents->find($sender, $documentId, $ipAddress);
+        $document = $this->documents->find($sender, $documentId);
 
         if ($device->company_id !== $sender->default_company_id) {
             throw new RuntimeException('That device belongs to a different company.');
