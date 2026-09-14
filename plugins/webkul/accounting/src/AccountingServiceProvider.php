@@ -82,6 +82,7 @@ class AccountingServiceProvider extends PackageServiceProvider
                 '2026_09_10_000003_create_accounting_document_attachments_table',
                 '2026_09_10_000004_create_accounting_document_audits_table',
                 '2026_09_11_000001_create_accounting_document_drive_syncs_table',
+                '2026_09_15_000002_create_accounting_document_transfers_table',
             ])
             ->runsMigrations()
             ->hasSeeders([

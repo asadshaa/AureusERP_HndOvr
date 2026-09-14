@@ -71,6 +71,15 @@ final class AccountingPermissions
     public const DeleteDocuments = 'accounting_delete_documents';
 
     /**
+     * Sending a document to another user's device is a distinct act from
+     * downloading it yourself: it moves a copy to a machine the sender
+     * does not control. Read-only oversight roles (Internal Auditor, VP
+     * Finance, FP&A) deliberately do NOT get this -- their permission
+     * bundles are explicit allowlists, so they are excluded by omission.
+     */
+    public const TransferDocuments = 'accounting_transfer_documents';
+
+    /**
      * Distinguishes "a payment was prepared/recorded" (the generic
      * create/update Shield permission on the Payment resource) from "a
      * payment was authorized to actually leave the bank" -- the codebase
@@ -138,6 +147,7 @@ final class AccountingPermissions
             self::ManageDocuments,
             self::DownloadDocuments,
             self::DeleteDocuments,
+            self::TransferDocuments,
             self::ReleasePayment,
             self::ViewManualAdjustments,
             self::ViewExchangeRates,
