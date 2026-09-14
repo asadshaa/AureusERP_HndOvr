@@ -34,6 +34,7 @@ class SecurityServiceProvider extends PackageServiceProvider
                 '2025_08_21_082229_alter_roles_table',
                 '2025_08_21_101646_alter_users_table',
                 '2026_01_23_074142_add_multi_factor_auth_columns_in_users_table',
+                '2026_09_15_000001_create_user_devices_table',
             ])
             ->hasSettings([
                 '2024_11_05_042358_create_user_settings',
