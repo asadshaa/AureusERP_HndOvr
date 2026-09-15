@@ -692,6 +692,12 @@ graphify-out/wiki/index.md
 
 exists, use it for broad repository navigation.
 
+The wiki is not produced by `graphify extract`. Generate it with:
+
+```bash
+graphify export wiki
+```
+
 ## Graph Report
 
 Use:
@@ -709,6 +715,15 @@ for:
 - cases where query/path/explain do not provide enough context
 
 Do NOT read the entire `GRAPH_REPORT.md` for every small task.
+
+`GRAPH_REPORT.md` is not produced by `graphify extract`. Generate or refresh it with:
+
+```bash
+graphify cluster-only . --no-label --no-viz
+```
+
+- `--no-label` keeps `Community N` placeholders instead of calling an LLM to name communities, so no API key is needed
+- `--no-viz` skips `graph.html` generation, which matters here because this graph exceeds 5000 nodes
 
 ---
 
@@ -754,12 +769,31 @@ The Aureus ERP repository currently uses a code-only Graphify index.
 After meaningful source-code changes, update Graphify using:
 
 ```bash
-graphify . --update --code-only
+graphify update .
 ```
 
-Do NOT use an update command that triggers semantic document/image extraction unless explicitly requested.
+`update` re-extracts code files using local AST parsing only and requires no LLM API key.
 
-The code-only update should not require an external LLM API key.
+There is no `--code-only` flag on `update`; passing one fails with:
+
+```text
+error: unknown update option: --code-only
+```
+
+The only flags `update` accepts are:
+
+- `--force` — overwrite `graph.json` even if the rebuild has fewer nodes (use after refactors that deleted code)
+- `--no-cluster` — skip clustering and write raw extraction only
+
+To build the index from scratch, or to rebuild after deleting `graphify-out/`:
+
+```bash
+graphify extract . --code-only
+```
+
+`--code-only` belongs to `extract`, where it indexes code by local AST and skips doc/paper/image files, so no API key is required.
+
+Do NOT use an update command that triggers semantic document/image extraction unless explicitly requested.
 
 After significant architectural changes, re-query Graphify to verify the resulting dependency structure.
 
