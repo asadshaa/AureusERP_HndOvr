@@ -19,6 +19,7 @@ use Webkul\Accounting\Contracts\DriveClient;
 use Webkul\Accounting\Enums\DocumentStatus;
 use Webkul\Accounting\Enums\DocumentType;
 use Webkul\Accounting\Enums\DriveSyncStatus;
+use Webkul\Accounting\Filament\Actions\SendDocumentToPeerAction;
 use Webkul\Accounting\Filament\Clusters\Accounting;
 use Webkul\Accounting\Filament\Clusters\Accounting\Resources\DocumentResource\Pages\ListDocuments;
 use Webkul\Accounting\Jobs\SyncDocumentToDriveJob;
@@ -170,6 +171,8 @@ class DocumentResource extends Resource
                             Notification::make()->danger()->title('Could not download this document')->body($e->getMessage())->send();
                         }
                     }),
+
+                SendDocumentToPeerAction::make(),
 
                 Action::make('syncToDrive')
                     ->label(fn (Document $record): string => $record->driveSync?->status === DriveSyncStatus::Failed ? 'Retry Drive sync' : 'Sync now')

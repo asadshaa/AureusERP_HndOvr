@@ -71,15 +71,6 @@ final class AccountingPermissions
     public const DeleteDocuments = 'accounting_delete_documents';
 
     /**
-     * Sending a document to another user's device is a distinct act from
-     * downloading it yourself: it moves a copy to a machine the sender
-     * does not control. Read-only oversight roles (Internal Auditor, VP
-     * Finance, FP&A) deliberately do NOT get this -- their permission
-     * bundles are explicit allowlists, so they are excluded by omission.
-     */
-    public const TransferDocuments = 'accounting_transfer_documents';
-
-    /**
      * Distinguishes "a payment was prepared/recorded" (the generic
      * create/update Shield permission on the Payment resource) from "a
      * payment was authorized to actually leave the bank" -- the codebase
@@ -107,6 +98,19 @@ final class AccountingPermissions
      * previously accepted only ManageExchangeRates).
      */
     public const ViewExchangeRates = 'accounting_view_exchange_rates_list';
+
+    /**
+     * Cross-deployment peer exchange. Deliberately three permissions rather
+     * than one: pairing a peer is an administrative act that creates a trust
+     * relationship, sending is routine AP/AR work, and accepting an inbound
+     * invoice writes a draft bill into the ledger. Collapsing them would undo
+     * the segregation of duties the rest of this plugin enforces.
+     */
+    public const ManagePeers = 'accounting_manage_peers';
+
+    public const SendTransmissions = 'accounting_send_transmissions';
+
+    public const ReviewInboundTransmissions = 'accounting_review_inbound_transmissions';
 
     /**
      * @return array<int, string>
@@ -147,10 +151,12 @@ final class AccountingPermissions
             self::ManageDocuments,
             self::DownloadDocuments,
             self::DeleteDocuments,
-            self::TransferDocuments,
             self::ReleasePayment,
             self::ViewManualAdjustments,
             self::ViewExchangeRates,
+            self::ManagePeers,
+            self::SendTransmissions,
+            self::ReviewInboundTransmissions,
             'page_accounting_overview',
             'page_accounting_manage_taxes',
             'page_accounting_manage_products',
@@ -259,6 +265,10 @@ final class AccountingPermissions
             self::FxRevaluationPage,
             self::DeleteDocuments,
             self::ReleasePayment,
+            // Pairing a peer creates a trust relationship with an outside
+            // organisation -- an administrative act, not bookkeeping. Sending
+            // and reviewing inbound invoices ARE bookkeeping, so those stay.
+            self::ManagePeers,
             // The Accountant role's spec is explicitly "Review customer/vendor
             // accounting" / "Review invoices" -- view-only. Creating/updating
             // vendor, customer, payment, refund and credit-note records
@@ -367,6 +377,11 @@ final class AccountingPermissions
             self::ViewDocuments,
             self::ManageDocuments,
             self::DownloadDocuments,
+            // An inbound peer invoice becomes a vendor BILL, which is this
+            // role's core work -- so reviewing that queue belongs here, not
+            // only with the Controller. Note this grants no ability to pair
+            // a peer (administrative) or to send invoices out (AR's side).
+            self::ReviewInboundTransmissions,
             // Deliberately no approval-queue visibility here: the raw
             // ApprovalRequest resource is not scoped to "requests I
             // submitted" (it would show every request company-wide), and

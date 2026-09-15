@@ -104,6 +104,56 @@ class DocumentService
     }
 
     /**
+     * Store a file that arrived from a paired peer instance.
+     *
+     * A peer is not a User, so there is no actor to authorize and
+     * `uploaded_by` is deliberately null -- attributing it to whoever
+     * happened to be logged in, or to the reviewer who later accepts it,
+     * would put a name against an upload that no person performed.
+     *
+     * Everything else is the ordinary upload path: the same MIME and size
+     * validation, the same checksum, the same storage provider. Nothing a
+     * peer sends bypasses a check a human upload has to pass.
+     */
+    public function uploadFromPeer(
+        int $companyId,
+        DocumentType $documentType,
+        string $title,
+        ?string $description,
+        UploadedFile $file,
+        ?string $ipAddress = null,
+    ): Document {
+        $this->validateFile($file);
+
+        $document = DB::transaction(function () use ($companyId, $documentType, $title, $description, $file, $ipAddress) {
+            $document = Document::create([
+                'company_id'    => $companyId,
+                'creator_id'    => null,
+                'document_type' => $documentType,
+                'title'         => $title,
+                'description'   => $description,
+                'status'        => DocumentStatus::Active,
+            ]);
+
+            $version = $this->storeVersion($document, $file, null, 1, null);
+
+            $document->update(['current_version_id' => $version->id]);
+
+            $this->recordSystemOrUserAudit($document, null, DocumentAuditAction::Uploaded, $ipAddress, [
+                'version_id' => $version->id,
+                'filename'   => $version->original_filename,
+                'source'     => 'peer_transmission',
+            ]);
+
+            return $document->refresh();
+        });
+
+        DocumentContentChanged::dispatch($document);
+
+        return $document;
+    }
+
+    /**
      * Add a new version to an existing document. The prior version is
      * never touched or deleted -- accounting evidence keeps its full
      * history.
@@ -449,7 +499,7 @@ class DocumentService
         return $document->refresh();
     }
 
-    private function storeVersion(Document $document, UploadedFile $file, User $user, int $versionNumber, ?string $changeReason): DocumentVersion
+    private function storeVersion(Document $document, UploadedFile $file, ?User $user, int $versionNumber, ?string $changeReason): DocumentVersion
     {
         $contents = file_get_contents($file->getRealPath());
 
@@ -487,7 +537,7 @@ class DocumentService
             'mime_type'         => $file->getMimeType() ?: $file->getClientMimeType(),
             'file_size'         => $storedSize,
             'checksum_sha256'   => $checksum,
-            'uploaded_by'       => $user->id,
+            'uploaded_by'       => $user?->id,
             'change_reason'     => $changeReason,
         ]);
     }

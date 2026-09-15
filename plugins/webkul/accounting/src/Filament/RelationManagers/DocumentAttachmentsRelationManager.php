@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Auth;
 use Throwable;
 use Webkul\Accounting\Enums\DocumentStatus;
 use Webkul\Accounting\Enums\DocumentType;
+use Webkul\Accounting\Filament\Actions\SendDocumentToPeerAction;
 use Webkul\Accounting\Filament\Clusters\Accounting\Resources\DocumentResource;
 use Webkul\Accounting\Models\DocumentAttachment;
 use Webkul\Accounting\Services\DocumentService;
@@ -151,6 +152,13 @@ class DocumentAttachmentsRelationManager extends RelationManager
                             Notification::make()->danger()->title('Could not download this document')->body($e->getMessage())->send();
                         }
                     }),
+
+                // Rows here are DocumentAttachments, so the resolver hands
+                // the action the Document they point at. Wiring it on the
+                // relation manager (rather than each resource) puts "Send
+                // to..." on every owner type at once -- invoices, bills,
+                // journal entries, bank statements and payments.
+                SendDocumentToPeerAction::make(fn (DocumentAttachment $record) => $record->document),
 
                 Action::make('history')
                     ->label('History')

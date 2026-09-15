@@ -16,6 +16,7 @@ use Webkul\Accounting\Console\Commands\CheckDocumentIntegrityCommand;
 use Webkul\Accounting\Console\Commands\ExpireDocumentTransfersCommand;
 use Webkul\Accounting\Contracts\DocumentStorageProvider;
 use Webkul\Accounting\Contracts\DriveClient;
+use Webkul\Accounting\Contracts\InvoicePayloadFormatter;
 use Webkul\Accounting\Database\Seeders\AccountingPermissionSeeder;
 use Webkul\Accounting\Database\Seeders\IsoCurrencySeeder;
 use Webkul\Accounting\Database\Seeders\ReportWorkbookSeeder;
@@ -35,6 +36,7 @@ use Webkul\Accounting\Services\Bank\HblBankStatementParser;
 use Webkul\Accounting\Services\Bank\MeezanBankStatementParser;
 use Webkul\Accounting\Services\Drive\GoogleDriveClient;
 use Webkul\Accounting\Services\MeasureResolverRegistry;
+use Webkul\Accounting\Services\Peers\JsonV1InvoicePayloadFormatter;
 use Webkul\Accounting\Services\ReportValueProviderRegistry;
 use Webkul\Accounting\Services\Resolvers\LedgerMeasureResolver;
 use Webkul\Accounting\Services\Storage\LocalDocumentStorageProvider;
@@ -54,6 +56,8 @@ class AccountingServiceProvider extends PackageServiceProvider
         $package->name(static::$name)
             ->hasViews()
             ->hasTranslations()
+            ->hasRoute('api')
+            ->hasRoute('web')
             ->hasDependencies([
                 'accounts',
             ])
@@ -84,6 +88,10 @@ class AccountingServiceProvider extends PackageServiceProvider
                 '2026_09_10_000004_create_accounting_document_audits_table',
                 '2026_09_11_000001_create_accounting_document_drive_syncs_table',
                 '2026_09_15_000002_create_accounting_document_transfers_table',
+                '2026_09_16_000001_create_accounting_peers_table',
+                '2026_09_16_000002_create_accounting_outbound_transmissions_table',
+                '2026_09_16_000003_create_accounting_inbound_transmissions_table',
+                '2026_09_16_000004_make_document_id_nullable_on_document_audits',
             ])
             ->runsMigrations()
             ->hasSeeders([
@@ -241,6 +249,12 @@ class AccountingServiceProvider extends PackageServiceProvider
         // this one -- see tests/Helpers/DriveTestHelper.php -- so none of
         // them need real Google credentials.
         $this->app->bind(DriveClient::class, GoogleDriveClient::class);
+
+        // The seam that keeps UBL a later drop-in rather than a rewrite: the
+        // whole peer-exchange subsystem talks only to this interface, so
+        // adding UBL 2.1 means writing a second implementation and changing
+        // this one line -- no transport, trust or UI code moves.
+        $this->app->bind(InvoicePayloadFormatter::class, JsonV1InvoicePayloadFormatter::class);
 
         $this->app->singleton(ReportValueProviderRegistry::class);
 
