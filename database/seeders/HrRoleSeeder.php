@@ -12,12 +12,20 @@ use Webkul\Security\Models\Role;
  * HrPermissionRegistrar::synchronize() -- the same two-step pattern
  * FinanceRoleSeeder already established for the finance role catalogue.
  *
- * Deliberately does NOT create a role literally named "hr_manager" (or
- * any of its name variants): that name already resolves to the
- * pre-existing, full-access $hrRoles tier in HrPermissionRegistrar (see
- * that class's synchronize()) -- creating one here would just be another
- * admin-equivalent role under a different guise. "hr_ops_manager" is
- * this work's genuinely new, correctly-scoped senior HR role. Idempotent
+ * "hr_manager" is the single role explicitly requested to own ALL HR
+ * functionality end to end (onboarding, reporting-lines visibility,
+ * leave/time-off, recruitment, timesheets, performance, sensitive data)
+ * -- distinct from ERP Administrator, which retains system
+ * administration but is not meant to be the HR business owner. This
+ * name was previously and deliberately left uncreated here specifically
+ * because it resolves to HrPermissionRegistrar::synchronize()'s
+ * pre-existing, full-access $hrRoles tier (matched by name: "hr",
+ * "hr_manager", "hr manager", "human resources", "human resources
+ * manager") -- that tier already grants the complete HrPermissions::
+ * all() bundle (152 permissions spanning every HR plugin), so no new
+ * bundle or registrar logic was needed, only creating the role row
+ * itself. "hr_ops_manager" remains the separate, narrower senior-but-
+ * not-full-access role from the earlier HR-roles work. Idempotent
  * (firstOrCreate) and safe to re-run.
  */
 class HrRoleSeeder extends Seeder
@@ -26,6 +34,7 @@ class HrRoleSeeder extends Seeder
      * @var array<int, string>
      */
     private const ROLE_NAMES = [
+        'hr_manager',
         'hr_administrator',
         'hr_ops_manager',
         'hr_officer',

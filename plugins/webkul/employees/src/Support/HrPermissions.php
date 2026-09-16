@@ -88,6 +88,7 @@ final class HrPermissions
             'view_any_employee_performance::cycle', 'view_employee_performance::cycle', 'create_employee_performance::cycle', 'update_employee_performance::cycle',
             'view_any_employee_performance::review', 'view_employee_performance::review', 'create_employee_performance::review', 'update_employee_performance::review',
             'page_employee_hr_analytics',
+            'page_recruitment_recruitments',
             'view_any_time_off_time::off', 'view_time_off_time::off', 'update_time_off_time::off',
             'view_any_time_off_leave::type', 'view_time_off_leave::type', 'create_time_off_leave::type', 'update_time_off_leave::type',
             'view_any_time_off_allocation', 'view_time_off_allocation',
@@ -105,6 +106,7 @@ final class HrPermissions
             'view_any_recruitment_activity::type', 'view_recruitment_activity::type',
             'view_any_recruitment_u::t::m::medium', 'view_recruitment_u::t::m::medium',
             'view_any_recruitment_u::t::m::source', 'view_recruitment_u::t::m::source',
+            'view_any_timesheet_timesheet', 'view_timesheet_timesheet', 'create_timesheet_timesheet', 'update_timesheet_timesheet', 'delete_timesheet_timesheet',
         ];
     }
 

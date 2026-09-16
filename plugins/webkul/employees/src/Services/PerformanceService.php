@@ -56,17 +56,26 @@ class PerformanceService
         return $review->fresh();
     }
 
-    public function completeManagerReview(PerformanceReview $review, Employee $reviewer, float $rating, ?string $comments = null): PerformanceReview
+    /**
+     * @param  array{competency_ratings?: ?array, improvement_plan?: ?string, promotion_recommendation?: ?string}  $extra
+     */
+    public function completeManagerReview(PerformanceReview $review, Employee $reviewer, float $rating, ?string $comments = null, array $extra = []): PerformanceReview
     {
         if ((int) $review->reviewer_id !== (int) $reviewer->id || $review->status !== 'manager_review') {
             throw new RuntimeException('This employee is not the assigned manager reviewer.');
         }
-        $review->update([
-            'manager_rating'  => $rating,
-            'manager_comments'=> $comments,
-            'status'          => 'completed',
-            'completed_at'    => now(),
-        ]);
+        $updates = [
+            'manager_rating'   => $rating,
+            'manager_comments' => $comments,
+            'status'           => 'completed',
+            'completed_at'     => now(),
+        ];
+        foreach (['competency_ratings', 'improvement_plan', 'promotion_recommendation'] as $field) {
+            if (array_key_exists($field, $extra)) {
+                $updates[$field] = $extra[$field];
+            }
+        }
+        $review->update($updates);
 
         return $review->fresh();
     }

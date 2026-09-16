@@ -135,7 +135,7 @@ class Candidate extends Model
         static::creating(function ($candidate) {
             $authUser = Auth::user();
 
-            $candidate->creator_id ??= $authUser->id;
+            $candidate->creator_id ??= $authUser?->id;
 
             $candidate->company_id ??= $authUser?->default_company_id;
         });

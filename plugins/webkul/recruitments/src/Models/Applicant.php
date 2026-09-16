@@ -223,7 +223,7 @@ class Applicant extends Model
     {
         $authUser = Auth::user();
 
-        $this->creator_id ??= $authUser->id;
+        $this->creator_id ??= $authUser?->id;
 
         $this->company_id ??= $authUser?->default_company_id;
     }

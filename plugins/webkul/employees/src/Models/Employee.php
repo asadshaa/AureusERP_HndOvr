@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
+use InvalidArgumentException;
 use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
 use Webkul\Employee\Database\Factories\EmployeeFactory;
@@ -301,6 +302,10 @@ class Employee extends Model
     {
         parent::boot();
 
+        static::saving(function (self $employee): void {
+            static::assertHierarchyIsSameCompany($employee);
+        });
+
         static::saved(function (self $employee) {
             $employee->creator_id ??= Auth::id();
 
@@ -335,6 +340,62 @@ class Employee extends Model
                 ]);
             }
         });
+    }
+
+    /**
+     * Every hierarchy relationship an Employee can carry -- department,
+     * team, manager, coach, job position, work location, and the linked
+     * login -- must belong to the same company as the employee.
+     *
+     * Filament scopes several of these Select options to the current
+     * user's company already (see EmployeeResource::form()), but that is
+     * a UI convenience only: nothing stopped a cross-company id reaching
+     * this model directly (API, tinker, mass update), and job_id /
+     * work_location_id were not even scoped in the UI. This is the
+     * server-side enforcement rule 7 requires, checked once here so
+     * every write path (create, edit, API) goes through it -- following
+     * the same saving-hook pattern Department::validateNoRecursion()
+     * already uses in this same plugin for its own structural rule.
+     */
+    private static function assertHierarchyIsSameCompany(self $employee): void
+    {
+        $companyId = $employee->company_id;
+
+        if (! $companyId) {
+            // Nothing to compare against yet; the FK constraints on each
+            // relation still apply independently.
+            return;
+        }
+
+        $checks = [
+            'department' => [$employee->department_id, Department::class, 'Department'],
+            'team'       => [$employee->team_id, Team::class, 'Team'],
+            'job'        => [$employee->job_id, EmployeeJobPosition::class, 'Job position'],
+            'location'   => [$employee->work_location_id, WorkLocation::class, 'Work location'],
+            'manager'    => [$employee->parent_id, self::class, 'Manager'],
+            'coach'      => [$employee->coach_id, self::class, 'Coach'],
+        ];
+
+        foreach ($checks as [$relatedId, $modelClass, $label]) {
+            if (! $relatedId) {
+                continue;
+            }
+
+            $relatedCompanyId = $modelClass::query()->whereKey($relatedId)->value('company_id');
+
+            if ($relatedCompanyId !== null && (int) $relatedCompanyId !== (int) $companyId) {
+                throw new InvalidArgumentException("{$label} belongs to a different company than this employee.");
+            }
+        }
+
+        if ($employee->user_id) {
+            $user = User::query()->find($employee->user_id);
+
+            if ($user && (int) $user->default_company_id !== (int) $companyId
+                && ! $user->allowedCompanies()->whereKey($companyId)->exists()) {
+                throw new InvalidArgumentException('The linked user does not have access to this company.');
+            }
+        }
     }
 
     private function handlePartnerCreation(self $employee): void

@@ -12,6 +12,7 @@
 
 use Database\Seeders\HrRoleSeeder;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\PermissionRegistrar;
 use Webkul\Employee\Filament\Resources\AttendanceRecordResource;
 use Webkul\Employee\Filament\Resources\EmployeeRequestTypeResource;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
@@ -60,7 +61,7 @@ it('creates every genuinely-missing HR role exactly once', function (): void {
     seedHrRoles();
 
     $expectedNames = [
-        'hr_administrator', 'hr_ops_manager', 'hr_officer',
+        'hr_manager', 'hr_administrator', 'hr_ops_manager', 'hr_officer',
         'sensitive_data_custodian', 'recruiter', 'hiring_manager', 'hr_auditor',
     ];
 
@@ -70,11 +71,45 @@ it('creates every genuinely-missing HR role exactly once', function (): void {
     }
 });
 
-it('does not create a role literally named "hr_manager" -- that name already resolves to the pre-existing full-access tier', function (): void {
+it('grants the role literally named "hr_manager" the complete HrPermissions::all() bundle -- the single HR-functionality owner, distinct from ERP Administrator', function (): void {
     seedHrRoles();
 
-    expect(Role::query()->whereRaw('LOWER(name) = ?', ['hr_manager'])->count())->toBe(0)
-        ->and(Role::query()->whereRaw('LOWER(name) = ?', ['hr manager'])->count())->toBe(0);
+    $role = Role::query()->whereRaw('LOWER(name) = ?', ['hr_manager'])->firstOrFail();
+    $grantedCount = DB::table('role_has_permissions')->where('role_id', $role->id)->count();
+
+    expect($grantedCount)->toBe(count(HrPermissions::all()));
+
+    // Spot-check a few permissions spanning different HR plugins/capabilities,
+    // not just the count -- a wrong bundle could coincidentally match the count.
+    $grantedNames = DB::table('role_has_permissions')
+        ->join('permissions', 'permissions.id', '=', 'role_has_permissions.permission_id')
+        ->where('role_has_permissions.role_id', $role->id)
+        ->pluck('permissions.name');
+
+    expect($grantedNames)->toContain(HrPermissions::ViewAllRecords)
+        ->toContain(HrPermissions::ViewSensitiveEmployeeData)
+        ->toContain(HrPermissions::ApproveLeave)
+        ->toContain('create_employee_employee')
+        ->toContain('view_any_time_off_time::off')
+        ->toContain('view_any_recruitment_applicant')
+        ->toContain('view_any_timesheet_timesheet');
+});
+
+it('an hr_manager user sees every employee in their company via HrHierarchyService, same as ViewAllRecords implies', function (): void {
+    seedHrRoles();
+    $company = Company::factory()->create(['currency_id' => Currency::query()->where('code', 'PKR')->value('id'), 'is_active' => true]);
+
+    $hrManagerUser = hrRoleTestUser($company);
+    $hrManagerUser->assignRole(Role::query()->whereRaw('LOWER(name) = ?', ['hr_manager'])->firstOrFail());
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    hrRoleTestEmployee($company, hrRoleTestUser($company), 'Someone Else');
+    hrRoleTestEmployee($company, hrRoleTestUser($company), 'Someone Else Too');
+
+    $visible = app(HrHierarchyService::class)->visibleEmployeeIds($hrManagerUser, $company->id);
+    $allCompanyIds = Employee::query()->where('company_id', $company->id)->pluck('id')->sort()->values()->all();
+
+    expect($visible->sort()->values()->all())->toBe($allCompanyIds);
 });
 
 it('is idempotent: running the seeder twice creates no duplicate roles or permission grants', function (): void {

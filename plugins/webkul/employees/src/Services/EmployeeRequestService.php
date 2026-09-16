@@ -3,6 +3,7 @@
 namespace Webkul\Employee\Services;
 
 use Brick\Math\BigDecimal;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Account\Enums\JournalType;
@@ -11,7 +12,9 @@ use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Models\Account;
 use Webkul\Account\Models\Journal;
 use Webkul\Accounting\Enums\ConversionStatus;
+use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\EmployeeRequest;
+use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
@@ -62,6 +65,91 @@ class EmployeeRequestService
         return $approval;
     }
 
+    /**
+     * TIME CHANGE REQUEST: Employee -> Time Change Request -> Line Manager
+     * Approval -> Approved/Rejected. Creates and immediately submits an
+     * EmployeeRequest of the "attendance_time_change" type against the
+     * existing ApprovalEngine (routed to the requester's line manager via
+     * the same hierarchy_route mechanism every other HR workflow in this
+     * app uses) -- no separate approval system. The original attendance
+     * values and the requested values are captured in the request's
+     * payload at submission time and never mutated afterward, so the
+     * original request is preserved regardless of the eventual decision;
+     * approval history (who decided what, and when) is preserved via the
+     * existing ApprovalRequest/ApprovalDecision chain, untouched here.
+     *
+     * @param  array{check_in?: ?string, check_out?: ?string}  $requestedChanges
+     */
+    public function requestAttendanceTimeChange(
+        AttendanceRecord $record,
+        User $requester,
+        array $requestedChanges,
+        ?string $reason = null,
+    ): EmployeeRequest {
+        $record->loadMissing('employee');
+        if (! $record->employee) {
+            throw new RuntimeException('The attendance record has no linked employee.');
+        }
+        if ((int) $record->employee->user_id !== (int) $requester->id) {
+            $this->hierarchy->assertCanManage($requester, $record->employee);
+        }
+
+        // Must also drop null/blank VALUES, not just check the key is one of
+        // the two allowed names -- Carbon::parse(null) silently resolves to
+        // "now" rather than throwing or staying null, so a caller (e.g. a
+        // Filament action that always submits both keys, blank or not) that
+        // leaves one field untouched must not have that null smuggled
+        // through as if it were a real requested value.
+        $requestedChanges = array_filter(
+            $requestedChanges,
+            fn ($value, $key): bool => in_array($key, ['check_in', 'check_out'], true) && filled($value),
+            ARRAY_FILTER_USE_BOTH,
+        );
+        if ($requestedChanges === []) {
+            throw new RuntimeException('A time change request must propose at least a new check-in or check-out time.');
+        }
+
+        $requestType = EmployeeRequestType::query()
+            ->where('company_id', $record->company_id)
+            ->where('code', 'attendance_time_change')
+            ->where('is_active', true)
+            ->first();
+        if (! $requestType) {
+            throw new RuntimeException('No active "Attendance Time Change" request type is configured for this company.');
+        }
+
+        $original = [
+            'check_in'  => $record->check_in?->toDateTimeString(),
+            'check_out' => $record->check_out?->toDateTimeString(),
+        ];
+        $requested = [
+            'check_in'  => array_key_exists('check_in', $requestedChanges) ? Carbon::parse($requestedChanges['check_in'])->toDateTimeString() : $original['check_in'],
+            'check_out' => array_key_exists('check_out', $requestedChanges) ? Carbon::parse($requestedChanges['check_out'])->toDateTimeString() : $original['check_out'],
+        ];
+
+        return DB::transaction(function () use ($record, $requester, $requestType, $original, $requested, $reason): EmployeeRequest {
+            $request = EmployeeRequest::query()->create([
+                'company_id'      => $record->company_id,
+                'employee_id'     => $record->employee_id,
+                'request_type_id' => $requestType->id,
+                'requested_by'    => $requester->id,
+                'title'           => 'Attendance time change for '.$record->attendance_date?->toDateString(),
+                'description'     => $reason,
+                'status'          => 'draft',
+                'payload'         => [
+                    'kind'                 => 'attendance_time_change',
+                    'attendance_record_id' => $record->id,
+                    'original'             => $original,
+                    'requested'            => $requested,
+                ],
+            ]);
+
+            $this->submit($request, $requester);
+
+            return $request->fresh(['approvalRequest', 'requestType']);
+        });
+    }
+
     public function approve(EmployeeRequest $request, User $actor, ?string $reason = null): EmployeeRequest
     {
         $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
@@ -102,8 +190,43 @@ class EmployeeRequestService
         if ($request->requestType->is_financial) {
             $this->createAccountingDraft($request->fresh(['requestType', 'company']));
         }
+        if ($request->requestType->category === 'attendance_correction') {
+            $this->applyAttendanceTimeChange($request->fresh(['approvalRequest.decisions']));
+        }
 
         return $request->fresh(['approvalRequest', 'accountingMove.lines']);
+    }
+
+    /**
+     * Applies an APPROVED attendance_time_change request's requested values
+     * to the referenced AttendanceRecord. The request's own payload (the
+     * original and requested values captured at submission time) is never
+     * modified here -- only the AttendanceRecord is updated, and only on
+     * approval; a rejected request never reaches this method at all, so the
+     * attendance record is left untouched for that path by construction.
+     * Updating check_in/check_out re-triggers AttendanceRecord's own
+     * saving() hook, which recalculates worked_hours/late_minutes/
+     * early_departure_minutes the same way it does for any other edit --
+     * no duplicate calculation logic needed here.
+     */
+    private function applyAttendanceTimeChange(EmployeeRequest $request): void
+    {
+        $payload = (array) $request->payload;
+        $record = AttendanceRecord::query()->find($payload['attendance_record_id'] ?? null);
+        if (! $record || (int) $record->employee_id !== (int) $request->employee_id || (int) $record->company_id !== (int) $request->company_id) {
+            report(new RuntimeException("Approved attendance time change request #{$request->id} could not locate a matching attendance record to apply."));
+
+            return;
+        }
+
+        $requested = (array) ($payload['requested'] ?? []);
+        $updates = array_intersect_key($requested, array_flip(['check_in', 'check_out']));
+        if ($updates === []) {
+            return;
+        }
+
+        $updates['approved_by'] = $request->approvalRequest?->decisions?->last()?->actor_id;
+        $record->update($updates);
     }
 
     public function createAccountingDraft(EmployeeRequest $request): EmployeeRequest

@@ -38,6 +38,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Auth;
 use Webkul\TimeOff\Enums\AllocationValidationType;
 use Webkul\TimeOff\Enums\EmployeeRequest;
 use Webkul\TimeOff\Enums\LeaveValidationType;
@@ -302,6 +303,11 @@ class LeaveTypeResource extends Resource
                         ),
                     ForceDeleteBulkAction::make()
                         ->action(function (Collection $records) {
+                            // forceDeleteAny() (gating whether this bulk action renders at all)
+                            // has no per-record check; re-authorize each record individually so
+                            // bulk force-delete is never more permissive than the single-record
+                            // action would be for the same records.
+                            $records = $records->filter(fn (Model $record) => Auth::user()?->can('forceDelete', $record));
                             try {
                                 $records->each(fn (Model $record) => $record->forceDelete());
 
