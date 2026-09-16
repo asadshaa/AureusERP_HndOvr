@@ -84,6 +84,18 @@ final class HrPermissions
             'view_any_employee_activity::plan', 'view_employee_activity::plan', 'create_employee_activity::plan', 'update_employee_activity::plan',
             'view_any_employee_employee::request', 'view_employee_employee::request',
             'view_any_employee_employee::request::type', 'view_employee_employee::request::type',
+            // The shared Approval Queue (Webkul\Support\Filament\Resources\
+            // ApprovalRequestResource) is where every ApprovalStep's actual
+            // approve/reject buttons live. Any role this file routes an
+            // ApprovalStep to (HR Review, Sensitive Data Review, ...) needs
+            // this to even load that page -- canAct() being true is not
+            // enough on its own. Confirmed missing live: routing "HR
+            // Review"/"Sensitive Data Review" to hr_manager/
+            // sensitive_data_custodian worked at the service layer (proven
+            // by Pest, which calls ApprovalEngine directly) but 403'd in
+            // the real browser, because neither role held this. The real
+            // Finance roles (controller/vp_finance) already had it.
+            'view_any_support_approval::request', 'view_support_approval::request',
             'view_any_employee_attendance::record', 'view_employee_attendance::record',
             'view_any_employee_performance::cycle', 'view_employee_performance::cycle', 'create_employee_performance::cycle', 'update_employee_performance::cycle',
             'view_any_employee_performance::review', 'view_employee_performance::review', 'create_employee_performance::review', 'update_employee_performance::review',
@@ -191,6 +203,7 @@ final class HrPermissions
             'view_any_time_off_allocation', 'view_time_off_allocation', 'create_time_off_allocation', 'update_time_off_allocation',
             'view_any_employee_employee::request', 'view_employee_employee::request',
             'page_employee_hr_analytics',
+            'view_any_support_approval::request', 'view_support_approval::request',
         ];
     }
 
@@ -230,6 +243,7 @@ final class HrPermissions
             self::ViewSensitiveEmployeeData,
             self::ManageSensitiveEmployeeData,
             'view_any_employee_employee', 'view_employee_employee',
+            'view_any_support_approval::request', 'view_support_approval::request',
         ];
     }
 

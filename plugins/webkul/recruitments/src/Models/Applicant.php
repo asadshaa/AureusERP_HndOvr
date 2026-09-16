@@ -83,6 +83,21 @@ class Applicant extends Model
         'delay_close'             => 'double',
     ];
 
+    /**
+     * Transient, non-persisted signals computed by handleApplicationUpdation()
+     * for EditApplicant::afterSave() to act on (send a confirmation email,
+     * sync/notify interviewers). These must stay real declared properties --
+     * assigning to an undeclared property name on an Eloquent model routes
+     * through __set()/setAttribute() instead of plain PHP property
+     * assignment, which silently adds it to $attributes and made the next
+     * save() attempt to write a nonexistent "interviewerChanges"/
+     * "notificationData" column, crashing on any update where the
+     * interviewer relation happened to be loaded.
+     */
+    public array $notificationData = [];
+
+    public array $interviewerChanges = [];
+
     protected $appends = [
         'application_status',
     ];
@@ -90,6 +105,28 @@ class Applicant extends Model
     public function getModelTitle(): string
     {
         return __('recruitments::models/applicant.title');
+    }
+
+    public function getLogAttributeLabels(): array
+    {
+        return [
+            'company.name'      => __('recruitments::models/applicant.log-attributes.company'),
+            'candidate.name'    => __('recruitments::models/applicant.log-attributes.candidate'),
+            'job.name'          => __('recruitments::models/applicant.log-attributes.job'),
+            'department.name'   => __('recruitments::models/applicant.log-attributes.department'),
+            'stage.name'        => __('recruitments::models/applicant.log-attributes.stage'),
+            'recruiter.name'    => __('recruitments::models/applicant.log-attributes.recruiter'),
+            'creator.name'      => __('recruitments::models/applicant.log-attributes.creator'),
+            'refuseReason.name' => __('recruitments::models/applicant.log-attributes.refuse-reason'),
+            'state'             => __('recruitments::models/applicant.log-attributes.state'),
+            'screening_score'   => __('recruitments::models/applicant.log-attributes.screening-score'),
+            'interview_score'   => __('recruitments::models/applicant.log-attributes.interview-score'),
+            'assessment_score'  => __('recruitments::models/applicant.log-attributes.assessment-score'),
+            'offer_status'      => __('recruitments::models/applicant.log-attributes.offer-status'),
+            'offer_date'        => __('recruitments::models/applicant.log-attributes.offer-date'),
+            'priority'          => __('recruitments::models/applicant.log-attributes.priority'),
+            'is_active'         => __('recruitments::models/applicant.log-attributes.is-active'),
+        ];
     }
 
     public function source(): BelongsTo
@@ -226,6 +263,18 @@ class Applicant extends Model
         $this->creator_id ??= $authUser?->id;
 
         $this->company_id ??= $authUser?->default_company_id;
+
+        // The recruitments_applicants migration defaults this column to
+        // false, so any creation path other than ListApplicants' header
+        // action (the only place that currently sets it explicitly) would
+        // otherwise produce an application whose application_status resolves
+        // straight to ARCHIVED (see getApplicationStatusAttribute()) despite
+        // never having been rejected or closed. Defaulting it here, the same
+        // way creator_id/company_id are defaulted above, makes a plain,
+        // unqualified create() behave correctly everywhere -- including
+        // CandidateConversionService and any future non-UI entry point --
+        // without relying on every call-site to remember to pass it.
+        $this->is_active ??= true;
     }
 
     public function handleApplicationUpdation(): void

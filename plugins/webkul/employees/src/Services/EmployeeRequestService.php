@@ -37,6 +37,7 @@ class EmployeeRequestService
         if ($request->requestType->requires_document && empty($request->attachments)) {
             throw new RuntimeException('This employee request type requires a supporting document.');
         }
+        $this->assertClaimTaxConsistency($request);
 
         $approval = $this->approvals->submit(
             $request,
@@ -292,6 +293,50 @@ class EmployeeRequestService
         });
 
         return $request->fresh(['accountingMove.lines']);
+    }
+
+    /**
+     * Section 8 (Claims & Reimbursements): billed_amount / *_deduction /
+     * amount ("Net Payment") are only present on claim-shaped requests --
+     * anything else leaves billed_amount null and is untouched here, so this
+     * never has to know which EmployeeRequestType categories are "claims".
+     * The Filament form already live-calculates net payment before a user
+     * can submit; this is the server-side backstop against a stale or
+     * tampered payload, not the primary UX -- so it throws rather than
+     * silently recomputing and overwriting what was submitted.
+     */
+    private function assertClaimTaxConsistency(EmployeeRequest $request): void
+    {
+        if ($request->billed_amount === null) {
+            return;
+        }
+
+        $billed = BigDecimal::of((string) $request->billed_amount);
+        $incomeTax = BigDecimal::of((string) ($request->income_tax_deduction ?? 0));
+        $salesTax = BigDecimal::of((string) ($request->sales_tax_deduction ?? 0));
+
+        if ($billed->isNegative()) {
+            throw new RuntimeException('The billed amount cannot be negative.');
+        }
+        if ($incomeTax->isNegative() || $salesTax->isNegative()) {
+            throw new RuntimeException('Tax deductions cannot be negative.');
+        }
+        if ($request->tax_deduction_rate !== null
+            && (BigDecimal::of((string) $request->tax_deduction_rate)->isNegative()
+                || BigDecimal::of((string) $request->tax_deduction_rate)->isGreaterThan('100'))) {
+            throw new RuntimeException('Tax deduction rate must be between 0 and 100.');
+        }
+
+        $totalDeductions = $incomeTax->plus($salesTax);
+        if ($totalDeductions->isGreaterThan($billed)) {
+            throw new RuntimeException('Tax deductions cannot exceed the billed amount.');
+        }
+
+        $expectedNet = $billed->minus($totalDeductions);
+        $actualNet = BigDecimal::of((string) ($request->amount ?? 0));
+        if (! $expectedNet->isEqualTo($actualNet)) {
+            throw new RuntimeException('Net payment must equal the billed amount minus tax deductions.');
+        }
     }
 
     private function assertRequestIntegrity(EmployeeRequest $request, User $requester): void

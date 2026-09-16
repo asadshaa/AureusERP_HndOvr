@@ -1780,28 +1780,32 @@ class EmployeeResource extends Resource
                                                         ->placeholder('—')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.identification-id-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('ssnid')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.ssnid'))
                                                         ->icon('heroicon-o-document-check')
                                                         ->placeholder('—')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.ssnid-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('sinid')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.sinid'))
                                                         ->placeholder('—')
                                                         ->icon('heroicon-o-document')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.sinid-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('passport_id')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.passport-id'))
                                                         ->icon('heroicon-o-identification')
                                                         ->copyable()
                                                         ->placeholder('—')
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.passport-id-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('gender')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.gender'))
                                                         ->placeholder('—')

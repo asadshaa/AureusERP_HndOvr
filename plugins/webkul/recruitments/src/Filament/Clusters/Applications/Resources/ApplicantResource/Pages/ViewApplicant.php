@@ -99,7 +99,7 @@ class ViewApplicant extends ViewRecord
                 ->activityPlans($this->getRecord()->activityPlans()),
             Action::make('createEmployee')
                 ->label(__('recruitments::filament/clusters/applications/resources/applicant/pages/edit-applicant.create-employee'))
-                ->hidden(fn ($record) => $record->application_status->value == ApplicationStatus::HIRED->value || $record->candidate->employee_id)
+                ->hidden(fn ($record) => $record->application_status->value == ApplicationStatus::HIRED->value || $record->candidate->employee_id || $record->refuse_reason_id)
                 ->action(function (Applicant $record) {
                     $employee = $record->createEmployee();
 
