@@ -122,7 +122,22 @@ final class HrPermissions
         ];
     }
 
-    /** @return array<int, string> */
+    /**
+     * Confirmed live, not assumed: a plain line manager (an employee who is
+     * someone's Employee.parent_id, holding no special role at all) can be
+     * correctly resolved as the approver for a hierarchy_route:
+     * 'requester_manager' step -- ApprovalEngine::canAct() returns true for
+     * them -- but without a permission granting access to the shared
+     * Approval Queue page (Webkul\Support\Filament\Resources\
+     * ApprovalRequestResource), they 403 trying to load the one screen
+     * where that step's actual Approve/Reject buttons exist. This bundle is
+     * HrPermissionRegistrar::synchronize()'s already-existing mechanism for
+     * exactly this tier (auto-granted to any role literally named
+     * "manager"/"department_manager"/"team_manager") -- it just never
+     * included queue access.
+     *
+     * @return array<int, string>
+     */
     public static function manager(): array
     {
         return [
@@ -132,6 +147,7 @@ final class HrPermissions
             self::ManagePerformance,
             self::ManageEmployeeRequests,
             self::ViewAnalytics,
+            'view_any_support_approval::request', 'view_support_approval::request',
         ];
     }
 

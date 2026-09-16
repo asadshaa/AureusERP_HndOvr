@@ -42,6 +42,18 @@ class HrRoleSeeder extends Seeder
         'recruiter',
         'hiring_manager',
         'hr_auditor',
+        // Same gap as "hr_manager" originally was: HrPermissionRegistrar::
+        // synchronize() already matches a role literally named "manager"
+        // (rolesNamed(['manager', 'department_manager', ...])) and grants
+        // it HrPermissions::manager() -- but nothing ever created the row.
+        // Confirmed live: a plain employee who is someone's
+        // Employee.parent_id (the "Line Manager" a Leave/Attendance/Claims
+        // request routes hierarchy_route: 'requester_manager' to) could be
+        // correctly resolved by ApprovalEngine::canAct() but had no way to
+        // reach the Approval Queue page to act on it -- no role granted
+        // them that permission, because no role matching this tier existed
+        // to grant it to.
+        'manager',
     ];
 
     public function run(): void
