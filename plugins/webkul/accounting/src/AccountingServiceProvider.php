@@ -14,6 +14,7 @@ use Webkul\Account\Models\Payment as BaseAccountPayment;
 use Webkul\Accounting\Console\Commands\AuthorizeDriveCommand;
 use Webkul\Accounting\Console\Commands\CheckDocumentIntegrityCommand;
 use Webkul\Accounting\Console\Commands\ExpireDocumentTransfersCommand;
+use Webkul\Accounting\Console\Commands\ExpireWebRtcSessionsCommand;
 use Webkul\Accounting\Contracts\DocumentStorageProvider;
 use Webkul\Accounting\Contracts\DriveClient;
 use Webkul\Accounting\Contracts\InvoicePayloadFormatter;
@@ -103,6 +104,7 @@ class AccountingServiceProvider extends PackageServiceProvider
                 CheckDocumentIntegrityCommand::class,
                 AuthorizeDriveCommand::class,
                 ExpireDocumentTransfersCommand::class,
+                ExpireWebRtcSessionsCommand::class,
             ])
             ->icon('accounting')
             ->hasInstallCommand(function (InstallCommand $command) {

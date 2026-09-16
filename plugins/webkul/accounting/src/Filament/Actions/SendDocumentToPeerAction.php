@@ -14,13 +14,14 @@ use Illuminate\Support\Facades\Auth;
 use Webkul\Accounting\Models\Document;
 use Webkul\Accounting\Models\Peer;
 use Webkul\Accounting\Services\Peers\DocumentExchangeService;
+use Webkul\Accounting\Services\Peers\WebRtcSignalingService;
 use Webkul\Accounting\Support\AccountingPermissions;
 
 /**
  * Sends a supporting document (the actual file) to a peer instance or to an
  * outside recipient.
  *
- * Mirrors SendInvoiceToPeerAction deliberately: same two channels, same
+ * Mirrors SendInvoiceToPeerAction deliberately: same channels, same
  * permission, same manual-only trigger. A user should not have to learn two
  * different flows depending on whether the thing being sent is an invoice
  * or a file.
@@ -44,10 +45,13 @@ class SendDocumentToPeerAction
             ->schema([
                 Radio::make('channel')
                     ->label('Send to')
-                    ->options([
+                    ->options(fn (): array => array_filter([
                         'peer'     => 'A paired AureusERP instance',
                         'external' => 'Someone without AureusERP (secure link)',
-                    ])
+                        'direct'   => config('webrtc.enabled', true)
+                            ? 'Someone who is online right now (direct encrypted browser transfer)'
+                            : null,
+                    ]))
                     ->default('peer')
                     ->live()
                     ->required(),
@@ -75,6 +79,16 @@ class SendDocumentToPeerAction
                 $document = $resolveDocument ? $resolveDocument($record) : $record;
 
                 try {
+                    if ($data['channel'] === 'direct') {
+                        $session = app(WebRtcSignalingService::class)->createSession(
+                            actor: Auth::user(),
+                            transmittable: $document,
+                            ipAddress: request()->ip(),
+                        );
+
+                        return redirect()->to(route('accounting.webrtc.send', ['code' => $session->code]));
+                    }
+
                     if ($data['channel'] === 'peer') {
                         $peer = Peer::query()->findOrFail($data['peer_id']);
 

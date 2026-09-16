@@ -55,3 +55,6 @@ Thumbs.db
 
 # Claude Code session-local state (launch.json is kept and versioned)
 /.claude/scheduled_tasks.lock
+
+# Local HTTPS dev setup (mkcert/caddy binaries, generated cert + private key)
+/.dev-tools/

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Move;
 use Webkul\Accounting\Models\Peer;
 use Webkul\Accounting\Services\Peers\DocumentExchangeService;
+use Webkul\Accounting\Services\Peers\WebRtcSignalingService;
 use Webkul\Accounting\Support\AccountingPermissions;
 
 /**
@@ -32,10 +33,15 @@ class SendInvoiceToPeerAction
             ->schema([
                 Radio::make('channel')
                     ->label('Send to')
-                    ->options([
+                    ->options(fn (): array => array_filter([
                         'peer'     => 'A paired AureusERP instance',
                         'external' => 'Someone without AureusERP (email + secure link)',
-                    ])
+                        // Browser-to-browser. Needs the recipient online now,
+                        // which is why it is never the default.
+                        'direct'   => config('webrtc.enabled', true)
+                            ? 'Someone who is online right now (direct encrypted browser transfer)'
+                            : null,
+                    ]))
                     ->default('peer')
                     ->live()
                     ->required(),
@@ -60,6 +66,19 @@ class SendInvoiceToPeerAction
                 $exchange = app(DocumentExchangeService::class);
 
                 try {
+                    // Hands the sender off to their own transfer console,
+                    // where their browser makes the offer. Nothing is queued:
+                    // this transport has no store-and-forward, by design.
+                    if ($data['channel'] === 'direct') {
+                        $session = app(WebRtcSignalingService::class)->createSession(
+                            actor: Auth::user(),
+                            transmittable: $record,
+                            ipAddress: request()->ip(),
+                        );
+
+                        return redirect()->to(route('accounting.webrtc.send', ['code' => $session->code]));
+                    }
+
                     if ($data['channel'] === 'peer') {
                         $peer = Peer::query()->findOrFail($data['peer_id']);
 

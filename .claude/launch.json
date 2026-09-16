@@ -6,6 +6,13 @@
       "runtimeExecutable": "C:\\laragon\\bin\\php\\php-8.3.33-Win32-vs16-x64\\php.exe",
       "runtimeArgs": ["artisan", "serve", "--host=127.0.0.1", "--port=8000"],
       "port": 8000
+    },
+    {
+      "name": "aureus-erp-https",
+      "runtimeExecutable": ".dev-tools\\caddy.exe",
+      "runtimeArgs": ["run", "--config", ".dev-tools\\Caddyfile", "--adapter", "caddyfile"],
+      "port": 8443,
+      "url": "https://localhost:8443"
     }
   ]
 }
