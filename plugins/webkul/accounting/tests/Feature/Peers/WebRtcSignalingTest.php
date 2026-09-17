@@ -157,12 +157,16 @@ test('returns null instead of fatalling on an unknown code', function () {
 |--------------------------------------------------------------------------
 */
 
-test('refuses to open a session for another company record', function () {
+test('refuses to open a session for another company record, generically and audited', function () {
     $otherCompany = Company::factory()->create(['is_active' => true]);
     $foreignMove = ($this->makeInvoice)($otherCompany);
 
+    // Generic on purpose -- this branch is reachable from the Filament
+    // "Send to..." action directly (InvoiceResource isn't company-scoped),
+    // not only from the HTTP lookup, so the message must not confirm the
+    // id is real to whoever reached it that way.
     expect(fn () => $this->signaling->createSession($this->sender, $foreignMove))
-        ->toThrow(RuntimeException::class, 'another company');
+        ->toThrow(RuntimeException::class, 'could not be found');
 
     expect(DocumentAudit::query()
         ->where('action', DocumentAuditAction::AccessDenied)
@@ -170,14 +174,23 @@ test('refuses to open a session for another company record', function () {
         ->exists())->toBeTrue();
 });
 
-test('refuses to open a session without the send permission', function () {
+test('refuses to open a session without the send permission, and audits it', function () {
     $outsider = documentTestUser($this->company, [AccountingPermissions::ViewDocuments]);
 
     expect(fn () => $this->signaling->createSession($outsider, ($this->makeInvoice)()))
         ->toThrow(RuntimeException::class, 'permission');
+
+    // The prototype's own audit trail was zero rows for any denial. This one
+    // was found live during manual testing -- the permission check threw
+    // before any audit call existed on this branch.
+    expect(DocumentAudit::query()
+        ->where('action', DocumentAuditAction::AccessDenied)
+        ->where('actor_id', $outsider->id)
+        ->whereJsonContains('metadata->reason', 'missing_permission')
+        ->exists())->toBeTrue();
 });
 
-test('hides another company invoice behind the same 404 as a missing one', function () {
+test('hides another company invoice behind an identical response to a missing one, but audits the real attempt', function () {
     $otherCompany = Company::factory()->create(['is_active' => true]);
     $foreignMove = ($this->makeInvoice)($otherCompany);
 
@@ -187,7 +200,20 @@ test('hides another company invoice behind the same 404 as a missing one', funct
     $missing = $this->actingAs($this->sender)
         ->postJson('/api/v1/webrtc/sessions', ['type' => 'invoice', 'id' => 99999999]);
 
-    expect($foreign->status())->toBe($missing->status());
+    // Status AND body identical -- a client-observable difference here is
+    // exactly what would let a caller enumerate real ids by company.
+    expect($foreign->status())->toBe($missing->status())
+        ->and($foreign->json())->toBe($missing->json());
+
+    // But server-side, the real attempt against a real record is not lost:
+    // audited against the record's OWNING company, matching
+    // DocumentService::find()'s cross_company_lookup pattern.
+    expect(DocumentAudit::query()
+        ->where('company_id', $otherCompany->id)
+        ->where('action', DocumentAuditAction::AccessDenied)
+        ->where('actor_id', $this->sender->id)
+        ->whereJsonContains('metadata->reason', 'cross_company_lookup')
+        ->exists())->toBeTrue();
 });
 
 test('only the sender may publish the offer', function () {

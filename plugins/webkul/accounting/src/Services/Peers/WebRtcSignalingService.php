@@ -3,6 +3,7 @@
 namespace Webkul\Accounting\Services\Peers;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Webkul\Account\Models\Move;
@@ -54,11 +55,23 @@ class WebRtcSignalingService
             throw new RuntimeException('WebRTC direct transfer is currently disabled.');
         }
 
+        $actorCompanyId = (int) $actor->default_company_id;
+
         if (! $actor->hasPermissionTo(AccountingPermissions::SendTransmissions)) {
+            // company_id is a required FK on accounting_document_audits, so a
+            // companyless account can't be attributed an audit row -- there's
+            // nothing to attribute it to.
+            if ($actorCompanyId > 0) {
+                $this->audit($actorCompanyId, DocumentAuditAction::AccessDenied, $actor, [
+                    'reason'             => 'missing_permission',
+                    'transport'          => 'webrtc',
+                    'transmittable_type' => $transmittable::class,
+                    'transmittable_id'   => $transmittable->getKey(),
+                ], $ipAddress);
+            }
+
             throw new RuntimeException('You do not have permission to initiate transmissions.');
         }
-
-        $actorCompanyId = (int) $actor->default_company_id;
 
         if ($actorCompanyId <= 0) {
             throw new RuntimeException('Your account has no default company, so it cannot send documents.');
@@ -79,7 +92,13 @@ class WebRtcSignalingService
                 'transmittable_id'   => $transmittable->getKey(),
             ], $ipAddress);
 
-            throw new RuntimeException('That record belongs to another company.');
+            // Generic on purpose, matching resolveInvoiceForActor() and
+            // DocumentService::find(): this branch is reachable not only via
+            // the HTTP lookup above but from the Filament "Send to..." action
+            // directly, and InvoiceResource does not company-scope its own
+            // query -- "belongs to another company" would confirm to a
+            // caller who reached this some other way that the id is real.
+            throw new RuntimeException('That record could not be found.');
         }
 
         $session = WebRtcSession::create([
@@ -105,6 +124,37 @@ class WebRtcSignalingService
         ], $ipAddress, $transmittable instanceof Document ? $transmittable->id : null);
 
         return $session;
+    }
+
+    /**
+     * Resolve an invoice for a caller-supplied id, indistinguishable from a
+     * missing one whether it doesn't exist or belongs to another company --
+     * matching DocumentService::find()'s pattern, including the fact that
+     * pattern audits the attempt server-side while keeping the client-facing
+     * error identical either way, rather than trading one for the other.
+     */
+    public function resolveInvoiceForActor(User $actor, int $moveId): Move
+    {
+        $companyId = (int) $actor->default_company_id;
+
+        $move = Move::query()->where('company_id', $companyId)->find($moveId);
+
+        if ($move) {
+            return $move;
+        }
+
+        $elsewhere = Move::query()->find($moveId);
+
+        if ($elsewhere) {
+            $this->audit((int) $elsewhere->company_id, DocumentAuditAction::AccessDenied, $actor, [
+                'reason'             => 'cross_company_lookup',
+                'transport'          => 'webrtc',
+                'transmittable_type' => Move::class,
+                'transmittable_id'   => $moveId,
+            ]);
+        }
+
+        throw new ModelNotFoundException('Invoice not found.');
     }
 
     /**

@@ -43,13 +43,14 @@ class WebRtcSignalingController extends Controller
         $actor = Auth::user();
 
         try {
-            // Both lookups are company-scoped, so a record in another company
-            // is indistinguishable from one that does not exist. The
-            // prototype ran an unscoped findOrFail() on a client-supplied id.
+            // Both lookups are company-scoped and both audit a cross-company
+            // attempt while still returning the same "not found" the caller
+            // would see for a nonexistent id -- see
+            // WebRtcSignalingService::resolveInvoiceForActor() and
+            // DocumentService::find(). The prototype ran an unscoped
+            // findOrFail() on a client-supplied id, with neither property.
             $record = $validated['type'] === 'invoice'
-                ? Move::query()
-                    ->where('company_id', $actor->default_company_id)
-                    ->findOrFail($validated['id'])
+                ? $this->signaling->resolveInvoiceForActor($actor, $validated['id'])
                 : $this->documents->find($actor, $validated['id']);
 
             $session = $this->signaling->createSession(
