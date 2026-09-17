@@ -83,6 +83,11 @@ class AccountingServiceProvider extends PackageServiceProvider
                 '2026_08_25_000002_add_invoice_import_reference_fields',
                 '2026_08_25_000003_add_fs_tags_to_journal_lines',
                 '2026_08_25_000004_link_bank_mappings_to_obligations',
+                // Also missing from this list entirely, found during the
+                // same fresh-database audit as the WebRTC sessions table
+                // below -- predates this session's own work, not something
+                // introduced here, but a real gap either way.
+                '2026_09_08_000001_add_fs_tag_diagnostics_to_bank_transaction_mappings',
                 '2026_09_10_000001_create_accounting_documents_table',
                 '2026_09_10_000002_create_accounting_document_versions_table',
                 '2026_09_10_000003_create_accounting_document_attachments_table',
@@ -93,6 +98,16 @@ class AccountingServiceProvider extends PackageServiceProvider
                 '2026_09_16_000002_create_accounting_outbound_transmissions_table',
                 '2026_09_16_000003_create_accounting_inbound_transmissions_table',
                 '2026_09_16_000004_make_document_id_nullable_on_document_audits',
+                // Was missing from this list entirely -- found live during a
+                // fresh-database regression run, where the WebRTC feature's
+                // own table never got created and every session lookup threw
+                // "Base table ... doesn't exist". It existed in the long-lived
+                // dev database only because an earlier session ran it
+                // manually with --path=, bypassing this registration; a real
+                // deployment's plain `php artisan migrate` would have missed
+                // it entirely, exactly as this array is what plugin-manager
+                // uses to discover which migrations to run at all.
+                '2026_09_16_000005_create_accounting_webrtc_sessions_table',
             ])
             ->runsMigrations()
             ->hasSeeders([

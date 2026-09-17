@@ -43,6 +43,13 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2025_08_20_082638_add_unique_user_id_to_employees_employees_table',
                 '2026_08_25_000010_extend_hr_master_and_hierarchy',
                 '2026_08_25_000011_create_hr_operations_tables',
+                // Also missing from this list -- found live during a fresh-
+                // database regression run, where every claim submission
+                // failed with "Unknown column 'billed_amount'" because this
+                // migration had never run on a genuine fresh install. It
+                // existed in the long-lived dev database only because it was
+                // migrated manually at the time it was written.
+                '2026_09_16_000001_add_claim_fields_to_employees_requests_table',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')
