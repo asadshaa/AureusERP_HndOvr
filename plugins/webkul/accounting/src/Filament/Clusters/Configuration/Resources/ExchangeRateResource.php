@@ -17,6 +17,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Throwable;
 use Webkul\Accounting\Enums\ExchangeRateApprovalStatus;
 use Webkul\Accounting\Enums\ExchangeRateSource;
 use Webkul\Accounting\Enums\ExchangeRateType;
@@ -56,6 +57,7 @@ class ExchangeRateResource extends Resource
         return $schema->components([
             Section::make('Dated exchange rate')->columns(2)->schema([
                 Select::make('company_id')
+                    ->options(fn (): array => [(int) Auth::user()?->default_company_id => Auth::user()?->defaultCompany?->name])
                     ->default(Auth::user()?->default_company_id)
                     ->disabled()
                     ->dehydrated()
@@ -106,8 +108,12 @@ class ExchangeRateResource extends Resource
                     ->visible(fn (ExchangeRate $record): bool => $record->approval_status !== ExchangeRateApprovalStatus::Approved
                         && app(ExchangeRateApprovalService::class)->requiresConfiguredApproval($record))
                     ->action(function (ExchangeRate $record): void {
-                        $request = app(ExchangeRateApprovalService::class)->submit($record, Auth::user());
-                        Notification::make()->success()->title("Approval request APR-{$request->id} is in the shared approval queue.")->send();
+                        try {
+                            $request = app(ExchangeRateApprovalService::class)->submit($record, Auth::user());
+                            Notification::make()->success()->title("Approval request APR-{$request->id} is in the shared approval queue.")->send();
+                        } catch (Throwable $e) {
+                            Notification::make()->danger()->title('Could not submit for approval')->body($e->getMessage())->send();
+                        }
                     }),
                 Action::make('approve')
                     ->authorize(AccountingPermissions::ApproveExchangeRates)
@@ -115,8 +121,12 @@ class ExchangeRateResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn (ExchangeRate $record): bool => $record->approval_status !== ExchangeRateApprovalStatus::Approved)
                     ->action(function (ExchangeRate $record): void {
-                        app(ExchangeRateApprovalService::class)->approve($record, Auth::user());
-                        Notification::make()->success()->title('Exchange rate approved. Missing bank conversions were refreshed.')->send();
+                        try {
+                            app(ExchangeRateApprovalService::class)->approve($record, Auth::user());
+                            Notification::make()->success()->title('Exchange rate approved. Missing bank conversions were refreshed.')->send();
+                        } catch (Throwable $e) {
+                            Notification::make()->danger()->title('Could not approve this exchange rate')->body($e->getMessage())->send();
+                        }
                     }),
                 Action::make('reject')
                     ->authorize(AccountingPermissions::ApproveExchangeRates)
@@ -124,8 +134,12 @@ class ExchangeRateResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn (ExchangeRate $record): bool => $record->approval_status !== ExchangeRateApprovalStatus::Rejected)
                     ->action(function (ExchangeRate $record): void {
-                        app(ExchangeRateApprovalService::class)->reject($record, Auth::user());
-                        Notification::make()->warning()->title('Exchange rate rejected.')->send();
+                        try {
+                            app(ExchangeRateApprovalService::class)->reject($record, Auth::user());
+                            Notification::make()->warning()->title('Exchange rate rejected.')->send();
+                        } catch (Throwable $e) {
+                            Notification::make()->danger()->title('Could not reject this exchange rate')->body($e->getMessage())->send();
+                        }
                     }),
             ])
             ->defaultSort('effective_date', 'desc');
@@ -133,10 +147,32 @@ class ExchangeRateResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
+        $user = Auth::user();
+
+        // ManageExchangeRates alone used to gate this -- meaning a role
+        // that can only approve (ApproveExchangeRates) or only needs
+        // read-only visibility (ViewExchangeRates, e.g. Internal Auditor,
+        // VP Finance, CFO) couldn't see the list at all. Neither addition
+        // widens what ManageExchangeRates-holders can already do.
+        return $user !== null && ($user->can(AccountingPermissions::ManageExchangeRates)
+            || $user->can(AccountingPermissions::ApproveExchangeRates)
+            || $user->can(AccountingPermissions::ViewExchangeRates));
     }
 
     public static function canCreate(): bool
+    {
+        return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
+    }
+
+    /**
+     * canEdit() already existed (below) and correctly gates on
+     * ManageExchangeRates. canDelete() did not exist at all -- same gap
+     * as ManualAdjustmentResource, just partial here: no Policy class
+     * exists for ExchangeRate, so without an explicit override Filament
+     * defaults to allowing delete for any authenticated user regardless
+     * of permissions.
+     */
+    public static function canDelete($record): bool
     {
         return Auth::user()?->can(AccountingPermissions::ManageExchangeRates) ?? false;
     }

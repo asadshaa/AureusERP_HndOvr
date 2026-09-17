@@ -50,9 +50,9 @@ use Webkul\Security\Filament\Resources\CompanyResource\Pages\ViewCompany;
 use Webkul\Security\Filament\Resources\CompanyResource\RelationManagers\BranchesRelationManager;
 use Webkul\Security\Settings\UserSettings;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
+use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
-use Webkul\Support\Enums\NavigationGroup;
 
 class CompanyResource extends Resource
 {
@@ -69,7 +69,7 @@ class CompanyResource extends Resource
         return __('security::filament/resources/company.navigation.title');
     }
 
-    public static function getNavigationGroup(): string | \UnitEnum
+    public static function getNavigationGroup(): string|\UnitEnum
     {
         return NavigationGroup::Setting;
     }
@@ -118,6 +118,18 @@ class CompanyResource extends Resource
                                             ->unique(ignoreRecord: true)
                                             ->maxLength(255)
                                             ->hintIcon('heroicon-o-question-mark-circle', tooltip: __('security::filament/resources/company.form.sections.company-information.fields.tax-id-tooltip')),
+                                        Toggle::make('is_sales_tax_registered')
+                                            ->label('Registered for sales tax')
+                                            ->helperText('Turn this on only if the company is actually registered to charge sales tax. Having a Tax ID/NTN on file does not, by itself, make sales tax applicable.')
+                                            ->live()
+                                            ->default(false)
+                                            ->columnSpanFull(),
+                                        TextInput::make('strn')
+                                            ->label('STRN')
+                                            ->helperText('Sales Tax Registration Number. You can save without it while registration is in progress, but this company cannot post a taxed invoice until it\'s filled in.')
+                                            ->unique(ignoreRecord: true)
+                                            ->maxLength(255)
+                                            ->visible(fn (Get $get): bool => (bool) $get('is_sales_tax_registered')),
                                         TextInput::make('website')
                                             ->url()
                                             ->prefixIcon('heroicon-o-globe-alt')
@@ -513,6 +525,13 @@ class CompanyResource extends Resource
                                             ->icon('heroicon-o-currency-dollar')
                                             ->placeholder('—')
                                             ->label(__('security::filament/resources/company.infolist.sections.company-information.entries.tax-id')),
+                                        IconEntry::make('is_sales_tax_registered')
+                                            ->label('Registered for sales tax')
+                                            ->boolean(),
+                                        TextEntry::make('strn')
+                                            ->icon('heroicon-o-document-check')
+                                            ->placeholder('Not set')
+                                            ->label('STRN'),
                                         TextEntry::make('website')
                                             ->icon('heroicon-o-globe-alt')
                                             ->placeholder('—')

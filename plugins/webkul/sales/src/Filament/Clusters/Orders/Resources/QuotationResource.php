@@ -54,6 +54,7 @@ use Illuminate\View\ComponentAttributeBag;
 use Webkul\Account\Enums\TypeTaxUse;
 use Webkul\Account\Facades\Tax;
 use Webkul\Account\Models\PaymentTerm;
+use Webkul\Account\Models\Tax as TaxModel;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
@@ -1466,8 +1467,14 @@ class QuotationResource extends Resource
                     ->relationship(
                         'taxes',
                         'name',
-                        fn (Builder $query) => $query->where('type_tax_use', TypeTaxUse::SALE),
+                        modifyQueryUsing: fn (Builder $query, Get $get, ?Model $record) => TaxModel::scopeTaxQuery(
+                            $query,
+                            $get('../../company_id') ?? $get('company_id') ?? Auth::user()?->default_company_id,
+                            TypeTaxUse::SALE,
+                            $record?->taxes()->pluck('accounts_taxes.id')->map(fn ($id) => (int) $id)->all() ?? [],
+                        ),
                     )
+                    ->rules([TaxModel::taxValidationRule(TypeTaxUse::SALE)])
                     ->searchable()
                     ->multiple()
                     ->preload()
@@ -2021,7 +2028,7 @@ class QuotationResource extends Resource
 
         $taxIds = $get($prefix.'taxes') ?? [];
 
-        $taxes = \Webkul\Account\Models\Tax::whereIn('id', $taxIds)->get();
+        $taxes = TaxModel::whereIn('id', $taxIds)->get();
 
         if ($taxes->isEmpty()) {
             $subTotal = round($discountedUnit * $quantity, 4);

@@ -41,6 +41,8 @@ class Partner extends Authenticatable implements FilamentUser
         'job_title',
         'website',
         'tax_id',
+        'is_sales_tax_registered',
+        'strn',
         'phone',
         'mobile',
         'color',
@@ -61,8 +63,9 @@ class Partner extends Authenticatable implements FilamentUser
     ];
 
     protected $casts = [
-        'account_type' => AccountType::class,
-        'is_active'    => 'boolean',
+        'account_type'             => AccountType::class,
+        'is_active'                => 'boolean',
+        'is_sales_tax_registered'  => 'boolean',
     ];
 
     public function getModelTitle(): string

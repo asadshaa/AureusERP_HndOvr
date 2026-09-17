@@ -187,7 +187,7 @@ class Leave extends Model
         static::creating(function ($leave) {
             $authUser = Auth::user();
 
-            $leave->creator_id = $authUser->id;
+            $leave->creator_id ??= $authUser?->id;
 
             $leave->company_id ??= $authUser?->default_company_id;
         });

@@ -3,9 +3,15 @@
 namespace Webkul\Account\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
+use Webkul\Account\Enums\TypeTaxUse;
 
 class BillRequest extends InvoiceRequest
 {
+    protected function expectedTaxUsage(): TypeTaxUse
+    {
+        return TypeTaxUse::PURCHASE;
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *

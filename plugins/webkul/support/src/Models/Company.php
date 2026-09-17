@@ -32,6 +32,8 @@ class Company extends Model implements Sortable
         'company_id',
         'parent_id',
         'tax_id',
+        'is_sales_tax_registered',
+        'strn',
         'registration_number',
         'email',
         'phone',
@@ -67,6 +69,7 @@ class Company extends Model implements Sortable
     {
         return [
             'is_active'                     => 'boolean',
+            'is_sales_tax_registered'       => 'boolean',
             'founded_date'                  => 'date',
             'rate_source_priority'          => 'array',
             'allow_previous_rate_fallback'  => 'boolean',

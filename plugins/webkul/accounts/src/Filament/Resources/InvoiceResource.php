@@ -1269,8 +1269,14 @@ class InvoiceResource extends Resource
                     ->relationship(
                         'taxes',
                         'name',
-                        modifyQueryUsing: fn (Builder $query) => $query->where('type_tax_use', TypeTaxUse::SALE),
+                        modifyQueryUsing: fn (Builder $query, Get $get, ?Model $record) => Tax::scopeTaxQuery(
+                            $query,
+                            $get('../../company_id') ?? $get('company_id') ?? Auth::user()?->default_company_id,
+                            TypeTaxUse::SALE,
+                            $record?->taxes()->pluck('accounts_taxes.id')->map(fn ($id) => (int) $id)->all() ?? [],
+                        ),
                     )
+                    ->rules([Tax::taxValidationRule(TypeTaxUse::SALE)])
                     ->wrapOptionLabels(false)
                     ->searchable()
                     ->multiple()

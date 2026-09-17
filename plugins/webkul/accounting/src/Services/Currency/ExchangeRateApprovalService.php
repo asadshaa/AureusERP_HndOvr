@@ -10,6 +10,7 @@ use Webkul\Accounting\Models\ExchangeRate;
 use Webkul\Accounting\Services\Bank\BankStatementConversionService;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
+use Webkul\Support\Models\Currency;
 use Webkul\Support\Services\ApprovalEngine;
 
 class ExchangeRateApprovalService
@@ -45,14 +46,26 @@ class ExchangeRateApprovalService
         $approvedRate = DB::transaction(function () use ($rate, $approver): ExchangeRate {
             $rate = ExchangeRate::query()->lockForUpdate()->findOrFail($rate->id);
 
-            if ($this->requiresConfiguredApproval($rate) && ! ApprovalRequest::query()
-                ->where('company_id', $rate->company_id)
-                ->where('request_type', 'exchange_rate_change')
-                ->where('subject_type', $rate->getMorphClass())
-                ->where('subject_id', $rate->id)
-                ->where('status', 'approved')
-                ->exists()) {
-                throw new RuntimeException('This exchange rate requires a completed configured approval workflow before activation.');
+            if ($this->requiresConfiguredApproval($rate)) {
+                $approvedRequest = ApprovalRequest::query()
+                    ->where('company_id', $rate->company_id)
+                    ->where('request_type', 'exchange_rate_change')
+                    ->where('subject_type', $rate->getMorphClass())
+                    ->where('subject_id', $rate->id)
+                    ->where('status', 'approved')
+                    ->latest('id')
+                    ->first();
+
+                if (! $approvedRequest) {
+                    throw new RuntimeException('This exchange rate requires a completed configured approval workflow before activation.');
+                }
+
+                // The record stays editable while an approval is pending (there's
+                // no "Pending" status, only Draft/Approved/Rejected), so the value
+                // an approver actually signed off on can drift from what's on the
+                // record right now by the time this runs. Refuse to finalize
+                // anything that doesn't still match exactly what was approved.
+                $this->assertNothingChangedSinceApproval($rate, $approvedRequest);
             }
 
             if ($rate->source_currency_id === $rate->target_currency_id) {
@@ -100,6 +113,68 @@ class ExchangeRateApprovalService
         ]);
 
         return $rate->fresh();
+    }
+
+    /**
+     * Compares what was actually approved against what's on the record right
+     * now, and if anything differs, throws a message that names the exact
+     * field and its before/after values — not just "something changed" — so
+     * whoever sees it knows immediately what happened and what to do: submit
+     * it for approval again.
+     */
+    private function assertNothingChangedSinceApproval(ExchangeRate $rate, ApprovalRequest $approvedRequest): void
+    {
+        $captured = (array) ($approvedRequest->context ?? []);
+        $current = $this->approvalContext($rate);
+
+        $fieldLabels = [
+            'source_currency_id' => 'source currency',
+            'target_currency_id' => 'target currency',
+            'rate_type'          => 'rate type',
+            'rate'               => 'exchange rate value',
+        ];
+
+        foreach ($fieldLabels as $key => $label) {
+            $approvedValue = (string) ($captured[$key] ?? '');
+            $currentValue = (string) $current[$key];
+
+            if ($approvedValue === $currentValue) {
+                continue;
+            }
+
+            if (in_array($key, ['source_currency_id', 'target_currency_id'], true)) {
+                $approvedValue = $this->describeCurrency($approvedValue);
+                $currentValue = $this->describeCurrency($currentValue);
+            } elseif ($key === 'rate') {
+                $approvedValue = $this->trimTrailingZeros($approvedValue);
+                $currentValue = $this->trimTrailingZeros($currentValue);
+            }
+
+            throw new RuntimeException(
+                "The {$label} was changed from \"{$approvedValue}\" to \"{$currentValue}\" after this rate was already ".
+                'approved, so that approval no longer applies. Submit this rate for approval again to activate it.'
+            );
+        }
+    }
+
+    private function trimTrailingZeros(string $decimal): string
+    {
+        if (! str_contains($decimal, '.')) {
+            return $decimal;
+        }
+
+        return rtrim(rtrim($decimal, '0'), '.');
+    }
+
+    private function describeCurrency(string $currencyId): string
+    {
+        if ($currencyId === '') {
+            return 'none';
+        }
+
+        $currency = Currency::query()->find((int) $currencyId);
+
+        return $currency ? ($currency->code ?: $currency->name) : "#{$currencyId}";
     }
 
     /** @return array<string, mixed> */

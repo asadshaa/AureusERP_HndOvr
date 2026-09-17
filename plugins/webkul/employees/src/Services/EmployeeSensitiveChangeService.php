@@ -21,11 +21,40 @@ class EmployeeSensitiveChangeService
         'salary_currency_id',
     ];
 
-    public function __construct(protected ApprovalEngine $approvals) {}
+    public function __construct(
+        protected ApprovalEngine $approvals,
+        protected HrHierarchyService $hierarchy,
+    ) {}
 
-    /** @param array<string, mixed> $changes */
+    /**
+     * The Filament action that calls this is already gated on
+     * hr_manage_sensitive_employee_data (->visible()), but that only hides
+     * a button -- it doesn't stop this method being called directly (a
+     * future API route, an Artisan command, or simply a different UI entry
+     * point that forgets the check). Enforcing it here too closes that gap,
+     * and mirrors EmployeeRequestService::assertRequestIntegrity()'s own
+     * "HR-privileged OR within HR hierarchy scope" rule -- proven by an
+     * existing test: HrPlatformTest's "enforces company team and manager
+     * hierarchy and audits approved sensitive employee changes" already has
+     * a plain manager, not an HR-privileged user, submitting a change for
+     * their own direct report, and that has to keep working. This also
+     * means an employee can submit a change for themselves (self is always
+     * within one's own HrHierarchyService::visibleEmployeeIds() scope, the
+     * same "self and reports" concept every other HR self-service screen in
+     * this app already uses) -- it still can't take effect without a
+     * sensitive_data_custodian's separate approval, so this isn't a way to
+     * bypass review. A requester with neither the permission nor HR-scope
+     * visibility of this employee at all -- some unrelated user, or someone
+     * outside this company -- is refused.
+     *
+     * @param  array<string, mixed>  $changes
+     */
     public function submit(Employee $employee, User $requester, array $changes): ApprovalRequest
     {
+        if (! $requester->can('hr_manage_sensitive_employee_data')) {
+            $this->hierarchy->assertCanManage($requester, $employee);
+        }
+
         $changes = array_intersect_key($changes, array_flip(self::FIELDS));
         if ($changes === []) {
             throw new RuntimeException('No supported sensitive employee changes were supplied.');

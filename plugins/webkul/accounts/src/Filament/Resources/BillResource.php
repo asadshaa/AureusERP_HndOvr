@@ -1179,8 +1179,14 @@ class BillResource extends Resource
                     ->relationship(
                         'taxes',
                         'name',
-                        modifyQueryUsing: fn (Builder $query) => $query->where('type_tax_use', TypeTaxUse::PURCHASE),
+                        modifyQueryUsing: fn (Builder $query, Get $get, ?Model $record) => Tax::scopeTaxQuery(
+                            $query,
+                            $get('../../company_id') ?? $get('company_id') ?? Auth::user()?->default_company_id,
+                            TypeTaxUse::PURCHASE,
+                            $record?->taxes()->pluck('accounts_taxes.id')->map(fn ($id) => (int) $id)->all() ?? [],
+                        ),
                     )
+                    ->rules([Tax::taxValidationRule(TypeTaxUse::PURCHASE)])
                     ->wrapOptionLabels(false)
                     ->searchable()
                     ->multiple()

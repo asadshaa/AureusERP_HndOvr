@@ -225,11 +225,49 @@ class EmployeeResource extends Resource
                                     )
                                     ->tel(),
                                 Select::make('job_id')
-                                    ->relationship('job', 'name')
+                                    ->relationship(
+                                        name: 'job',
+                                        titleAttribute: 'name',
+                                        // EmployeeJobPosition is company-owned (see the
+                                        // department_id/team_id/parent_id fields above for
+                                        // the same pattern) -- unscoped, this let the form
+                                        // offer a job position from another company.
+                                        modifyQueryUsing: fn (Builder $query) => $query
+                                            ->where('company_id', Auth::user()?->default_company_id),
+                                    )
                                     ->searchable()
                                     ->preload()
                                     ->label(__('employees::filament/resources/employee.form.sections.fields.job-position'))
                                     ->createOptionForm(fn (Schema $schema) => JobPositionResource::form($schema)),
+                                Select::make('employee_type')
+                                    // NOT ->relationship('employmentType', ...): the
+                                    // employees_employees.employee_type column is a
+                                    // plain string (migration:
+                                    // string('employee_type')->default('employee')),
+                                    // while Employee::employmentType() treats it as a
+                                    // belongsTo FK into employees_employment_types.id
+                                    // -- a pre-existing mismatch that makes that
+                                    // relation non-functional (it would compare the
+                                    // id column to a string like 'full-time', which
+                                    // never matches). Binding through it here would
+                                    // have written an EmploymentType row's integer id
+                                    // into a column every other reader (including this
+                                    // model's own factory) expects to hold one of
+                                    // these descriptive strings. Out of scope to fix
+                                    // the relation/migration itself -- this exposes
+                                    // the field onboarding needs using the value shape
+                                    // the column actually has today.
+                                    ->options([
+                                        'employee'   => 'Employee',
+                                        'full-time'  => 'Full-time',
+                                        'part-time'  => 'Part-time',
+                                        'contractor' => 'Contractor',
+                                        'intern'     => 'Intern',
+                                        'consultant' => 'Consultant',
+                                    ])
+                                    ->default('employee')
+                                    ->searchable()
+                                    ->label('Employment type'),
                                 TextInput::make('work_phone')
                                     ->label(__('employees::filament/resources/employee.form.sections.fields.work-phone'))
                                     ->suffixAction(
@@ -321,7 +359,15 @@ class EmployeeResource extends Resource
                                                             ->suffixIcon('heroicon-o-map-pin')
                                                             ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.work-address')),
                                                         Select::make('work_location_id')
-                                                            ->relationship('workLocation', 'name')
+                                                            ->relationship(
+                                                                name: 'workLocation',
+                                                                titleAttribute: 'name',
+                                                                // WorkLocation is company-owned -- unscoped, this
+                                                                // let the form offer a location from another
+                                                                // company (see job_id's identical fix above).
+                                                                modifyQueryUsing: fn (Builder $query) => $query
+                                                                    ->where('company_id', Auth::user()?->default_company_id),
+                                                            )
                                                             ->searchable()
                                                             ->preload()
                                                             ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.work-location'))
@@ -1404,40 +1450,64 @@ class EmployeeResource extends Resource
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
                         ->action(function (Collection $records) {
+                            // deleteAny() (which gates whether this bulk action even renders)
+                            // has no per-record hierarchy/ownership check, unlike the single-row
+                            // DeleteAction which is gated by delete()'s hasAccess() scoping. A
+                            // bare $records->each(fn ($r) => $r->delete()) here would let a user
+                            // bulk-delete employees that the single-record action would deny them
+                            // one at a time. Re-check per record so bulk delete is never more
+                            // permissive than deleting the same record individually would be.
+                            $selectedCount = $records->count();
+                            $authorized = $records->filter(fn (Model $record) => Auth::user()?->can('delete', $record));
+                            $skipped = $selectedCount - $authorized->count();
+
                             try {
-                                $records->each(fn (Model $record) => $record->delete());
+                                $authorized->each(fn (Model $record) => $record->delete());
                             } catch (QueryException $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title(__('accounts::filament/resources/tax-group.table.bulk-actions.delete.notification.error.title'))
                                     ->body(__('accounts::filament/resources/tax-group.table.bulk-actions.delete.notification.error.body'))
                                     ->send();
+
+                                return;
                             }
-                        })
-                        ->successNotification(
+
                             Notification::make()
                                 ->success()
-                                ->title(__('employees::filament/resources/employee.table.bulk-actions.delete.notification.title'))
-                                ->body(__('employees::filament/resources/employee.table.bulk-actions.delete.notification.body'))
-                        ),
+                                ->title($authorized->isEmpty() ? 'No employees deleted' : 'Employees deleted')
+                                ->body($skipped > 0
+                                    ? "{$authorized->count()} of {$selectedCount} employee(s) deleted. {$skipped} skipped -- you are not authorized to delete them individually."
+                                    : __('employees::filament/resources/employee.table.bulk-actions.delete.notification.body'))
+                                ->send();
+                        }),
                     ForceDeleteBulkAction::make()
                         ->action(function (Collection $records) {
+                            // Same per-record re-check as DeleteBulkAction above, for forceDelete().
+                            $selectedCount = $records->count();
+                            $authorized = $records->filter(fn (Model $record) => Auth::user()?->can('forceDelete', $record));
+                            $skipped = $selectedCount - $authorized->count();
+
                             try {
-                                $records->each(fn (Model $record) => $record->forceDelete());
+                                $authorized->each(fn (Model $record) => $record->forceDelete());
                             } catch (QueryException $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title(__('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.error.title'))
                                     ->body(__('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.error.body'))
                                     ->send();
+
+                                return;
                             }
-                        })
-                        ->successNotification(
+
                             Notification::make()
                                 ->success()
-                                ->title(__('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.success.title'))
-                                ->body(__('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.success.body'))
-                        ),
+                                ->title($authorized->isEmpty() ? 'No employees permanently deleted' : __('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.success.title'))
+                                ->body($skipped > 0
+                                    ? "{$authorized->count()} of {$selectedCount} employee(s) permanently deleted. {$skipped} skipped -- you are not authorized to delete them individually."
+                                    : __('employees::filament/resources/employee.table.bulk-actions.force-delete.notification.success.body'))
+                                ->send();
+                        }),
                 ]),
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query->with(['categories']));
@@ -1710,28 +1780,32 @@ class EmployeeResource extends Resource
                                                         ->placeholder('—')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.identification-id-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('ssnid')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.ssnid'))
                                                         ->icon('heroicon-o-document-check')
                                                         ->placeholder('—')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.ssnid-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('sinid')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.sinid'))
                                                         ->placeholder('—')
                                                         ->icon('heroicon-o-document')
                                                         ->copyable()
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.sinid-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('passport_id')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.passport-id'))
                                                         ->icon('heroicon-o-identification')
                                                         ->copyable()
                                                         ->placeholder('—')
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.passport-id-copy-message'))
-                                                        ->copyMessageDuration(1500),
+                                                        ->copyMessageDuration(1500)
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
                                                     TextEntry::make('gender')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.gender'))
                                                         ->placeholder('—')

@@ -10,6 +10,7 @@ use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource\Pages\Edi
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource\Pages\ListBills;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource\Pages\ManagePayments;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource\Pages\ViewBill;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Livewire\InvoiceSummary;
 use Webkul\Accounting\Models\Bill;
 
@@ -54,6 +55,13 @@ class BillResource extends BaseBillResource
             EditBill::class,
             ManagePayments::class,
         ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

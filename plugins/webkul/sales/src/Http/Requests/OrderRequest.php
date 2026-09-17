@@ -4,6 +4,9 @@ namespace Webkul\Sale\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
+use Webkul\Account\Enums\TypeTaxUse;
 use Webkul\Product\Models\Product;
 
 class OrderRequest extends FormRequest
@@ -55,7 +58,13 @@ class OrderRequest extends FormRequest
             'lines.*.product_uom_id'        => ['nullable', 'integer', 'exists:unit_of_measures,id'],
             'lines.*.product_packaging_id'  => ['nullable', 'integer', 'exists:products_packagings,id'],
             'lines.*.taxes'                 => ['nullable', 'array'],
-            'lines.*.taxes.*'               => ['integer', 'exists:accounts_taxes,id'],
+            'lines.*.taxes.*'               => [
+                'integer',
+                Rule::exists('accounts_taxes', 'id')
+                    ->where('company_id', $this->input('company_id') ?? Auth::user()?->default_company_id)
+                    ->where('is_active', true)
+                    ->where('type_tax_use', TypeTaxUse::SALE->value),
+            ],
         ];
 
         return $rules;

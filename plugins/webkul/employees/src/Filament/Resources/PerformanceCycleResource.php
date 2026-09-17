@@ -70,7 +70,8 @@ class PerformanceCycleResource extends Resource
                 ->icon('heroicon-o-play')
                 ->color('success')
                 ->requiresConfirmation()
-                ->visible(fn (PerformanceCycle $record): bool => $record->status === 'draft')
+                ->visible(fn (PerformanceCycle $record): bool => $record->status === 'draft'
+                    && (bool) Auth::user()?->can(HrPermissions::ManagePerformance))
                 ->action(function (PerformanceCycle $record): void {
                     $count = app(PerformanceService::class)->launch($record, Auth::user())->count();
                     Notification::make()->success()->title("Performance cycle launched for {$count} employees")->send();
@@ -87,7 +88,9 @@ class PerformanceCycleResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(HrPermissions::ManagePerformance) ?? false;
+        $user = Auth::user();
+
+        return $user !== null && ($user->can(HrPermissions::ManagePerformance) || $user->can(HrPermissions::ViewPerformance));
     }
 
     public static function getPages(): array

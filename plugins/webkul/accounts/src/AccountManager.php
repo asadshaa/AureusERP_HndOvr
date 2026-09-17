@@ -57,15 +57,30 @@ class AccountManager
     {
         $this->isConfirmAllowedForMove($record);
 
+        $wasPostedBefore = $record->posted_before;
+
         $record->state = MoveState::POSTED;
 
         $record->posted_before = true;
 
         $record->save();
 
+        // Invoice-type moves don't have their balancing tax/payable/receivable
+        // lines yet at this point — computeAccountMove() (via syncDynamicLines())
+        // is what generates them. So the balance check has to run after this
+        // call, not before it, or every fresh invoice would look "unbalanced"
+        // and get rejected before the system ever gets to balance it.
         $record = $this->computeAccountMove($record);
 
         $record->refresh();
+
+        $totalBalance = $record->lines->sum(fn ($line) => (float) $line->balance);
+
+        if (! float_is_zero($totalBalance, precisionRounding: $record->currency->rounding)) {
+            $record->update(['state' => MoveState::DRAFT, 'posted_before' => $wasPostedBefore]);
+
+            throw new Exception(__('accounts::account-manager.post-action-validate.unbalanced-entry'));
+        }
 
         foreach ($record->lines as $line) {
             $line->update(['parent_state' => MoveState::POSTED]);
@@ -939,18 +954,30 @@ class AccountManager
                     ? $paymentRegister->payment_difference
                     : -$paymentRegister->payment_difference;
 
+                $writeOffBalance = $paymentRegister->currency->convert(
+                    $writeOffAmountCurrency,
+                    $paymentRegister->company->currency,
+                    $paymentRegister->company,
+                    $paymentRegister->payment_date
+                );
+
                 $paymentVals['write_off_line_vals'][] = [
                     'name'            => 'Write Off',
                     'account_id'      => $paymentRegister->writeoff_account_id,
                     'partner_id'      => $paymentRegister->partner_id,
                     'currency_id'     => $paymentRegister->currency_id,
                     'amount_currency' => $writeOffAmountCurrency,
-                    'balance'         => $paymentRegister->currency->convert(
-                        $writeOffAmountCurrency,
-                        $paymentRegister->company->currency,
-                        $paymentRegister->company,
-                        $paymentRegister->payment_date
-                    ),
+                    'balance'         => $writeOffBalance,
+                    // computeAccountMove() -> computeMoveLineTotals() runs
+                    // computeBalance() on every PRODUCT-classified line of the
+                    // move (which this line becomes, absent an explicit
+                    // display_type, same as the liquidity/counterpart lines
+                    // above) and for a non-invoice move that recomputes
+                    // balance as debit - credit. Without these set, that
+                    // recompute silently zeroes out the write-off amount and
+                    // posts an unbalanced entry.
+                    'debit'           => $writeOffBalance > 0.0 ? $writeOffBalance : 0.0,
+                    'credit'          => $writeOffBalance < 0.0 ? -$writeOffBalance : 0.0,
                 ];
             }
         }
@@ -1057,7 +1084,15 @@ class AccountManager
 
             $deltaBalance = $sourceBalance - $paymentBalance;
 
-            if ($paymentRegister->companyCurrency->isZero($deltaBalance)) {
+            // PaymentRegister has no companyCurrency relation (or backing
+            // column) at all, unlike MoveLine -- this always resolved to
+            // null here and crashed on the very first cross-currency
+            // payment that reached this branch. Falling back to
+            // company->currency mirrors the same defensive pattern already
+            // used for this exact accessor in MoveLine::computeReconciliationStatus().
+            $companyCurrency = $paymentRegister->companyCurrency ?? $paymentRegister->company->currency;
+
+            if ($companyCurrency->isZero($deltaBalance)) {
                 continue;
             }
 
@@ -2016,10 +2051,13 @@ class AccountManager
         foreach ($reverseMoves as $reverseMove) {
             foreach ($reverseMove->lines as $line) {
                 if ($reverseMove->move_type === MoveType::ENTRY || $line->display_type === DisplayType::COGS) {
-                    $line->update([
-                        'balance'         => -$line->balance,
-                        'amount_currency' => -$line->amount_currency,
-                    ]);
+                    $line->balance = -$line->balance;
+                    $line->amount_currency = -$line->amount_currency;
+                    // balance flipped sign above; debit/credit must be recomputed from
+                    // it or the reversal line keeps the original entry's debit/credit
+                    // values and reads as a duplicate instead of a cancellation.
+                    $line->computeCreditAndDebit();
+                    $line->save();
                 }
             }
         }
@@ -2081,6 +2119,41 @@ class AccountManager
 
         if (! $record->currency) {
             throw new Exception(__('accounts::account-manager.post-action-validate.currency-archived'));
+        }
+
+        if ($record->isSaleDocument(true)) {
+            $this->assertSalesTaxCompliance($record);
+        }
+    }
+
+    /**
+     * A company must never be charged with sales tax it isn't actually
+     * registered for, and a registered company must have its STRN on file
+     * before that registration can take effect on a real invoice. Only
+     * applies to sale-side documents (invoices/refunds/receipts the company
+     * itself issues) — a vendor bill's tax is the vendor's own registration
+     * to answer for, not this company's.
+     */
+    private function assertSalesTaxCompliance(AccountMove $record): void
+    {
+        $hasTaxedLine = $record->invoiceLines()->whereHas('taxes')->exists();
+
+        if (! $hasTaxedLine) {
+            return;
+        }
+
+        $company = $record->company;
+
+        if (! $company) {
+            return;
+        }
+
+        if (! $company->is_sales_tax_registered) {
+            throw new Exception(__('accounts::account-manager.post-action-validate.sales-tax-not-registered', ['company' => $company->name]));
+        }
+
+        if (blank($company->strn)) {
+            throw new Exception(__('accounts::account-manager.post-action-validate.strn-required', ['company' => $company->name]));
         }
     }
 

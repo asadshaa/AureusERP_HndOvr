@@ -144,24 +144,28 @@ class BankStatementImportService
                 'is_completed'            => false,
             ]);
 
-            $fsTagIndex = false;
+            $fsTagIndex = static::findFsTagColumnIndex($normalized->rawHeader);
 
-            foreach ($normalized->rawHeader as $headerRow) {
-                if (! is_array($headerRow)) {
-                    continue;
-                }
-
-                $index = array_search('FS Tag', $headerRow, true);
-
-                if ($index !== false) {
-                    $fsTagIndex = $index;
-                    break;
-                }
-            }
+            $seenFingerprints = [];
 
             foreach ($normalized->transactions as $sort => $transaction) {
                 $conversion = $conversions['transactions'][$sort];
                 $fingerprint = $transaction->fingerprint($normalized->bankAccountNumber);
+
+                // The validator already flagged a within-file duplicate as a soft,
+                // reviewable error (see $errors above) so the statement can still
+                // import, tagged ReconciliationFailed. But `bank_statement_lines`
+                // has a hard unique constraint on (statement_id,
+                // transaction_fingerprint), so inserting the second occurrence of
+                // the same fingerprint would throw and roll back everything
+                // imported so far. Skip creating a line for it — the duplicate is
+                // still visible to the user via the statement's validation_errors.
+                if (isset($seenFingerprints[$fingerprint])) {
+                    continue;
+                }
+
+                $seenFingerprints[$fingerprint] = true;
+
                 $originalSignedAmount = BigDecimal::of($transaction->credit)->minus($transaction->debit)->__toString();
                 $line = BankStatementLine::query()->create([
                     'sort'                    => $sort,
@@ -209,8 +213,9 @@ class BankStatementImportService
                     ? trim((string) ($transaction->rawRow[$fsTagIndex] ?? ''))
                     : '';
 
+                $fsTagService = app(FsTagService::class);
                 $fsTag = $fsTagCode !== ''
-                    ? app(FsTagService::class)->resolve($company->id, $fsTagCode)
+                    ? $fsTagService->resolve($company->id, $fsTagCode)
                     : null;
 
                 BankTransactionMapping::query()->create([
@@ -229,6 +234,14 @@ class BankStatementImportService
                     'fs_tag_id'            => $fsTag?->id,
                     'match_type'           => $fsTag ? 'fs_tag' : null,
 
+                    // The raw text the user actually typed is kept even when it
+                    // doesn't resolve, and paired with a plain-language reason, so
+                    // the review grid can show *why* a tag wasn't applied instead
+                    // of an unhelpful blank cell that reads the same as "nothing
+                    // was entered".
+                    'fs_tag_raw_code'      => $fsTagCode !== '' ? $fsTagCode : null,
+                    'fs_tag_issue'         => $fsTag ? null : $fsTagService->diagnose($company->id, $fsTagCode),
+
                     'review_status'        => $fsTagCode !== '' && ! $fsTag
                         ? BankReviewStatus::NeedsReview
                         : BankReviewStatus::Unmapped,
@@ -239,6 +252,32 @@ class BankStatementImportService
 
             return $statement->fresh(['lines.mapping']);
         });
+    }
+
+    /**
+     * Locate the "FS Tag" column in a parsed statement's raw header rows,
+     * tolerating case, surrounding whitespace, and separator differences
+     * (e.g. "fs tag", "FS_Tag", "FS-TAG", "FSTag" all match). Returns the
+     * column index, or false if no header row contains anything recognizable
+     * as an FS Tag column.
+     */
+    public static function findFsTagColumnIndex(array $rawHeader): int|false
+    {
+        foreach ($rawHeader as $headerRow) {
+            if (! is_array($headerRow)) {
+                continue;
+            }
+
+            foreach ($headerRow as $index => $cell) {
+                $normalized = preg_replace('/[\s_-]+/', '', mb_strtoupper(trim((string) $cell)));
+
+                if ($normalized === 'FSTAG') {
+                    return $index;
+                }
+            }
+        }
+
+        return false;
     }
 
     protected function assertTarget(Company $company, Journal $journal, Account $bankGlAccount, Currency $currency): void

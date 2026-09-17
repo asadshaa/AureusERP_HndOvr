@@ -613,7 +613,8 @@ class PaymentRegister extends Model
                         $amountResidualCurrency,
                         $this->company->currency,
                         $this->company,
-                        $this->payment_date
+                        $this->payment_date,
+                        strict: true,
                     );
             }
 
@@ -622,7 +623,8 @@ class PaymentRegister extends Model
                     $amountResidual,
                     $this->currency,
                     $this->company,
-                    $this->payment_date
+                    $this->payment_date,
+                    strict: true,
                 );
         }, 0.0);
     }

@@ -107,3 +107,33 @@ it('rejects wrong-company actors and requires matching thresholds and conditions
     expect($request->status)->toBe('rejected')
         ->and($request->decisions->first()->reason)->toBe('Supporting evidence is incomplete.');
 });
+
+it('refuses a second submission for the same subject while one is already pending instead of silently discarding it', function (): void {
+    $fixture = approvalEngineFixture();
+    $engine = app(ApprovalEngine::class);
+    $first = $engine->submit(
+        $fixture['company'],
+        $fixture['requester'],
+        'journal_posting',
+        '2500.0000',
+        ['company_id' => $fixture['company']->id, 'department' => 'Operations'],
+    );
+
+    // Before the fix, a second submit() for the same subject/type/company while
+    // one is still pending silently returned $first untouched — this new
+    // context (a different amount) was dropped with no error and no trace.
+    expect(fn () => $engine->submit(
+        $fixture['company'],
+        $fixture['requester'],
+        'journal_posting',
+        '9000.0000',
+        ['company_id' => $fixture['company']->id, 'department' => 'Operations'],
+    ))->toThrow(RuntimeException::class, 'already exists');
+
+    expect(\Webkul\Support\Models\ApprovalRequest::query()
+        ->where('subject_type', $fixture['company']->getMorphClass())
+        ->where('subject_id', $fixture['company']->id)
+        ->where('request_type', 'journal_posting')
+        ->count())->toBe(1)
+        ->and($first->fresh()->amount)->toBe('2500.0000');
+});

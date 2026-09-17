@@ -26,6 +26,9 @@ class CandidateConversionService
 
                 return $employee;
             }
+            if ($application->refuse_reason_id) {
+                throw new RuntimeException('This application was rejected and cannot be converted to an employee.');
+            }
             if ((int) $candidate->company_id !== (int) $application->company_id) {
                 throw new RuntimeException('Candidate and application companies do not match.');
             }

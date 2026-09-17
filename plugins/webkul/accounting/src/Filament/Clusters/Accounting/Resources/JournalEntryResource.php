@@ -69,6 +69,7 @@ use Webkul\Accounting\Filament\Clusters\Customers\Resources\PaymentResource\Page
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\ViewPayment as VendorViewPayment;
 use Webkul\Accounting\Filament\Exports\JournalEntryExporter;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Models\JournalEntry;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
@@ -730,7 +731,17 @@ class JournalEntryResource extends Resource
                     ->disabled(fn ($record) => in_array($record?->parent_state, [MoveState::POSTED, MoveState::CANCEL])),
                 Select::make('taxes')
                     ->label(__('accounting::filament/clusters/accounting/resources/journal-entry.form.tabs.lines.repeater.fields.taxes'))
-                    ->relationship('taxes', 'name')
+                    ->relationship(
+                        'taxes',
+                        'name',
+                        modifyQueryUsing: fn (Builder $query, Get $get, ?Model $record) => Tax::scopeTaxQuery(
+                            $query,
+                            $get('../../company_id') ?? $get('company_id') ?? Auth::user()?->default_company_id,
+                            null,
+                            $record?->taxes()->pluck('accounts_taxes.id')->map(fn ($id) => (int) $id)->all() ?? [],
+                        ),
+                    )
+                    ->rules([Tax::taxValidationRule(null)])
                     ->getOptionLabelFromRecordUsing(function ($record): string {
                         return $record->name.' ('.$record->type_tax_use->getLabel().')';
                     })
@@ -1082,6 +1093,13 @@ class JournalEntryResource extends Resource
         }
 
         return $navigationItems;
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

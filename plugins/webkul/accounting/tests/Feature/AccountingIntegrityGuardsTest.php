@@ -435,8 +435,21 @@ it('clears fs_tag_id when matching an open obligation to prevent tag carryover t
         'parent_state' => MoveState::POSTED->value,
     ]);
 
-    // Create bank statement line with reference INV-MATCH-888
+    // Create bank statement line with reference INV-MATCH-888. The shared
+    // helper defaults to a debit (money out) line; this test is matching a
+    // receivable (money owed to us), so it needs to be a credit (money in)
+    // -- otherwise the direction check correctly refuses the match.
     $stmtLine = createIntegrityStatementLine($fixture, 'INV-MATCH-888');
+    $stmtLine->update([
+        'debit'                  => 0,
+        'credit'                 => 100,
+        'original_debit'         => 0,
+        'original_credit'        => 100,
+        'original_signed_amount' => 100,
+        'company_debit'          => 0,
+        'company_credit'         => 100,
+        'company_signed_amount'  => 100,
+    ]);
     $mapping = BankTransactionMapping::query()->create([
         'company_id'          => $fixture['company']->id,
         'statement_line_id'   => $stmtLine->id,

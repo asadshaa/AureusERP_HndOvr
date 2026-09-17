@@ -29,18 +29,38 @@ class EmployeeFactory extends Factory
      */
     public function definition(): array
     {
+        // Created once, eagerly, and reused below -- not left as independent
+        // Company::factory() references on department_id/job_id/
+        // work_location_id/user_id, which each used to resolve to their OWN
+        // random company. That made a bare Employee::factory()->create()
+        // structurally invalid the moment Employee::boot() started
+        // enforcing "every hierarchy relationship must share the employee's
+        // company" (see Employee::assertHierarchyIsSameCompany()) -- and
+        // several OTHER plugins' factories (DepartmentFactory::manager_id,
+        // time-off's Leave/LeaveAllocation, recruitments' Candidate/
+        // JobPosition) create an Employee this same bare way.
+        $company = Company::factory()->create();
+
         return [
-            'company_id'                     => Company::factory(),
-            'user_id'                        => User::query()->value('id') ?? User::factory(),
+            'company_id'                     => $company->id,
+            'user_id'                        => User::factory()->create(['default_company_id' => $company->id])->id,
             'creator_id'                     => User::query()->value('id') ?? User::factory(),
             'calendar_id'                    => null,
-            'department_id'                  => Department::factory(),
+            // manager_id: null overrides DepartmentFactory's own default
+            // (Employee::factory()) -- left unoverridden, it recurses
+            // straight back into this same definition().
+            'department_id'                  => Department::factory()->create(['company_id' => $company->id, 'manager_id' => null])->id,
             'attendance_manager_id'          => User::query()->value('id') ?? User::factory(),
-            'job_id'                         => EmployeeJobPosition::factory(),
+            // department_id: null for the identical reason -- EmployeeJobPositionFactory's
+            // own default is Department::factory() (-> manager_id -> Employee::factory()).
+            'job_id'                         => EmployeeJobPosition::factory()->create(['company_id' => $company->id, 'department_id' => null])->id,
             'partner_id'                     => null,
-            'work_location_id'               => WorkLocation::factory(),
-            'parent_id'                      => User::query()->value('id') ?? User::factory(),
-            'coach_id'                       => User::query()->value('id') ?? User::factory(),
+            // location_type: WorkLocationFactory's own default is fake()->word, which is
+            // not constrained to the WorkLocation enum's actual cases (home/office/other)
+            // -- an unrelated pre-existing bug, sidestepped here rather than fixed.
+            'work_location_id'               => WorkLocation::factory()->create(['company_id' => $company->id, 'location_type' => 'office'])->id,
+            'parent_id'                      => null,
+            'coach_id'                       => null,
             'country_id'                     => Country::factory(),
             'private_state_id'               => State::factory(),
             'private_country_id'             => Country::factory(),

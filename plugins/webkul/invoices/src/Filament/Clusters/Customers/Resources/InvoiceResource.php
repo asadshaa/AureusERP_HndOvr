@@ -6,6 +6,7 @@ use Filament\Actions\Action;
 use Filament\Resources\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Webkul\Account\Filament\Resources\InvoiceResource as BaseInvoiceResource;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Invoice\Filament\Clusters\Customers;
 use Webkul\Invoice\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\CreateInvoice;
 use Webkul\Invoice\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\EditInvoice;
@@ -68,6 +69,13 @@ class InvoiceResource extends BaseInvoiceResource
                     ->openUrlInNewTab()
                     ->visible(fn (array $arguments, Get $get): bool => filled($get("products.{$arguments['item']}.product_id"))),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

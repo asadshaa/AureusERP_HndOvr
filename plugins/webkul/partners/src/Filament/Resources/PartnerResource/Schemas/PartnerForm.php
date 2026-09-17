@@ -8,6 +8,7 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
@@ -123,8 +124,18 @@ class PartnerForm
                     ->schema([
                         TextInput::make('tax_id')
                             ->label(__('partners::filament/resources/partner.form.sections.general.fields.tax-id'))
+                            ->helperText('NTN or other national tax identity number. This does not, by itself, register the partner for sales tax.')
                             ->placeholder('e.g. 29ABCDE1234F1Z5')
                             ->maxLength(255),
+                        Toggle::make('is_sales_tax_registered')
+                            ->label('Registered for sales tax')
+                            ->live()
+                            ->default(false),
+                        TextInput::make('strn')
+                            ->label('STRN')
+                            ->helperText('Sales Tax Registration Number. You can save without it while registration is in progress, but this partner cannot be used on a taxed invoice until it\'s filled in.')
+                            ->maxLength(255)
+                            ->visible(fn (Get $get): bool => (bool) $get('is_sales_tax_registered')),
                         TextInput::make('job_title')
                             ->label(__('partners::filament/resources/partner.form.sections.general.fields.job-title'))
                             ->placeholder('e.g. CEO')

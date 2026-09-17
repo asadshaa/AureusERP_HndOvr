@@ -117,7 +117,7 @@ class EditApplicant extends EditRecord
                 ->activityPlans($this->getRecord()->activityPlans()),
             Action::make('createEmployee')
                 ->label(__('recruitments::filament/clusters/applications/resources/applicant/pages/edit-applicant.create-employee'))
-                ->hidden(fn ($record) => $record->application_status->value == ApplicationStatus::HIRED->value || $record->candidate->employee_id)
+                ->hidden(fn ($record) => $record->application_status->value == ApplicationStatus::HIRED->value || $record->candidate->employee_id || $record->refuse_reason_id)
                 ->action(function (Applicant $record) {
                     $employee = $record->createEmployee();
 
@@ -211,6 +211,14 @@ class EditApplicant extends EditRecord
 
     protected function afterSave(): void
     {
+        // handleApplicationUpdation() on the model computes these onto
+        // $this->record (a transient, non-persisted property -- see
+        // Applicant::$notificationData/$interviewerChanges), not onto this
+        // page. This page's own same-named properties are a separate,
+        // always-empty object and were never actually populated.
+        $this->notificationData = $this->record->notificationData;
+        $this->interviewerChanges = $this->record->interviewerChanges;
+
         if (! empty($this->notificationData)) {
             $this->sendApplicationConfirmationNotification();
         }

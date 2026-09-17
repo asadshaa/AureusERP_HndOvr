@@ -2,10 +2,13 @@
 
 namespace Webkul\Account\Models;
 
+use Closure;
 use Exception;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Spatie\EloquentSortable\Sortable;
 use Spatie\EloquentSortable\SortableTrait;
@@ -63,6 +66,97 @@ class Tax extends Model implements Sortable
     public function company()
     {
         return $this->belongsTo(Company::class, 'company_id');
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('is_active', true);
+    }
+
+    public function scopeForCompany(Builder $query, ?int $companyId): Builder
+    {
+        if (! $companyId) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('company_id', $companyId);
+    }
+
+    public static function scopeTaxQuery(
+        Builder $query,
+        ?int $companyId,
+        ?TypeTaxUse $typeTaxUse = null,
+        array $existingTaxIds = [],
+    ): Builder {
+        $query->forCompany($companyId)
+            ->where(function (Builder $q) use ($existingTaxIds) {
+                $q->active();
+
+                if (! empty($existingTaxIds)) {
+                    $q->orWhereIn('accounts_taxes.id', $existingTaxIds);
+                }
+            });
+
+        if ($typeTaxUse) {
+            $query->where('accounts_taxes.type_tax_use', $typeTaxUse);
+        }
+
+        return $query;
+    }
+
+    public static function taxValidationRule(?TypeTaxUse $expectedType = null): Closure
+    {
+        return function ($get, ?Model $record = null) use ($expectedType) {
+            return function (string $attribute, mixed $value, Closure $fail) use ($get, $record, $expectedType): void {
+                $taxIds = array_filter(Arr::wrap($value));
+
+                if (empty($taxIds)) {
+                    return;
+                }
+
+                $companyId = is_callable($get)
+                    ? ($get('../../company_id') ?? $get('company_id') ?? Auth::user()?->default_company_id)
+                    : Auth::user()?->default_company_id;
+
+                if (! $companyId) {
+                    $fail(__('The company context is missing.'));
+
+                    return;
+                }
+
+                $user = Auth::user();
+
+                if ($user) {
+                    $authorized = (int) $user->default_company_id === (int) $companyId
+                        || $user->allowedCompanies()->where('companies.id', $companyId)->exists();
+
+                    if (! $authorized) {
+                        $fail(__('The selected company is not authorized.'));
+
+                        return;
+                    }
+                }
+
+                $existingTaxIds = $record && $record->exists && method_exists($record, 'taxes')
+                    ? $record->taxes()->pluck('accounts_taxes.id')->map(fn ($id) => (int) $id)->all()
+                    : [];
+
+                $validTaxesQuery = static::query();
+
+                static::scopeTaxQuery($validTaxesQuery, (int) $companyId, $expectedType, $existingTaxIds);
+
+                $validTaxIds = $validTaxesQuery->whereIn('accounts_taxes.id', $taxIds)
+                    ->pluck('accounts_taxes.id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                $invalidTaxIds = array_diff(array_map('intval', $taxIds), $validTaxIds);
+
+                if (! empty($invalidTaxIds)) {
+                    $fail(__('The selected tax is invalid, inactive, or belongs to another company.'));
+                }
+            };
+        };
     }
 
     public function taxGroup()

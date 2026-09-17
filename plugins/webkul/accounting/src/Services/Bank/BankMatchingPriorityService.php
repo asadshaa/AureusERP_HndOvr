@@ -30,6 +30,13 @@ final class BankMatchingPriorityService
             ->whereIn('review_status', [BankReviewStatus::Unmapped, BankReviewStatus::Suggested, BankReviewStatus::NeedsReview])
             ->get();
 
+        // Documents and payments claimed by an earlier mapping in this same
+        // run must not be offered again to a later one -- otherwise two bank
+        // lines can both independently see the same open invoice or payment
+        // as their unique match and both get suggested against it.
+        $claimedMoveIds = [];
+        $claimedPaymentIds = [];
+
         foreach ($mappings as $mapping) {
             $reference = trim((string) ($mapping->statementLine?->reference ?: $mapping->statementLine?->payment_reference));
             $description = trim((string) $mapping->statementLine?->description);
@@ -37,11 +44,22 @@ final class BankMatchingPriorityService
                 continue;
             }
 
+            // A bank credit (money in) can only settle a receivable -- someone
+            // paying us -- and a bank debit (money out) can only settle a
+            // payable -- us paying someone. Without this, an incoming customer
+            // payment could get suggested against an outstanding vendor bill.
+            $direction = BigDecimal::of((string) ($mapping->statementLine?->original_credit ?? $mapping->statementLine?->credit ?? '0'))->isPositive()
+                ? 'credit'
+                : 'debit';
+            $expectedAccountType = $direction === 'credit' ? 'asset_receivable' : 'liability_payable';
+
             $moves = Move::query()
                 ->where('company_id', $companyId)
                 ->where('state', 'posted')
                 ->where('amount_residual', '>', 0)
                 ->where('currency_id', $mapping->statementLine?->original_currency_id)
+                ->whereNotIn('id', $claimedMoveIds)
+                ->whereHas('lines.account', fn ($query) => $query->where('account_type', $expectedAccountType))
                 ->where(function ($query) use ($reference, $description): void {
                     if ($reference !== '') {
                         $query->where('reference', $reference)
@@ -77,7 +95,7 @@ final class BankMatchingPriorityService
 
             $move = $moves->first();
             if ($move) {
-                $accountId = $move->lines->first(fn ($line) => in_array($line->account?->account_type?->value, ['asset_receivable', 'liability_payable'], true))?->account_id;
+                $accountId = $move->lines->first(fn ($line) => $line->account?->account_type?->value === $expectedAccountType)?->account_id;
                 $matchedReference = collect([
                     $move->reference,
                     $move->payment_reference,
@@ -97,12 +115,14 @@ final class BankMatchingPriorityService
                     'suggestion_explanation' => 'A unique open document matched by invoice, booking or consolidated reference and compatible amount.',
                 ]);
                 $obligations++;
+                $claimedMoveIds[] = $move->id;
 
                 continue;
             }
 
             $paymentQuery = Payment::query()
                 ->where('company_id', $companyId)
+                ->whereNotIn('id', $claimedPaymentIds)
                 ->where(fn ($query) => $query->where('payment_reference', $reference)->orWhere('name', $reference)->orWhere('memo', $reference));
             $paymentMatches = $reference === ''
                 ? collect()
@@ -132,6 +152,7 @@ final class BankMatchingPriorityService
                     'confidence'        => 1, 'suggestion_explanation' => "Exact payment reference {$reference} and amount matched.",
                 ]);
                 $payments++;
+                $claimedPaymentIds[] = $payment->id;
             }
         }
 

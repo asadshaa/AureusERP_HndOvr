@@ -1,0 +1,27 @@
+<?php
+
+return [
+    'uploaded'               => 'Uploaded',
+    'version-added'          => 'New version added',
+    'attached'               => 'Attached to record',
+    'detached'               => 'Detached from record',
+    'viewed'                 => 'Viewed',
+    'downloaded'             => 'Downloaded',
+    'archived'               => 'Archived',
+    'restored'               => 'Restored',
+    'access-denied'          => 'Access denied',
+    'drive-exported'         => 'Exported to Google Drive',
+    'drive-sync-failed'      => 'Google Drive sync failed',
+    'transfer-sent'          => 'Transfer sent',
+    'transfer-delivered'     => 'Transfer delivered',
+    'transfer-cancelled'     => 'Transfer cancelled',
+    'peer-paired'            => 'Peer paired',
+    'peer-revoked'           => 'Peer revoked',
+    'transmission-sent'      => 'Sent to peer',
+    'transmission-delivered' => 'Delivered to peer',
+    'transmission-failed'    => 'Delivery failed',
+    'transmission-received'  => 'Received from peer',
+    'transmission-accepted'  => 'Inbound accepted',
+    'transmission-rejected'  => 'Inbound rejected',
+    'peer-auth-failed'       => 'Peer authentication failed',
+];

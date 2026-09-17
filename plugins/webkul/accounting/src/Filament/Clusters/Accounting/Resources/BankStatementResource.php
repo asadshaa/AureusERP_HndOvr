@@ -2,6 +2,9 @@
 
 namespace Webkul\Accounting\Filament\Clusters\Accounting\Resources;
 
+use Filament\Actions\ViewAction;
+use Filament\Infolists\Components\IconEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -11,6 +14,8 @@ use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\BankStatement;
 use Webkul\Accounting\Filament\Clusters\Accounting;
 use Webkul\Accounting\Filament\Clusters\Accounting\Resources\BankStatementResource\Pages\ListBankStatements;
+use Webkul\Accounting\Filament\Clusters\Accounting\Resources\BankStatementResource\Pages\ViewBankStatement;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Support\AccountingPermissions;
 
 class BankStatementResource extends Resource
@@ -55,7 +60,40 @@ class BankStatementResource extends Resource
             IconColumn::make('is_completed')->label('Posted/closed')->boolean(),
             TextColumn::make('original_filename')->label('File')->toggleable(),
             TextColumn::make('file_hash')->label('SHA-256')->limit(12)->tooltip(fn (BankStatement $record) => $record->file_hash)->toggleable(isToggledHiddenByDefault: true),
-        ])->defaultSort('statement_end_date', 'desc');
+        ])
+            ->recordActions([
+                ViewAction::make(),
+            ])
+            ->defaultSort('statement_end_date', 'desc');
+    }
+
+    /**
+     * Shared with ViewBankStatement -- the statement's own recorded
+     * filename/hash prove a file WAS imported and check it hasn't changed
+     * since; they don't let anyone actually open that original file again.
+     * The Supporting documents relation manager below is where the real,
+     * downloadable copy (the bank's own PDF/CSV export) lives.
+     */
+    public static function infolistSchema(): array
+    {
+        return [
+            TextEntry::make('bank_name')->label('Bank'),
+            TextEntry::make('bank_account_number')->label('Account / IBAN'),
+            TextEntry::make('statement_start_date')->label('From')->date(),
+            TextEntry::make('statement_end_date')->label('To')->date(),
+            TextEntry::make('opening_balance')->money(fn (BankStatement $record) => $record->currency?->name ?? 'PKR'),
+            TextEntry::make('closing_balance')->money(fn (BankStatement $record) => $record->currency?->name ?? 'PKR'),
+            TextEntry::make('original_filename')->label('Imported file'),
+            TextEntry::make('file_hash')->label('Imported file SHA-256'),
+            IconEntry::make('is_completed')->label('Posted/closed')->boolean(),
+        ];
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function canCreate(): bool
@@ -70,6 +108,9 @@ class BankStatementResource extends Resource
 
     public static function getPages(): array
     {
-        return ['index' => ListBankStatements::route('/')];
+        return [
+            'index' => ListBankStatements::route('/'),
+            'view'  => ViewBankStatement::route('/{record}'),
+        ];
     }
 }

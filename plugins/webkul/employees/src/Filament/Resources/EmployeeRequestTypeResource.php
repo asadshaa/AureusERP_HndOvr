@@ -49,10 +49,26 @@ class EmployeeRequestTypeResource extends Resource
             TextInput::make('code')->required()->maxLength(80),
             TextInput::make('name')->required()->maxLength(255),
             Select::make('category')->options([
-                'reimbursement' => 'Reimbursement', 'expense_claim' => 'Expense claim',
-                'travel'        => 'Travel', 'salary_advance' => 'Salary advance', 'loan' => 'Employee loan',
-                'equipment'     => 'Equipment / asset', 'document' => 'Document / certificate',
-                'correction'    => 'Correction', 'leave' => 'Leave-related', 'custom' => 'Custom',
+                'travel_entertainment'   => 'Travel & Entertainment',
+                'professional_services'  => 'Professional Services',
+                'tech'                   => 'Tech',
+                'digital_marketing'      => 'Digital Marketing',
+                'returns_waivers'        => 'Returns and Waivers',
+                'financial_provisions'   => 'Financial Provisions',
+                'people'                 => 'People',
+                'real_estate'            => 'Real Estate',
+                'others'                 => 'Others',
+                'attendance_time_change' => 'Attendance Time Change',
+                'reimbursement'          => 'Reimbursement',
+                'expense_claim'          => 'Expense claim',
+                'travel'                 => 'Travel',
+                'salary_advance'         => 'Salary advance',
+                'loan'                   => 'Employee loan',
+                'equipment'              => 'Equipment / asset',
+                'document'               => 'Document / certificate',
+                'correction'             => 'Correction',
+                'leave'                  => 'Leave-related',
+                'custom'                 => 'Custom',
             ])->default('custom')->required(),
             TextInput::make('approval_request_type')
                 ->helperText('Must match an active shared Approval Workflow request type.')
@@ -101,7 +117,9 @@ class EmployeeRequestTypeResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(HrPermissions::ManageEmployeeRequests) ?? false;
+        $user = Auth::user();
+
+        return $user !== null && ($user->can(HrPermissions::ManageEmployeeRequests) || $user->can(HrPermissions::ViewEmployeeRequestTypes));
     }
 
     public static function getPages(): array

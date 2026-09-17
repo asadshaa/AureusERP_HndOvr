@@ -116,6 +116,35 @@ final class FsTagService
         return FsTag::query()->whereRaw('UPPER(code) = ?', [$normalized])->exists();
     }
 
+    /**
+     * Explain, in plain language, why a raw FS Tag code from an imported file
+     * did not resolve to an active tag for this company. Returns null only
+     * when the code is blank — there is nothing to explain.
+     */
+    public function diagnose(int $companyId, string $code): ?string
+    {
+        $normalized = mb_strtoupper(trim($code));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $retiredForThisCompany = FsTag::query()
+            ->where('company_id', $companyId)
+            ->whereRaw('UPPER(code) = ?', [$normalized])
+            ->where('is_active', false)
+            ->exists();
+
+        if ($retiredForThisCompany) {
+            return "Tag code \"{$code}\" has been retired for this company. Reactivate it under FS Tag settings, or use a different code.";
+        }
+
+        if ($this->existsForAnyCompany($code)) {
+            return "Tag code \"{$code}\" belongs to a different company. Add a matching tag for this company under FS Tag settings.";
+        }
+
+        return "Tag code \"{$code}\" isn't set up yet. Check the spelling, or add it under FS Tag settings.";
+    }
+
     private function nextCode(Company $company): string
     {
         $next = ((int) FsTag::query()->where('company_id', $company->id)->max('id')) + 1;

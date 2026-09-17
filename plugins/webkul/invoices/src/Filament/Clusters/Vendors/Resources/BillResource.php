@@ -6,6 +6,7 @@ use Filament\Actions\Action;
 use Filament\Resources\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Webkul\Account\Filament\Resources\BillResource as BaseBillResource;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Invoice\Filament\Clusters\Vendors;
 use Webkul\Invoice\Filament\Clusters\Vendors\Resources\BillResource\Pages\CreateBill;
 use Webkul\Invoice\Filament\Clusters\Vendors\Resources\BillResource\Pages\EditBill;
@@ -79,6 +80,13 @@ class BillResource extends BaseBillResource
                         fn (array $arguments, Get $get): bool => filled($get("products.{$arguments['item']}.product_id"))
                     ),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

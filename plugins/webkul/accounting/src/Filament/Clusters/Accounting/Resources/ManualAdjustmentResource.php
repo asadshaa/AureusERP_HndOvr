@@ -165,10 +165,40 @@ class ManualAdjustmentResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return Auth::user()?->can(AccountingPermissions::ManageManualAdjustments) ?? false;
+        $user = Auth::user();
+
+        // ManageManualAdjustments alone used to gate this -- meaning
+        // there was no way to grant a role (e.g. Internal Auditor, VP
+        // Finance, CFO) read-only visibility without also handing it
+        // Edit/Submit-for-approval access. ViewManualAdjustments closes
+        // that gap without widening what ManageManualAdjustments-holders
+        // can already do.
+        return $user !== null && ($user->can(AccountingPermissions::ManageManualAdjustments)
+            || $user->can(AccountingPermissions::ViewManualAdjustments));
     }
 
     public static function canCreate(): bool
+    {
+        return Auth::user()?->can(AccountingPermissions::ManageManualAdjustments) ?? false;
+    }
+
+    /**
+     * There is no Policy class for ManualAdjustment, and Filament allows
+     * an action by default when nothing gates it -- so canEdit()/
+     * canDelete() were previously wide open to ANY authenticated user
+     * navigating directly to the edit URL, completely bypassing the
+     * EditAction button's own ->authorize(ManageManualAdjustments) check
+     * on the list. Found live during manual testing (a read-only VP
+     * Finance test user could open a real edit form). Company scoping on
+     * getEloquentQuery() already prevents cross-company access; this
+     * closes the same-company over-permission gap.
+     */
+    public static function canEdit($record): bool
+    {
+        return Auth::user()?->can(AccountingPermissions::ManageManualAdjustments) ?? false;
+    }
+
+    public static function canDelete($record): bool
     {
         return Auth::user()?->can(AccountingPermissions::ManageManualAdjustments) ?? false;
     }

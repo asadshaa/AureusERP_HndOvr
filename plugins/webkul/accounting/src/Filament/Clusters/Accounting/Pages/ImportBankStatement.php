@@ -18,9 +18,11 @@ use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Models\Account;
+use Webkul\Account\Models\BankStatement;
 use Webkul\Account\Models\Journal;
 use Webkul\Accounting\Enums\BankImportStatus;
 use Webkul\Accounting\Filament\Clusters\Accounting;
+use Webkul\Accounting\Models\FsTag;
 use Webkul\Accounting\Services\Account\CanonicalAccountCreationService;
 use Webkul\Accounting\Services\Bank\BankJournalCreationService;
 use Webkul\Accounting\Services\Bank\BankStatementImportService;
@@ -335,10 +337,23 @@ class ImportBankStatement extends Page implements HasForms
                         );
 
                         $failed = $statement->import_status === BankImportStatus::ReconciliationFailed->value;
+                        $fsTagNote = $this->summarizeFsTagIssues($statement);
+                        $needsAttention = $failed || $fsTagNote !== null;
+
+                        $body = $failed
+                            ? collect($statement->validation_errors)->pluck('message')->implode(' ')
+                            : "{$statement->lines->count()} transactions imported as unposted mappings.";
+
+                        if ($fsTagNote !== null) {
+                            $body .= ' '.$fsTagNote;
+                        }
+
                         Notification::make()
-                            ->title($failed ? 'Imported for review — reconciliation failed' : 'Bank statement validated and imported')
-                            ->body($failed ? collect($statement->validation_errors)->pluck('message')->implode(' ') : "{$statement->lines->count()} transactions imported as unposted mappings.")
-                            ->{$failed ? 'warning' : 'success'}()
+                            ->title($failed
+                                ? 'Imported for review — reconciliation failed'
+                                : ($fsTagNote !== null ? 'Imported — some FS Tags need attention' : 'Bank statement validated and imported'))
+                            ->body($body)
+                            ->{$needsAttention ? 'warning' : 'success'}()
                             ->persistent()
                             ->send();
                     } catch (\Throwable $exception) {
@@ -346,5 +361,40 @@ class ImportBankStatement extends Page implements HasForms
                     }
                 }),
         ];
+    }
+
+    /**
+     * Plain-language summary of anything wrong with FS Tags on this import,
+     * shown right in the import notification instead of leaving the user to
+     * discover it later on the Bank Transaction Mapping screen. Returns null
+     * when there is nothing worth mentioning.
+     */
+    private function summarizeFsTagIssues(BankStatement $statement): ?string
+    {
+        $company = $statement->company;
+
+        // If this company has never set up any FS Tags, it isn't using the
+        // feature — a missing column is expected, not a mistake, so stay
+        // quiet rather than warn about something the user never intended.
+        $usesFsTags = $company && FsTag::query()->where('company_id', $company->id)->exists();
+
+        if ($usesFsTags && BankStatementImportService::findFsTagColumnIndex($statement->raw_header ?? []) === false) {
+            return 'No "FS Tag" column was recognized in this file, so none of these transactions were tagged. '
+                .'If the file has one, check its header spelling.';
+        }
+
+        $unrecognized = $statement->lines
+            ->pluck('mapping')
+            ->filter(fn ($mapping) => $mapping && $mapping->fs_tag_id === null && $mapping->fs_tag_raw_code !== null);
+
+        if ($unrecognized->isEmpty()) {
+            return null;
+        }
+
+        $examples = $unrecognized->pluck('fs_tag_raw_code')->unique()->take(3)->implode('", "');
+        $count = $unrecognized->count();
+        $plural = $count === 1 ? 'transaction has' : 'transactions have';
+
+        return "{$count} {$plural} an FS Tag we didn't recognize (e.g. \"{$examples}\") — open Bank Transaction Mapping to review and fix them.";
     }
 }

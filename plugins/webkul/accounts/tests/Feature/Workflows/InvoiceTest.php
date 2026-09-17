@@ -471,6 +471,31 @@ it('writes off the shortfall and marks the invoice paid when the difference is r
         ->and((float) abs($invoice->amount_residual))->toBe(0.0);
 });
 
+it('keeps the payment journal entry balanced when a shortfall is written off', function () {
+    $invoice = AccountHelper::invoice(MoveType::OUT_INVOICE, $this->partner);
+    AccountHelper::productLine($invoice, $this->income, qty: 2, priceUnit: 100);
+    AccountHelper::post($invoice);
+
+    AccountHelper::pay($invoice, amount: 190, differenceHandling: 'reconcile');
+
+    $paymentMove = \Webkul\Account\Models\Move::query()
+        ->where('origin_payment_id', '!=', null)
+        ->latest('id')
+        ->first();
+
+    expect($paymentMove)->not->toBeNull();
+
+    // The write-off line must actually carry its amount through to
+    // debit/credit, not just `balance` — otherwise the move posts with
+    // total debit != total credit.
+    $totalBalance = (float) $paymentMove->lines->sum(fn ($l) => (float) $l->balance);
+    $totalDebit = (float) $paymentMove->lines->sum(fn ($l) => (float) $l->debit);
+    $totalCredit = (float) $paymentMove->lines->sum(fn ($l) => (float) $l->credit);
+
+    expect($totalBalance)->toBe(0.0)
+        ->and($totalDebit)->toBe($totalCredit);
+});
+
 it('keeps section and note lines through post without affecting the balance', function () {
     $invoice = AccountHelper::invoice(MoveType::OUT_INVOICE, $this->partner);
     AccountHelper::displayLine($invoice, DisplayType::LINE_SECTION, 'Services');

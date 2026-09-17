@@ -62,6 +62,24 @@ class EmployeeRequestType extends Model
         return $this->hasMany(EmployeeRequest::class, 'request_type_id');
     }
 
+    /**
+     * Per-type "nature of expense" options, admin-configured through the
+     * existing generic `configuration` KeyValue field rather than a new
+     * table -- e.g. configuration: {"expense_natures": "Team event, Gift, Training"}.
+     * Nothing read this column before Section 8; it was write-only.
+     *
+     * @return array<int, string>
+     */
+    public function getExpenseNatures(): array
+    {
+        $raw = data_get($this->configuration, 'expense_natures', []);
+        if (is_string($raw)) {
+            $raw = array_map('trim', explode(',', $raw));
+        }
+
+        return array_values(array_filter($raw, fn ($value): bool => filled($value)));
+    }
+
     protected static function booted(): void
     {
         static::creating(function (self $type): void {

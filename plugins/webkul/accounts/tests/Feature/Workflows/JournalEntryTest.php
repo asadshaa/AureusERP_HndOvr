@@ -50,9 +50,43 @@ it('keeps a manual journal entry balanced so total debit equals total credit', f
         ->and((float) $lines->sum(fn ($l) => (float) $l->credit))->toBe(100.0);
 });
 
+it('refuses to post a manual journal entry whose lines do not balance', function () {
+    $entry = AccountHelper::journalEntry();
+    AccountHelper::entryLine($entry, $this->debitAccount, debit: 100, credit: 0);
+    AccountHelper::entryLine($entry, $this->creditAccount, debit: 0, credit: 50);
+
+    expect(fn () => AccountHelper::post($entry))
+        ->toThrow(Exception::class, __('accounts::account-manager.post-action-validate.unbalanced-entry'));
+
+    expect($entry->refresh()->state)->toBe(MoveState::DRAFT);
+});
+
 it('refuses to post a manual journal entry with no lines', function () {
     $entry = AccountHelper::journalEntry();
 
     expect(fn () => AccountHelper::post($entry))
         ->toThrow(Exception::class, __('accounts::account-manager.post-action-validate.lines-required'));
+});
+
+it('actually cancels the original entry when reversed, not duplicates it', function () {
+    $entry = AccountHelper::journalEntry();
+    AccountHelper::entryLine($entry, $this->debitAccount, debit: 100, credit: 0);
+    AccountHelper::entryLine($entry, $this->creditAccount, debit: 0, credit: 100);
+
+    AccountHelper::post($entry);
+
+    $reversal = AccountHelper::reverse($entry);
+
+    $debitLine = $reversal->lines->firstWhere('account_id', $this->debitAccount->id);
+    $creditLine = $reversal->lines->firstWhere('account_id', $this->creditAccount->id);
+
+    // The original had debit=100/credit=0 on the debit account and
+    // debit=0/credit=100 on the credit account. A genuine reversal must
+    // flip both sides, not just the internal `balance` field.
+    expect((float) $debitLine->debit)->toBe(0.0)
+        ->and((float) $debitLine->credit)->toBe(100.0)
+        ->and((float) $creditLine->debit)->toBe(100.0)
+        ->and((float) $creditLine->credit)->toBe(0.0)
+        ->and((float) $debitLine->balance)->toBe((float) $debitLine->debit - (float) $debitLine->credit)
+        ->and((float) $creditLine->balance)->toBe((float) $creditLine->debit - (float) $creditLine->credit);
 });

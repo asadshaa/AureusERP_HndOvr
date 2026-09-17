@@ -8,7 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use RuntimeException;
 use Webkul\Support\Database\Factories\CurrencyFactory;
 
 class Currency extends Model
@@ -58,14 +60,22 @@ class Currency extends Model
         return trim("{$code} - {$this->full_name}");
     }
 
-    public function convert(float|int $fromAmount, Currency $toCurrency, ?Company $company = null, $date = null, bool $round = true): float
+    /**
+     * @param  bool  $strict  When true, throws instead of silently falling back to a
+     *                        1:1 rate when no CurrencyRate record exists for this pair.
+     *                        Left false by default so existing draft/preview call sites
+     *                        keep working unchanged; anything that turns this amount
+     *                        into a real, ledger-affecting journal entry should pass
+     *                        true instead of trusting a rate nobody actually configured.
+     */
+    public function convert(float|int $fromAmount, Currency $toCurrency, ?Company $company = null, $date = null, bool $round = true, bool $strict = false): float
     {
         $base = $this ?? $toCurrency;
 
         $toCurrency = $toCurrency ?? $this;
 
         if ($fromAmount) {
-            $rate = $this->getConversionRate($base, $toCurrency, $company, $date);
+            $rate = $this->getConversionRate($base, $toCurrency, $company, $date, $strict);
 
             $toAmount = $fromAmount * $rate;
         } else {
@@ -75,7 +85,10 @@ class Currency extends Model
         return $round ? $toCurrency->round($toAmount) : $toAmount;
     }
 
-    public function getConversionRate($fromCurrency, $toCurrency, $company = null, $date = null)
+    /**
+     * @param  bool  $strict  See {@see self::convert()}.
+     */
+    public function getConversionRate($fromCurrency, $toCurrency, $company = null, $date = null, bool $strict = false)
     {
         if ($fromCurrency->id === $toCurrency->id) {
             return 1;
@@ -97,7 +110,23 @@ class Currency extends Model
             ->orderByDesc('name')
             ->first();
 
-        return $toRateRecord->rate ?? 1.0;
+        if ($toRateRecord) {
+            return $toRateRecord->rate;
+        }
+
+        $fromLabel = $fromCurrency->code ?: $fromCurrency->name;
+        $toLabel = $toCurrency->code ?: $toCurrency->name;
+
+        if ($strict) {
+            throw new RuntimeException(
+                "There's no exchange rate set up for converting {$fromLabel} to {$toLabel} on or before {$date}. ".
+                'Add one under Accounting → Exchange Rates, then try this again.'
+            );
+        }
+
+        Log::warning("Currency::getConversionRate() fell back to a 1:1 rate for {$fromLabel} to {$toLabel} on {$date} -- no CurrencyRate record was found.");
+
+        return 1.0;
     }
 
     public function round(float $amount): float

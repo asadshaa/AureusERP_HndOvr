@@ -4,6 +4,9 @@ namespace Webkul\Account\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
+use Webkul\Account\Enums\TypeTaxUse;
 use Webkul\Account\Models\Product;
 
 class InvoiceRequest extends FormRequest
@@ -51,11 +54,22 @@ class InvoiceRequest extends FormRequest
             'invoice_lines.*.price_unit'       => ['required', 'numeric'],
             'invoice_lines.*.discount'         => ['nullable', 'numeric', 'min:0', 'max:100'],
             'invoice_lines.*.taxes'            => ['nullable', 'array'],
-            'invoice_lines.*.taxes.*'          => ['integer', 'exists:accounts_taxes,id'],
+            'invoice_lines.*.taxes.*'          => [
+                'integer',
+                Rule::exists('accounts_taxes', 'id')
+                    ->where('company_id', $this->input('company_id') ?? Auth::user()?->default_company_id)
+                    ->where('is_active', true)
+                    ->where('type_tax_use', $this->expectedTaxUsage()->value),
+            ],
             'invoice_lines.*.id'               => ['nullable', 'integer', 'exists:accounts_account_move_lines,id'],
         ];
 
         return $rules;
+    }
+
+    protected function expectedTaxUsage(): TypeTaxUse
+    {
+        return TypeTaxUse::SALE;
     }
 
     /**

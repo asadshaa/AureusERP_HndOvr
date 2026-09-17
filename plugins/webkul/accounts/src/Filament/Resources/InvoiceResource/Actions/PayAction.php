@@ -27,6 +27,7 @@ use Webkul\Account\Models\Move;
 use Webkul\Account\Models\PaymentMethodLine;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Accounting\Models\Journal;
+use Webkul\Support\Models\Currency;
 
 class PayAction extends Action
 {
@@ -301,6 +302,31 @@ class PayAction extends Action
             })
             ->action(function (Move $record, $data, Component $livewire): void {
                 try {
+                    // The preview above already tried this same conversion
+                    // (that's what a missing rate refuses to compute), but a
+                    // failed preview doesn't stop the wizard from being
+                    // submitted anyway -- it just leaves the form holding
+                    // stale, half-computed defaults (e.g. the invoice's raw
+                    // foreign-currency amount labelled with the company's
+                    // local currency). Submitting that mismatch used to run
+                    // straight into a deep, unrelated null-property crash
+                    // inside payment/journal-entry generation instead of the
+                    // same clear message. Re-checking it here, before any
+                    // record is created, means either both stages agree the
+                    // rate is missing and refuse identically, or the rate
+                    // truly exists and this is a no-op.
+                    $paymentCurrency = Currency::find($data['currency_id'] ?? $record->currency_id);
+
+                    if ($record->currency && $paymentCurrency) {
+                        $record->currency->getConversionRate(
+                            $record->currency,
+                            $paymentCurrency,
+                            $record->company,
+                            $data['payment_date'] ?? now(),
+                            strict: true,
+                        );
+                    }
+
                     $lineIds = $record->paymentTermLines
                         ->filter(fn ($line) => ! $line->reconciled)
                         ->pluck('id')

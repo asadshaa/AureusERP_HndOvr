@@ -83,8 +83,18 @@ class ListJournalEntries extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            // Found alongside the identical gap in ManualAdjustmentResource
+            // during the 4-role manual test walkthrough: unlike the /create
+            // route (CreateRecord::authorizeAccess() has its own built-in
+            // abort_unless(canCreate(), 403)), this header button is a
+            // self-contained modal action that bypasses that check
+            // entirely unless explicitly ->authorize()'d -- it was not.
+            // Wiring it to the resource's own canCreate() makes the button
+            // honor exactly the same rule the direct URL already enforces,
+            // instead of inventing separate authorization logic.
             CreateAction::make()
-                ->icon('heroicon-o-plus-circle'),
+                ->icon('heroicon-o-plus-circle')
+                ->authorize(fn (): bool => JournalEntryResource::canCreate()),
         ];
     }
 }

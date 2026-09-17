@@ -29,6 +29,70 @@
                 </tbody>
             </table>
         </x-filament::section>
+
+        @php
+            $fsTagHasActivity = $preview['fs_tag_summary']['recognized'] > 0 || $preview['fs_tag_summary']['unrecognized'] > 0;
+            $fsTagMissingColumnIsNoteworthy = $preview['company_uses_fs_tags'] && ! $preview['fs_tag_column_found'];
+        @endphp
+        @if ($fsTagHasActivity || $fsTagMissingColumnIsNoteworthy)
+            <x-filament::section heading="FS Tag check" class="mt-6">
+                @if ($fsTagHasActivity)
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <x-filament::badge color="gray">
+                            {{ $preview['row_count'] }} transactions
+                        </x-filament::badge>
+                        <x-filament::badge color="success">
+                            {{ $preview['fs_tag_summary']['recognized'] }} recognized
+                        </x-filament::badge>
+                        <x-filament::badge color="danger">
+                            {{ $preview['fs_tag_summary']['unrecognized'] }} unrecognized
+                        </x-filament::badge>
+                        <x-filament::badge color="gray">
+                            {{ $preview['fs_tag_summary']['none'] }} untagged
+                        </x-filament::badge>
+                    </div>
+                @endif
+
+                @if ($fsTagMissingColumnIsNoteworthy)
+                    <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                        No "FS Tag" column was recognized in this file, so none of these transactions will be tagged.
+                        If the file has one, check its header spelling.
+                    </p>
+                @endif
+
+                @if ($preview['fs_tag_summary']['unrecognized'] > 0)
+                    <table>
+                        <thead>
+                            <tr><th>Description</th><th>Tag in file</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($preview['rows'] as $row)
+                                @if ($row['fs_tag_status'] !== 'none')
+                                    <tr>
+                                        <td>{{ $row['description'] }}</td>
+                                        <td>{{ $row['fs_tag_code'] }}</td>
+                                        <td>
+                                            @if ($row['fs_tag_status'] === 'recognized')
+                                                <x-filament::badge color="success">Recognized</x-filament::badge>
+                                            @else
+                                                <x-filament::badge color="danger" :tooltip="$row['fs_tag_issue']">Not set up yet</x-filament::badge>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endif
+                            @endforeach
+                        </tbody>
+                    </table>
+                @endif
+
+                @if ($preview['fs_tag_summary']['unrecognized'] > 0)
+                    <p class="text-sm text-gray-600 dark:text-gray-300 mt-4">
+                        You can still import now — unrecognized tags won't be applied, but every transaction will
+                        still come in for review under Bank Transaction Mapping.
+                    </p>
+                @endif
+            </x-filament::section>
+        @endif
     @endif
 
     <x-filament::section class="mt-6">

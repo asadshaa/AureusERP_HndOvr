@@ -59,10 +59,18 @@ final class ApprovalEngine
                 ->where('subject_type', $subject->getMorphClass())
                 ->where('subject_id', $subject->getKey())
                 ->where('status', 'pending')
+                ->lockForUpdate()
                 ->latest('id')
                 ->first();
             if ($existing) {
-                return $existing;
+                // A pending request already exists for this exact subject. Returning it
+                // unchanged used to silently discard whatever new $context/$amount this
+                // caller just submitted — a second requester's intended changes vanished
+                // with no error and no trace. Fail loudly instead: the caller must resolve
+                // (approve/reject) the existing request before a new one can be submitted.
+                throw new RuntimeException(
+                    "A pending approval request already exists for this {$requestType} — it must be approved, rejected, or withdrawn before a new one can be submitted."
+                );
             }
 
             return ApprovalRequest::query()->create([
@@ -147,7 +155,7 @@ final class ApprovalEngine
         array $previousValues,
         array $newValues,
     ): ApprovalRequest {
-        $request = DB::transaction(function () use ($request, $actor, $decision, $reason, $previousValues, $newValues): ApprovalRequest {
+        return DB::transaction(function () use ($request, $actor, $decision, $reason, $previousValues, $newValues): ApprovalRequest {
             $request = ApprovalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
             $request->loadMissing('workflow.steps');
             if (! $this->canAct($request, $actor)) {
@@ -171,38 +179,44 @@ final class ApprovalEngine
 
             if ($decision === 'rejected') {
                 $request->update(['status' => 'rejected', 'completed_at' => now()]);
+            } else {
+                $approvalCount = $request->decisions()
+                    ->where('step_id', $step->id)
+                    ->where('decision', 'approved')
+                    ->distinct('actor_id')
+                    ->count('actor_id');
 
-                return $request->fresh(['workflow.steps', 'decisions.actor']);
+                if ($approvalCount >= $step->required_approvals) {
+                    $nextStep = $request->workflow->steps
+                        ->where('sequence', '>', $step->sequence)
+                        ->first(fn (ApprovalStep $candidate): bool => $this->conditionsMatch(
+                            (array) $candidate->conditions,
+                            (array) $request->context + ['amount' => $request->amount],
+                        ));
+                    $request->update($nextStep ? [
+                        'current_step_sequence' => $nextStep->sequence,
+                    ] : [
+                        'status'                => 'approved',
+                        'current_step_sequence' => null,
+                        'completed_at'          => now(),
+                    ]);
+                }
             }
 
-            $approvalCount = $request->decisions()
-                ->where('step_id', $step->id)
-                ->where('decision', 'approved')
-                ->distinct('actor_id')
-                ->count('actor_id');
-            if ($approvalCount < $step->required_approvals) {
-                return $request->fresh(['workflow.steps', 'decisions.actor']);
-            }
+            $request = $request->fresh(['workflow.steps', 'decisions.actor']);
 
-            $nextStep = $request->workflow->steps
-                ->where('sequence', '>', $step->sequence)
-                ->first(fn (ApprovalStep $candidate): bool => $this->conditionsMatch(
-                    (array) $candidate->conditions,
-                    (array) $request->context + ['amount' => $request->amount],
-                ));
-            $request->update($nextStep ? [
-                'current_step_sequence' => $nextStep->sequence,
-            ] : [
-                'status'                => 'approved',
-                'current_step_sequence' => null,
-                'completed_at'          => now(),
-            ]);
+            // Applying the subject-side effect of a decision (e.g. writing an
+            // approved sensitive-change to the Employee, or flipping a Leave to
+            // validate_two) used to run AFTER this transaction committed. If it
+            // failed — e.g. the subject's company changed since submission — the
+            // request was left permanently showing its new status with the
+            // actual change never applied, and nothing anywhere could retry it.
+            // Running it inside the same transaction means a failure here rolls
+            // the whole decision back instead of leaving that inconsistency.
+            app(ApprovalSubjectSynchronizer::class)->synchronize($request);
 
             return $request->fresh(['workflow.steps', 'decisions.actor']);
         });
-        app(ApprovalSubjectSynchronizer::class)->synchronize($request);
-
-        return $request->fresh(['workflow.steps', 'decisions.actor']);
     }
 
     private function amountMatches(ApprovalWorkflow $workflow, ?string $amount): bool

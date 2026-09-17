@@ -12,6 +12,7 @@ use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\ListPayments;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\ManageBills;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\PaymentResource\Pages\ViewPayment;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Models\Payment;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
 
@@ -59,6 +60,13 @@ class PaymentResource extends BasePaymentResource
         }
 
         return $navigationItems;
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

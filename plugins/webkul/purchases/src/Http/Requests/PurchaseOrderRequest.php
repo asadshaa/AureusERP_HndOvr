@@ -4,6 +4,9 @@ namespace Webkul\Purchase\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
+use Webkul\Account\Enums\TypeTaxUse;
 use Webkul\Product\Models\Product;
 
 class PurchaseOrderRequest extends FormRequest
@@ -49,7 +52,13 @@ class PurchaseOrderRequest extends FormRequest
             'lines.*.product_packaging_id' => ['nullable', 'integer', 'exists:products_packagings,id'],
             'lines.*.price_unit'           => ['required', 'numeric', 'min:0', 'max:99999999999'],
             'lines.*.taxes'                => ['nullable', 'array'],
-            'lines.*.taxes.*'              => ['integer', 'exists:accounts_taxes,id'],
+            'lines.*.taxes.*'              => [
+                'integer',
+                Rule::exists('accounts_taxes', 'id')
+                    ->where('company_id', $this->input('company_id') ?? Auth::user()?->default_company_id)
+                    ->where('is_active', true)
+                    ->where('type_tax_use', TypeTaxUse::PURCHASE->value),
+            ],
             'lines.*.discount'             => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.qty_received'         => ['nullable', 'numeric', 'min:0', 'max:99999999999'],
             'lines.*.qty_received_manual'  => ['nullable', 'numeric', 'min:0', 'max:99999999999'],

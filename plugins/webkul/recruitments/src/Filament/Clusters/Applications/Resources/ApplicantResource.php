@@ -693,6 +693,7 @@ class ApplicantResource extends Resource
                         ->color('success')
                         ->requiresConfirmation()
                         ->visible(fn (Applicant $record): bool => $record->candidate?->employee_id === null
+                            && $record->refuse_reason_id === null
                             && (Auth::user()?->can(HrPermissions::ConvertCandidates) ?? false))
                         ->action(function (Applicant $record): void {
                             $employee = app(CandidateConversionService::class)->convert($record);

@@ -337,7 +337,13 @@ class Payment extends Model
             if (
                 $this->move
                 && $liquidity->isNotEmpty()
-                && $this->move->currency->isZero($liquidity->sum('amount_residual'))
+                // amount_residual is always computed and rounded in the company
+                // currency (see MoveLine::computeAmountResidual()), so the zero
+                // check must use the company currency's rounding threshold, not
+                // the payment's transaction currency — otherwise a company on a
+                // fine-grained currency (e.g. BHD) paired with a coarser
+                // transaction currency (e.g. JPY) can read a real residual as zero.
+                && $this->company->currency->isZero($liquidity->sum('amount_residual'))
             ) {
                 $this->state = PaymentStatus::PAID;
 

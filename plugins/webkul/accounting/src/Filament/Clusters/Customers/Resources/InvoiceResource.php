@@ -12,6 +12,7 @@ use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource\Page
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\ListInvoices;
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\ManagePayments;
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource\Pages\ViewInvoice;
+use Webkul\Accounting\Filament\RelationManagers\DocumentAttachmentsRelationManager;
 use Webkul\Accounting\Livewire\InvoiceSummary;
 use Webkul\Accounting\Models\Invoice;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
@@ -68,6 +69,13 @@ class InvoiceResource extends BaseInvoiceResource
             EditInvoice::class,
             ManagePayments::class,
         ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DocumentAttachmentsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
