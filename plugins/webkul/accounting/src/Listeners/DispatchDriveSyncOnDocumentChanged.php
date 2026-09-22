@@ -15,6 +15,10 @@ class DispatchDriveSyncOnDocumentChanged
 {
     public function handle(DocumentContentChanged $event): void
     {
+        if (! config('accounting_drive.enabled')) {
+            return;
+        }
+
         SyncDocumentToDriveJob::dispatch($event->document->id);
     }
 }

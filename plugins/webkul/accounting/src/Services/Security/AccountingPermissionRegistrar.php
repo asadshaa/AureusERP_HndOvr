@@ -68,6 +68,10 @@ class AccountingPermissionRegistrar
                 'names'       => ['internal_auditor', 'internal auditor', 'auditor'],
                 'permissions' => AccountingPermissions::internalAuditor(),
             ],
+            'external_auditor' => [
+                'names'       => ['external_auditor', 'external auditor'],
+                'permissions' => AccountingPermissions::externalAuditor(),
+            ],
         ];
     }
 

@@ -10,6 +10,7 @@
  * involved.
  */
 
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Webkul\Account\Database\Factories\BankStatementFactory;
 use Webkul\Account\Enums\MoveType;
@@ -37,6 +38,8 @@ beforeEach(function () {
         ['is_installed' => true, 'is_active' => true, 'updated_at' => now()],
     );
     Package::$plugins = Plugin::all()->keyBy('name');
+
+    Config::set('accounting_drive.unify_invoice_and_inbound_folders', false);
 
     $this->resolver = new DriveFolderPathResolver;
     $this->company = Company::factory()->create(['is_active' => true]);
@@ -139,7 +142,7 @@ it('resolves the Journal Entry template with its own identifier, distinct from I
         "{$this->company->name} ({$this->company->id})",
         'Accounting',
         'Journal Entries',
-        'JE-2026-00042',
+        $this->resolver->sanitize($entry->name),
     ]);
 });
 
@@ -234,4 +237,35 @@ it('sanitizes a slash-bearing company name so it can never introduce an extra fo
 
     expect($path[1])->toBe("Trade Debtors - Local ({$company->id})")
         ->and($path[1])->not->toContain('/');
+});
+
+it('resolves Invoice to the company inbound folder when unify_invoice_and_inbound_folders is enabled', function () {
+    Config::set('accounting_drive.unify_invoice_and_inbound_folders', true);
+
+    $move = Move::factory()->create([
+        'name'        => 'INV/2026/00042',
+        'move_type'   => MoveType::OUT_INVOICE,
+        'company_id'  => $this->company->id,
+        'currency_id' => Currency::query()->firstOrFail()->id,
+    ]);
+    $invoice = AccountingInvoice::query()->findOrFail($move->id);
+
+    $document = Document::factory()->create([
+        'company_id'    => $this->company->id,
+        'document_type' => DocumentType::Invoice,
+    ]);
+    DocumentAttachment::factory()->create([
+        'company_id'      => $this->company->id,
+        'document_id'     => $document->id,
+        'attachable_type' => AccountingInvoice::class,
+        'attachable_id'   => $invoice->id,
+    ]);
+
+    $path = $this->resolver->resolve($document);
+
+    expect($path)->toBe([
+        'Aureus',
+        "{$this->company->name} ({$this->company->id})",
+        'Inbound',
+    ]);
 });

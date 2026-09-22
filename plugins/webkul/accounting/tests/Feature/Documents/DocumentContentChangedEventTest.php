@@ -19,6 +19,7 @@
  * provider's boot-time registration, for exactly that reason.
  */
 
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -33,6 +34,7 @@ require_once __DIR__.'/../../Helpers/DocumentTestHelper.php';
 
 beforeEach(function () {
     Storage::fake('accounting_documents');
+    Config::set('accounting_drive.enabled', false);
 
     $this->service = app(DocumentService::class);
 });
@@ -86,6 +88,7 @@ it('costs nothing when nothing is listening -- no job queued, no error, with Dri
 
 it('the listener itself dispatches SyncDocumentToDriveJob for the event\'s document', function () {
     Queue::fake();
+    Config::set('accounting_drive.enabled', true);
     Event::listen(DocumentContentChanged::class, DispatchDriveSyncOnDocumentChanged::class);
 
     $user = documentTestUser(permissions: [AccountingPermissions::ManageDocuments]);

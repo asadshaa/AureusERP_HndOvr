@@ -37,6 +37,7 @@ use Webkul\Support\Models\Company;
 require_once __DIR__.'/../../Helpers/DocumentTestHelper.php';
 require_once __DIR__.'/../../Helpers/FakeDriveClient.php';
 
+use Illuminate\Support\Facades\Queue;
 use Webkul\Accounting\Tests\Helpers\FakeDriveClient;
 
 beforeEach(function () {
@@ -50,6 +51,7 @@ beforeEach(function () {
 
     $this->documentService = app(DocumentService::class);
     $this->driveSyncService = app(DriveSyncService::class);
+    Queue::fake();
 });
 
 it('creates a Drive folder path and file the first time a document is exported', function () {

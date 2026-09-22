@@ -64,4 +64,23 @@ interface DriveClient
      * Drive web UI.
      */
     public function webViewLink(string $fileId): string;
+
+    /**
+     * List the direct child FILES (not folders) of $parentFolderId --
+     * used by the Drive -> Aureus ingestion direction to discover what a
+     * human has dropped into a company's inbound folder. Each entry
+     * carries the identity fields DriveIngestion needs to capture at
+     * discovery time.
+     *
+     * @return array<int, array{id: string, name: string, mimeType: string, size: int, modifiedTime: ?string}>
+     */
+    public function listFiles(string $parentFolderId): array;
+
+    /**
+     * Download the raw bytes of $fileId. The import-direction mirror of
+     * createFile()/updateFileContent()'s writes -- used to verify a
+     * discovered file's checksum and, once verified, to register it as a
+     * new Aureus Document.
+     */
+    public function downloadFileContent(string $fileId): string;
 }

@@ -111,6 +111,57 @@ class FakeDriveClient implements DriveClient
         return "https://drive.google.com/file/d/{$fileId}/view";
     }
 
+    public function listFiles(string $parentFolderId): array
+    {
+        $results = [];
+
+        foreach ($this->files as $id => $file) {
+            if ($file['parent'] === $parentFolderId && ! $file['trashed']) {
+                $results[] = [
+                    'id'           => $id,
+                    'name'         => $file['name'],
+                    'mimeType'     => $file['mimeType'],
+                    'size'         => strlen($file['contents']),
+                    'modifiedTime' => $file['modifiedTime'] ?? null,
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    public function downloadFileContent(string $fileId): string
+    {
+        if (! isset($this->files[$fileId])) {
+            throw new \RuntimeException("FakeDriveClient: file {$fileId} does not exist.");
+        }
+
+        return $this->files[$fileId]['contents'];
+    }
+
+    /**
+     * Test helper: simulate a file dropped directly into Drive by a human
+     * (or another system) -- i.e. NOT created via this fake's own
+     * createFile(), which is what putExternalFile() is for versus
+     * createFile()'s export-direction bookkeeping (writeLog entries,
+     * revision numbering meant to model Aureus's own uploads).
+     */
+    public function putExternalFile(string $name, string $mimeType, string $contents, string $parentFolderId, ?string $modifiedTime = null): string
+    {
+        $id = 'file-'.$this->nextId++;
+        $this->files[$id] = [
+            'name'         => $name,
+            'mimeType'     => $mimeType,
+            'contents'     => $contents,
+            'parent'       => $parentFolderId,
+            'revision'     => 1,
+            'trashed'      => false,
+            'modifiedTime' => $modifiedTime,
+        ];
+
+        return $id;
+    }
+
     /** Test helper: simulate the Drive file having been trashed/deleted. */
     public function trash(string $fileId): void
     {

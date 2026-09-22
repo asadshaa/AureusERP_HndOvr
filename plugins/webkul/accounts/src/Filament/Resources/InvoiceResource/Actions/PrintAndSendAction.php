@@ -3,15 +3,19 @@
 namespace Webkul\Account\Filament\Resources\InvoiceResource\Actions;
 
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Facades\Account as AccountFacade;
 use Webkul\Account\Models\Move;
 use Webkul\Account\Models\Partner;
+use Webkul\Accounting\Services\Drive\InvoiceDriveExportService;
 use Webkul\Support\Traits\PDFHandler;
 
 class PrintAndSendAction extends Action
@@ -50,10 +54,11 @@ class PrintAndSendAction extends Action
                 ';
 
             $action->fillForm([
-                'files'       => $this->prepareInvoice($record),
-                'partners'    => [$record->partner_id],
-                'subject'     => $record->partner->name.' Invoice (Ref '.$record->name.')',
-                'description' => $description,
+                'files'         => $this->prepareInvoice($record),
+                'partners'      => [$record->partner_id],
+                'subject'       => $record->partner->name.' Invoice (Ref '.$record->name.')',
+                'description'   => $description,
+                'sync_to_drive' => true,
             ]);
         });
 
@@ -83,6 +88,11 @@ class PrintAndSendAction extends Action
                         ->multiple()
                         ->disk('public')
                         ->hiddenLabel(),
+                    Checkbox::make('sync_to_drive')
+                        ->label(__('Also upload to linked Google Drive'))
+                        ->helperText(__('Automatically save a copy of this invoice to your company\'s Google Drive.'))
+                        ->default(true)
+                        ->visible(fn () => (bool) config('accounting_drive.enabled', false)),
                 ]);
             }
         );
@@ -90,7 +100,36 @@ class PrintAndSendAction extends Action
         $this->modalSubmitActionLabel(__('accounts::filament/resources/invoice/actions/print-and-send.modal.action.submit.title'));
         $this->modalIcon('heroicon-m-paper-airplane');
         $this->icon('heroicon-o-envelope');
-        $this->action(fn (Move $record, array $data) => AccountFacade::printAndSendMove($record, $data));
+        $this->action(function (Move $record, array $data) {
+            AccountFacade::printAndSendMove($record, $data);
+
+            if (! empty($data['sync_to_drive']) && config('accounting_drive.enabled', false)) {
+                try {
+                    $primaryFile = null;
+                    if (! empty($data['files'])) {
+                        $primaryFile = is_array($data['files']) ? reset($data['files']) : $data['files'];
+                    }
+
+                    app(InvoiceDriveExportService::class)->exportInvoice(
+                        Auth::user(),
+                        $record,
+                        $primaryFile
+                    );
+
+                    Notification::make()
+                        ->title(__('Invoice uploaded to Google Drive'))
+                        ->body(__('A copy of invoice :name has been saved to your linked Google Drive folder.', ['name' => $record->name]))
+                        ->success()
+                        ->send();
+                } catch (\Throwable $e) {
+                    Notification::make()
+                        ->title(__('Google Drive upload warning'))
+                        ->body($e->getMessage())
+                        ->warning()
+                        ->send();
+                }
+            }
+        });
         $this->modalSubmitAction(function ($action) {
             $action->label(__('accounts::filament/resources/invoice/actions/print-and-send.modal.action.submit.title'));
             $action->icon('heroicon-m-paper-airplane');

@@ -114,6 +114,14 @@ class DocumentService
      * Everything else is the ordinary upload path: the same MIME and size
      * validation, the same checksum, the same storage provider. Nothing a
      * peer sends bypasses a check a human upload has to pass.
+     *
+     * $source is the informal provenance marker recorded on the initial
+     * Uploaded audit's metadata -- 'peer_transmission' by default (this
+     * method's original and still most common caller), or 'drive_import'
+     * for a file registered by DriveIngestionService (Phase 1 of Drive ->
+     * Aureus ingestion). Any other non-human, non-peer origin added later
+     * should pass its own value here rather than overloading one of these
+     * two.
      */
     public function uploadFromPeer(
         int $companyId,
@@ -122,10 +130,11 @@ class DocumentService
         ?string $description,
         UploadedFile $file,
         ?string $ipAddress = null,
+        string $source = 'peer_transmission',
     ): Document {
         $this->validateFile($file);
 
-        $document = DB::transaction(function () use ($companyId, $documentType, $title, $description, $file, $ipAddress) {
+        $document = DB::transaction(function () use ($companyId, $documentType, $title, $description, $file, $ipAddress, $source) {
             $document = Document::create([
                 'company_id'    => $companyId,
                 'creator_id'    => null,
@@ -142,7 +151,7 @@ class DocumentService
             $this->recordSystemOrUserAudit($document, null, DocumentAuditAction::Uploaded, $ipAddress, [
                 'version_id' => $version->id,
                 'filename'   => $version->original_filename,
-                'source'     => 'peer_transmission',
+                'source'     => $source,
             ]);
 
             return $document->refresh();

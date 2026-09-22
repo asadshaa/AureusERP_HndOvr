@@ -1,0 +1,831 @@
+<title>Aureus P2P Connectivity Research</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --paper:#F2F4F5;
+    --surface:#FFFFFF;
+    --surface-2:#E8ECEE;
+    --rule:#D3DADD;
+    --rule-strong:#B4BEC3;
+    --ink:#16232A;
+    --ink-2:#4A5C65;
+    --ink-3:#7A8C95;
+    --signal:#0E7C8A;
+    --signal-deep:#095A65;
+    --signal-wash:#E1F0F1;
+    --go:#1C7048;
+    --go-wash:#E0F0E7;
+    --go-rule:#B6D8C6;
+    --hold:#8A5A08;
+    --hold-wash:#FAEFDA;
+    --hold-rule:#E8CF9E;
+    --stop:#A63528;
+    --stop-wash:#FAE8E5;
+    --stop-rule:#EBC2BB;
+    --lift:0 1px 1px rgba(22,35,42,.04), 0 10px 28px -18px rgba(22,35,42,.22);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0C1418;
+      --surface:#131E23;
+      --surface-2:#1A272D;
+      --rule:#26363D;
+      --rule-strong:#3A4E57;
+      --ink:#E4EBEE;
+      --ink-2:#A3B4BC;
+      --ink-3:#75878F;
+      --signal:#4FC5D2;
+      --signal-deep:#8FDDE6;
+      --signal-wash:#0E2A2F;
+      --go:#5CC28C;
+      --go-wash:#0F2A1E;
+      --go-rule:#1F4632;
+      --hold:#E0AE55;
+      --hold-wash:#2C2009;
+      --hold-rule:#4A3916;
+      --stop:#EC8878;
+      --stop-wash:#2E1310;
+      --stop-rule:#4C221C;
+      --lift:0 1px 1px rgba(0,0,0,.3), 0 14px 34px -20px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0C1418;
+    --surface:#131E23;
+    --surface-2:#1A272D;
+    --rule:#26363D;
+    --rule-strong:#3A4E57;
+    --ink:#E4EBEE;
+    --ink-2:#A3B4BC;
+    --ink-3:#75878F;
+    --signal:#4FC5D2;
+    --signal-deep:#8FDDE6;
+    --signal-wash:#0E2A2F;
+    --go:#5CC28C;
+    --go-wash:#0F2A1E;
+    --go-rule:#1F4632;
+    --hold:#E0AE55;
+    --hold-wash:#2C2009;
+    --hold-rule:#4A3916;
+    --stop:#EC8878;
+    --stop-wash:#2E1310;
+    --stop-rule:#4C221C;
+    --lift:0 1px 1px rgba(0,0,0,.3), 0 14px 34px -20px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Source Serif 4", Georgia, serif;
+    font-size:16.5px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,.mono,.tag,th,.score{font-family:"JetBrains Mono", ui-monospace, monospace;}
+  h1,h2,h3,h4,.ui{font-family:"Archivo", system-ui, sans-serif;}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:52px 26px 110px;}
+
+  /* masthead */
+  .masthead{border-bottom:3px solid var(--ink);padding-bottom:26px;margin-bottom:30px;}
+  .kicker{
+    font-family:"JetBrains Mono",monospace;font-size:11.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--signal);font-weight:700;margin-bottom:14px;
+  }
+  h1{font-size:40px;line-height:1.1;font-weight:700;letter-spacing:-.02em;margin:0 0 14px;text-wrap:balance;}
+  .standfirst{font-size:19px;line-height:1.5;color:var(--ink-2);max-width:66ch;margin:0;}
+  .byline{
+    display:flex;flex-wrap:wrap;gap:18px;margin-top:22px;
+    font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ink-3);
+  }
+  .byline b{color:var(--ink-2);font-weight:500;}
+
+  /* evidence tags */
+  .tag{
+    display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.09em;
+    text-transform:uppercase;padding:2px 6px;border-radius:3px;vertical-align:1.5px;
+    white-space:nowrap;
+  }
+  .tag.v{background:var(--signal-wash);color:var(--signal-deep);border:1px solid var(--signal);}
+  .tag.r{background:var(--go-wash);color:var(--go);border:1px solid var(--go-rule);}
+  .tag.i{background:var(--hold-wash);color:var(--hold);border:1px solid var(--hold-rule);}
+  .tag.a{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule-strong);}
+
+  .legend{
+    background:var(--surface);border:1px solid var(--rule);border-radius:8px;
+    padding:16px 20px;margin-bottom:40px;box-shadow:var(--lift);
+  }
+  .legend h4{margin:0 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);}
+  .legend ul{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:7px 26px;}
+  .legend li{font-size:14px;color:var(--ink-2);}
+
+  /* verdict */
+  .verdict{
+    border:1px solid var(--hold-rule);border-left:5px solid var(--hold);
+    background:var(--hold-wash);border-radius:8px;padding:24px 26px;margin-bottom:44px;
+  }
+  .verdict .vh{
+    font-family:"Archivo",sans-serif;font-size:12px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--hold);font-weight:700;margin-bottom:10px;
+  }
+  .verdict p{margin:0 0 12px;font-size:17px;}
+  .verdict p:last-child{margin-bottom:0;}
+  .verdict strong{font-weight:600;}
+
+  /* sections */
+  section{margin-bottom:52px;scroll-margin-top:20px;}
+  h2{
+    font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--signal);
+    font-weight:700;margin:0 0 6px;padding-bottom:8px;border-bottom:1px solid var(--rule);
+  }
+  h3{font-size:25px;font-weight:700;letter-spacing:-.01em;margin:14px 0 14px;text-wrap:balance;}
+  h4{font-size:16.5px;font-weight:600;margin:26px 0 8px;color:var(--ink);}
+  p{margin:0 0 14px;max-width:74ch;}
+  ul.body,ol.body{margin:0 0 16px;padding-left:22px;max-width:74ch;}
+  ul.body li,ol.body li{margin-bottom:7px;}
+  strong{font-weight:600;}
+  em{font-style:italic;}
+  code{
+    font-size:.85em;background:var(--surface-2);border:1px solid var(--rule);
+    border-radius:3px;padding:1px 5px;
+  }
+  a{color:var(--signal-deep);text-decoration-thickness:1px;text-underline-offset:2px;}
+  a:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:2px;}
+
+  /* callout */
+  .note{
+    background:var(--surface);border:1px solid var(--rule);border-left:4px solid var(--signal);
+    border-radius:6px;padding:15px 18px;margin:18px 0;font-size:15.5px;color:var(--ink-2);
+    max-width:78ch;
+  }
+  .note b{color:var(--ink);font-weight:600;}
+  .note.stop{border-left-color:var(--stop);}
+  .note.go{border-left-color:var(--go);}
+
+  /* tables */
+  .scroller{overflow-x:auto;margin:20px 0;border:1px solid var(--rule);border-radius:8px;background:var(--surface);box-shadow:var(--lift);}
+  table{width:100%;border-collapse:collapse;font-family:"Archivo",sans-serif;font-size:14px;}
+  th{
+    text-align:left;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-3);font-weight:700;background:var(--surface-2);
+    padding:11px 13px;border-bottom:1px solid var(--rule-strong);white-space:nowrap;
+  }
+  td{padding:11px 13px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2);}
+  tr:last-child td{border-bottom:none;}
+  td.crit{color:var(--ink);font-weight:600;white-space:nowrap;font-size:13.5px;}
+  td.rec{background:var(--go-wash);}
+  th.rec{background:var(--go-wash);color:var(--go);}
+  .score{font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap;display:inline-block;}
+  .s4{background:var(--go-wash);color:var(--go);border:1px solid var(--go-rule);}
+  .s3{background:var(--signal-wash);color:var(--signal-deep);border:1px solid var(--signal);}
+  .s2{background:var(--hold-wash);color:var(--hold);border:1px solid var(--hold-rule);}
+  .s1{background:var(--stop-wash);color:var(--stop);border:1px solid var(--stop-rule);}
+  .s0{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule-strong);}
+
+  /* diagram */
+  pre.diagram{
+    font-family:"JetBrains Mono",monospace;font-size:12.5px;line-height:1.65;
+    background:var(--surface);border:1px solid var(--rule);border-radius:8px;
+    padding:20px;overflow-x:auto;color:var(--ink-2);margin:20px 0;box-shadow:var(--lift);
+  }
+
+  /* poc cards */
+  .pocs{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:20px 0;}
+  .poc{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:15px 17px;box-shadow:var(--lift);}
+  .poc .pid{font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:700;color:var(--signal);letter-spacing:.06em;}
+  .poc h5{font-family:"Archivo",sans-serif;font-size:15px;font-weight:600;margin:5px 0 7px;color:var(--ink);}
+  .poc p{font-size:14px;margin:0 0 8px;color:var(--ink-2);max-width:none;}
+  .poc .crit-line{font-size:13px;color:var(--ink-3);border-top:1px dashed var(--rule);padding-top:8px;margin-top:9px;}
+  .poc .crit-line b{color:var(--ink-2);font-weight:600;}
+
+  /* phases */
+  .phase{display:grid;grid-template-columns:auto 1fr;gap:0 18px;margin-bottom:4px;}
+  .phase .pnum{
+    font-family:"Archivo",sans-serif;font-size:12px;font-weight:700;color:var(--surface);
+    background:var(--signal);width:26px;height:26px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;margin-top:3px;
+  }
+  .phase .pbody{padding-bottom:20px;border-left:1px solid var(--rule);margin-left:-31px;padding-left:31px;}
+  .phase:last-child .pbody{border-left-color:transparent;}
+  .phase h5{font-family:"Archivo",sans-serif;font-size:16.5px;font-weight:600;margin:2px 0 6px;}
+  .phase p{font-size:15px;margin:0;}
+
+  footer{border-top:1px solid var(--rule);margin-top:56px;padding-top:22px;font-size:13.5px;color:var(--ink-3);}
+  footer p{max-width:78ch;}
+
+  @media (max-width:760px){
+    h1{font-size:30px;}
+    .standfirst{font-size:17px;}
+    .legend ul{grid-template-columns:1fr;}
+    .pocs{grid-template-columns:1fr;}
+    .wrap{padding:34px 16px 80px;}
+  }
+</style>
+
+<div class="wrap">
+
+<div class="masthead">
+  <div class="kicker">Technical Research · Not for implementation</div>
+  <h1>Peer-to-Peer Connectivity for Aureus ERP</h1>
+  <p class="standfirst">An architecture investigation into whether Windows&nbsp;↔&nbsp;macOS peer-to-peer communication should be added to Aureus, which technologies are viable, and what it would cost to do safely alongside an authoritative Laravel/MySQL ledger.</p>
+  <div class="byline">
+    <span><b>Scope</b> · 6 P2P definitions, 14 technologies, 5 architectures</span>
+    <span><b>Stack</b> · Laravel 13.8.0 · Filament 5.6.3 · Livewire 4.3.0 · PHP 8.3</span>
+    <span><b>Status</b> · Awaiting review — no code written</span>
+  </div>
+</div>
+
+<div class="legend">
+  <h4>Evidence labelling used throughout</h4>
+  <ul>
+    <li><span class="tag v">Verified</span> &nbsp;Confirmed against current official documentation or vendor pricing.</li>
+    <li><span class="tag r">Repo</span> &nbsp;Observed directly in this codebase, with file paths.</li>
+    <li><span class="tag i">Inference</span> &nbsp;Engineering judgement derived from the two above.</li>
+    <li><span class="tag a">Assumption</span> &nbsp;Unverified premise that would change the conclusion if wrong.</li>
+  </ul>
+</div>
+
+<div class="verdict">
+  <div class="vh">Section 1 · Executive summary — conditional no-go</div>
+  <p><strong>Do not build peer-to-peer connectivity into Aureus now.</strong> Not because P2P cannot be made to work between Windows and macOS — it demonstrably can — but because in this codebase P2P would be the most complex available solution to problems that are currently unsolved by far cheaper means, and because the target deployment environment is the one where P2P degrades worst.</p>
+  <p>Three repository findings drive that conclusion. Aureus has <strong>no realtime transport of any kind</strong> — no broadcasting config, no channels file, no Reverb/Pusher/Echo, and zero broadcast events. It has <strong>no desktop application</strong> — the NativePHP dependency is a mobile WebView shell wired only to the barcode scanner. And its document pipeline <strong>caps files at 20&nbsp;MB and buffers each one entirely in memory</strong>, with no chunked, resumable, or truly streaming path anywhere. The "large file" pain that motivates P2P is therefore already broken server-side, well below the size at which peer transfer would begin to pay for itself.</p>
+  <p>Against that, the decisive external number: in corporate environments with managed firewalls, <strong>60–70% of WebRTC sessions fall back to a TURN relay</strong> <span class="tag v">Verified</span>. A relayed session is not peer-to-peer — it is centralised communication with extra steps, paid for in relay bandwidth. Building WebRTC for Windows-and-Mac office users means building the full complexity of peer connectivity and then routing the majority of it through a server anyway.</p>
+  <p>The recommendation is therefore <strong>Option E (Hybrid), deferred behind three prerequisites</strong>: fix the file pipeline, add server realtime via Reverb, and close the API tenant-isolation gap this review uncovered. If the real requirement turns out to be "devices on different networks must reach each other," the correct answer is not application-level P2P at all — it is <strong>Tailscale or self-hosted Headscale</strong>, which solves it at the network layer with zero application change.</p>
+</div>
+
+<!-- ======================= 2 ======================= -->
+<section>
+  <h2>Section 2</h2>
+  <h3>Current Aureus architecture, as it bears on P2P</h3>
+
+  <p>Every finding below was read out of the repository during this review. They are stated first because most of them foreclose options that would otherwise look attractive.</p>
+
+  <h4>What exists</h4>
+  <ul class="body">
+    <li><strong>Request path</strong> is entirely classic server-rendered Laravel: browser → Nginx → PHP-FPM → Filament/Livewire → Eloquent → MySQL. <span class="tag r">Repo</span></li>
+    <li><strong>Authentication</strong> is session-based across two Filament panels (<code>admin</code> on guard <code>web</code>, <code>customer</code> on guard <code>customer</code>), with multi-factor authentication enabled via <code>AppAuthentication::make()->recoverable()</code> in <code>AdminPanelProvider.php</code>. <span class="tag r">Repo</span></li>
+    <li><strong>Sanctum is live</strong> and issues bearer tokens from <code>POST admin/api/v1/login</code>; a REST surface exists under <code>admin/api/v1/*</code> across nine plugins behind <code>auth:sanctum</code>. <span class="tag r">Repo</span></li>
+    <li><strong>Authorization</strong> stacks three layers: spatie/laravel-permission name checks, ~40 policy classes, and a row-level <code>resource_permission</code> scope (<code>GROUP</code>/<code>INDIVIDUAL</code>/<code>GLOBAL</code>) applied through <code>HasResourcePermissionQuery</code> on 23 resources. <span class="tag r">Repo</span></li>
+    <li><strong>Documents are genuinely well-built</strong> and already contain most primitives a P2P transfer would need: SHA-256 per version, immutable version rows (an <code>updating</code> hook throws), write-verify after <code>put()</code>, read-verify via <code>readVerifiedBytes()</code>, a MIME allowlist, a company-prefixed storage layout, and an append-only <code>accounting_document_audits</code> table capturing actor, action, metadata and IP. <span class="tag r">Repo</span></li>
+    <li><strong>Storage is already abstracted</strong> behind <code>DocumentStorageProvider</code> with a driver-agnostic implementation over the <code>accounting_documents</code> disk, switchable local↔S3 by <code>DOC_STORAGE_DISK</code>. <span class="tag r">Repo</span></li>
+    <li><strong>Queue</strong> runs on the <code>database</code> driver with one job class (<code>SyncDocumentToDriveJob</code>, 5 tries, backoff 30s→1h). <span class="tag r">Repo</span></li>
+  </ul>
+
+  <h4>What does not exist — the constraining findings</h4>
+  <ul class="body">
+    <li><strong>No realtime anything.</strong> <code>config/broadcasting.php</code> and <code>routes/channels.php</code> are both absent; <code>BROADCAST_CONNECTION=log</code>; no class implements <code>ShouldBroadcast</code>; Filament's <code>broadcasting.echo</code> block is commented out; <code>laravel-echo</code> and <code>pusher-js</code> are absent from <code>package.json</code>. <span class="tag r">Repo</span></li>
+    <li><strong>No client-side application to build into.</strong> <code>package.json</code> declares <em>no</em> runtime dependencies — only Vite, Tailwind, axios and concurrently as devDependencies. <code>resources/js/app.js</code> is a single import line. The only substantive project JavaScript in the repo is a vendored barcode scanner. <span class="tag r">Repo</span></li>
+    <li><strong>No desktop native shell.</strong> Only <code>nativephp/mobile</code> is required — there is no <code>nativephp/electron</code> or desktop package, no <code>config/nativephp.php</code>, no committed build directory, and no <code>Native::</code> facade call anywhere. The bridge is a WebView JS shim exposing <code>vibrate()</code> and <code>toast()</code> for <code>/admin/barcode</code>. <span class="tag r">Repo</span></li>
+    <li><strong>No large-file capability.</strong> <code>MAX_FILE_SIZE_BYTES</code> is 20&nbsp;MB; uploads run <code>file_get_contents()</code> then <code>put()</code>, holding the whole blob in memory; Drive uploads use Google's single-request <code>multipart</code> rather than resumable; and the <code>streamDownload()</code> calls stream a string that is already fully in memory. No chunked, resumable or multipart handling exists. <span class="tag r">Repo</span></li>
+    <li><strong>No device concept.</strong> No device table, token-per-device, or fingerprint. Sanctum tokens are all named <code>api-token</code> and <code>config/sanctum.php</code> sets <code>expiration => null</code>, making them permanent undifferentiated bearer credentials. <span class="tag r">Repo</span></li>
+    <li><strong>Deployment is HTTP-only.</strong> <code>docker-compose.yml</code> publishes exactly one external port (8080→80); MySQL is bound to loopback; there is no Redis, no WebSocket service, and nothing listening on UDP. <span class="tag r">Repo</span></li>
+    <li><strong>No P2P precedent.</strong> An exhaustive case-insensitive sweep for WebRTC, DataChannel, STUN/TURN, signalling, libp2p, mDNS, Bonjour, multicast, Tailscale, WireGuard and QUIC returned only false positives inside minified vendor bundles and unrelated words such as <code>smallestUnit</code>. <span class="tag r">Repo</span></li>
+  </ul>
+
+  <div class="note stop">
+    <b>Two pre-existing security findings that must be fixed before any peer feature.</b> First, the REST controllers expose <code>company_id</code> as a client-supplied <code>AllowedFilter::exact()</code> rather than deriving it from the token holder — so the API layer currently has <em>no enforced tenant boundary</em>, only a permission check. Any P2P grant issued through that layer would inherit the hole. Second, <code>Webkul\Security\Bouncer</code> caches authorized user IDs in a <code>static</code> property, which is per-process rather than per-user and will leak across users inside a long-lived worker — exactly the execution model a signalling service would introduce. <span class="tag r">Repo</span>
+  </div>
+
+  <div class="note">
+    <b>Tooling note.</b> The brief asked for Graphify-assisted relationship mapping. No Graphify tool is available in this environment, so the dependency and call-graph findings above were produced by direct repository inspection instead. <span class="tag r">Repo</span>
+  </div>
+</section>
+
+<!-- ======================= 3 ======================= -->
+<section>
+  <h2>Section 3</h2>
+  <h3>What "P2P" could actually mean here — six readings, judged separately</h3>
+
+  <p>The single most common failure in this class of project is treating these as one feature. They have almost nothing in common beyond the word "peer," and they carry wildly different risk.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Reading</th><th>What it means</th><th>Technically possible?</th><th>Appropriate for Aureus?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="crit">A · File/data transfer</td>
+          <td>Server authenticates and coordinates; bulk bytes move directly between two devices.</td>
+          <td><span class="score s4">Yes</span></td>
+          <td><span class="score s2">Narrowly</span> — only for <em>distribution</em> of blobs the server already knows the hash of, never for ingestion.</td>
+        </tr>
+        <tr>
+          <td class="crit">B · Realtime comms</td>
+          <td>Browser↔browser presence, collaboration signals, chat.</td>
+          <td><span class="score s4">Yes</span></td>
+          <td><span class="score s1">No</span> — a WebSocket server is dramatically simpler and gives server-side authorization and audit.</td>
+        </tr>
+        <tr>
+          <td class="crit">C · LAN P2P</td>
+          <td>Two machines on one office network talk directly.</td>
+          <td><span class="score s3">Transfer yes,<br>discovery no</span></td>
+          <td><span class="score s2">Narrowly</span> — the strongest genuine case, if WAN bandwidth is the real constraint.</td>
+        </tr>
+        <tr>
+          <td class="crit">D · Internet P2P</td>
+          <td>Direct connection across separate networks through NAT.</td>
+          <td><span class="score s2">Partially</span></td>
+          <td><span class="score s1">No</span> — 60–70% relay rate in managed corporate networks means it mostly is not P2P.</td>
+        </tr>
+        <tr>
+          <td class="crit">E · Offline-first sync</td>
+          <td>Device works disconnected, reconciles later.</td>
+          <td><span class="score s3">Yes, but</span></td>
+          <td><span class="score s2">Split</span> — safe for drafts/documents/caches, unsafe for ledger posting. Not a P2P problem at all.</td>
+        </tr>
+        <tr>
+          <td class="crit">F · Decentralised ERP</td>
+          <td>Multiple devices hold authoritative data and merge.</td>
+          <td><span class="score s2">Only with<br>consensus</span></td>
+          <td><span class="score s1">No</span> — structurally incompatible with double-entry invariants. See §10.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Note that A and C are the same mechanism at different network scopes, and that E is misfiled: offline capability is a <em>client-storage and command-queue</em> problem, not a peer-connectivity one. Conflating them is how projects end up building WebRTC to solve an offline requirement it cannot address — both peers must be online simultaneously for any direct channel to exist at all. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 4 ======================= -->
+<section>
+  <h2>Section 4</h2>
+  <h3>WebRTC DataChannels — the detailed case</h3>
+
+  <p>WebRTC is the only technology in this review that can create a direct peer connection <em>from an unmodified browser</em>, which makes it the default candidate for a zero-install ERP feature. A DataChannel carries arbitrary bytes over SCTP, inside DTLS, over an ICE-negotiated UDP (or TCP-fallback) path.</p>
+
+  <h4>Cross-platform and cross-browser reality</h4>
+  <ul class="body">
+    <li>Chrome, Edge, Firefox and Safari all implement <code>RTCDataChannel</code>; a Windows Chrome peer and a macOS Safari peer interoperate, because the negotiation is standardised at the protocol level rather than the browser level. <span class="tag v">Verified</span></li>
+    <li>Encryption is <strong>mandatory and cannot be disabled</strong> — DTLS is part of the WebRTC specification, not an option. This is a real and often-understated security advantage over hand-rolled sockets. <span class="tag v">Verified</span></li>
+  </ul>
+
+  <h4>How connection establishment actually works</h4>
+  <p>ICE (Interactive Connectivity Establishment) gathers three kinds of candidate address and then probes pairs of them:</p>
+  <ul class="body">
+    <li><strong>Host candidates</strong> — the machine's own local addresses. These make same-LAN connections work.</li>
+    <li><strong>Server-reflexive candidates</strong> — discovered by asking a <strong>STUN</strong> server "what public address and port do you see me from?". STUN is stateless, cheap, and carries no user traffic.</li>
+    <li><strong>Relay candidates</strong> — obtained from a <strong>TURN</strong> server, which forwards every packet on the peers' behalf when no direct path can be found.</li>
+  </ul>
+
+  <div class="note stop">
+    <b>The honesty requirement the brief demanded.</b> A TURN-relayed DataChannel is <em>not</em> direct P2P. Packets traverse a server you operate and pay bandwidth for; the only thing preserved is end-to-end encryption, which means the relay cannot read the payload but absolutely does carry it. Published measurements put relay usage between 0% and 50% depending on population, ~22% in one general study, and <strong>60–70% in corporate environments with managed firewalls</strong> — driven mainly by outbound UDP being blocked. Roughly 85% of WebRTC connection failures trace to NAT/firewall traversal. <span class="tag v">Verified</span>
+  </div>
+
+  <p>The standard mitigation is to run TURN over <strong>TCP on port 443 with TLS</strong>, which corporate firewalls rarely block because it is indistinguishable from HTTPS <span class="tag v">Verified</span>. That rescues connectivity but is precisely the configuration in which "P2P" has become a TLS tunnel through your own datacentre. <span class="tag i">Inference</span></p>
+
+  <h4>Can Laravel be the signalling server?</h4>
+  <p>Yes, and it should be. Signalling is just authenticated message relay: peer A's SDP offer and ICE candidates must reach peer B and vice versa. Requirements are modest — a handful of messages over a few seconds — so the transport does not need to be fast, only authenticated.</p>
+  <ul class="body">
+    <li><strong>Laravel/Livewire can do it over plain HTTP</strong> with short polling. Ugly but entirely workable, and it adds zero infrastructure. <span class="tag i">Inference</span></li>
+    <li><strong>Reverb is the better transport</strong> if realtime is being added anyway. Laravel 13 ships Reverb as the first-party broadcasting driver alongside Pusher and Ably, all speaking the Pusher protocol with Laravel Echo on the client. <span class="tag v">Verified</span></li>
+    <li><strong>Laravel's broadcasting has no P2P or WebRTC capability of its own</strong>; the only client-to-client feature, Pusher "client events" via <code>whisper()</code>, still routes through Pusher infrastructure. So Reverb would be carrying signalling, not payload. <span class="tag v">Verified</span></li>
+  </ul>
+
+  <h4>How peers get authenticated — the crux</h4>
+  <p>WebRTC itself authenticates nothing about <em>identity</em>. What it guarantees is that the DTLS session terminates at the endpoint whose certificate fingerprint appeared in the SDP. That is the hook: because the SDP travels through Laravel over an authenticated HTTPS session, and Laravel knows which Aureus user each socket belongs to, the fingerprint becomes a binding between a verified application identity and a transport session. Compromising it requires compromising the signalling channel — the same trust boundary as the rest of the ERP. <span class="tag i">Inference</span></p>
+
+  <h4>Large files over a DataChannel</h4>
+  <ul class="body">
+    <li>Maximum message size is negotiated by the SDP <code>max-message-size</code> attribute (RFC 8841); <strong>if absent, 64&nbsp;KB is assumed</strong>, and most modern browsers support at least 256&nbsp;KB. <span class="tag v">Verified</span></li>
+    <li>Without message interleaving (RFC 8260), one large message causes <strong>head-of-line blocking</strong> that delays every other channel. <span class="tag v">Verified</span></li>
+    <li>Therefore files must be <strong>chunked</strong> — 16–64&nbsp;KB is the safe interoperable range — with flow control driven by <code>bufferedAmount</code> and the <code>bufferedAmountLow</code> event, or the sender will exhaust memory on a fast link. <span class="tag i">Inference</span></li>
+    <li>Resume requires an application-level protocol: chunk indices, a per-transfer manifest, and a persisted byte offset. Nothing in WebRTC provides this. <span class="tag i">Inference</span></li>
+  </ul>
+
+  <p><strong>Verdict on the proposed architecture.</strong> Laravel for authentication and signalling, with a DataChannel carrying payload directly between a Windows browser and a macOS browser, is <em>viable and correctly shaped</em>. It is the right design if the feature is built. The objection is not to the architecture but to its cost/benefit in this codebase at this time. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 5 ======================= -->
+<section>
+  <h2>Section 5</h2>
+  <h3>libp2p — capable, and not justified here</h3>
+
+  <p>libp2p is the modular networking stack extracted from IPFS: pluggable transports, stream multiplexing, Noise/TLS security, persistent cryptographic peer identity, DHT-based peer discovery, circuit relay, and DCUtR hole punching. It is genuinely the most capable option in this review.</p>
+
+  <ul class="body">
+    <li><strong>WebRTC support is documented as "implemented, available and documented" in js-libp2p and go-libp2p</strong>; rust-libp2p is not listed for it. Browser→server uses WebRTC-Direct, encoding the server's TLS certificate fingerprint into the multiaddr to simplify signalling; browser↔browser works via relay-based SDP exchange. <span class="tag v">Verified</span></li>
+    <li>The documentation is explicit that <strong>browsers cannot access raw UDP or TCP sockets</strong>, which is why WebRTC is one of very few viable browser transports at all — a constraint, not a libp2p limitation. <span class="tag v">Verified</span></li>
+    <li>Best runtimes are <strong>Go or Rust</strong> for native peers and <strong>js-libp2p</strong> in the browser or Node. <span class="tag v">Verified</span></li>
+  </ul>
+
+  <h4>What adopting it would actually require</h4>
+  <p>There is no meaningful libp2p implementation for PHP. Laravel could not be a peer; it could only be a bystander issuing credentials to a separate service. That service is a new long-running daemon in a new language, with its own build toolchain, deployment unit, health monitoring, upgrade path and security surface — added to a stack whose entire production footprint is currently PHP-FPM, Nginx, a queue worker, a scheduler and MySQL. <span class="tag r">Repo</span> <span class="tag i">Inference</span></p>
+
+  <pre class="diagram">Laravel (PHP-FPM)  ──────────  MySQL          ← authority, unchanged
+      │
+      │  issues signed peer capabilities over HTTPS
+      ▼
+P2P Coordination Service  (new: Go or Rust daemon, new deploy unit)
+      │
+   ┌──┴───────────────┐
+   ▼                  ▼
+Windows peer       macOS peer
+(js-libp2p in      (js-libp2p in
+ browser, or        browser, or
+ native agent)      native agent)</pre>
+
+  <p><strong>Justified only if</strong> Aureus needed DHT-based discovery across many untrusted nodes, content-addressed distribution at scale, or a persistent mesh topology. For "send a file from one colleague's Windows laptop to another's Mac," it is a distributed-systems framework deployed to solve a two-node problem — and it would still need the same server-issued authorization layer as the WebRTC option, because libp2p peer IDs say nothing about Aureus permissions. <strong>Recommendation: no.</strong> <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 6 ======================= -->
+<section>
+  <h2>Section 6</h2>
+  <h3>Tailscale / WireGuard — the pragmatic alternative nobody asked for</h3>
+
+  <p>WireGuard is a minimal modern VPN protocol (Noise-based crypto, tiny attack surface, kernel-fast). On its own it needs manual key exchange, explicit peer endpoints, and does not traverse NAT gracefully. Tailscale is the control plane that fixes all three: identity-based enrolment with SSO, automatic key distribution and rotation, NAT traversal with DERP relays as fallback, ACL policy, and MagicDNS naming.</p>
+
+  <ul class="body">
+    <li>First-class Windows and macOS clients; direct WireGuard tunnels where possible, encrypted DERP relay where not. Traffic is end-to-end encrypted, so relays carry ciphertext only. <span class="tag v">Verified</span></li>
+    <li><strong>Pricing (2026):</strong> Personal free; Personal Plus $5/mo up to 6 users; <strong>Starter $6/user/mo</strong>; <strong>Premium $18/user/mo annual</strong> ($20 monthly) adding SSO/SAML, advanced ACLs and audit logging; Enterprise on quote. <span class="tag v">Verified</span></li>
+    <li><strong>Headscale</strong> is an open-source control-server implementation, which removes the vendor dependency and per-seat cost at the price of running it yourself. <span class="tag i">Inference</span></li>
+  </ul>
+
+  <div class="note go">
+    <b>The key reframing.</b> Tailscale does not add peer-to-peer semantics to Aureus. It makes the network flat, so ordinary client-server HTTP works between any two enrolled devices regardless of NAT. For most organisations that say "we want P2P," this is what they actually want — and it requires <em>no application code at all</em>. The existing Nginx/Laravel stack becomes reachable device-to-device unchanged. <span class="tag i">Inference</span>
+  </div>
+
+  <p><strong>The blocking objection</strong> is that it requires installing networking software with elevated privileges on every participating machine. For managed corporate fleets that is an MDM push; for BYOD, contractors, or customers whose IT forbids third-party VPN clients, it is a hard stop. It also does nothing for offline operation. <span class="tag i">Inference</span></p>
+
+  <h4>Three-way comparison</h4>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Dimension</th><th>Tailscale / Headscale</th><th>Custom WebRTC</th><th>Custom libp2p</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">Application code required</td><td><span class="score s4">None</span></td><td><span class="score s2">Substantial</span></td><td><span class="score s1">Very large</span></td></tr>
+        <tr><td class="crit">Client install required</td><td><span class="score s1">Yes, privileged</span></td><td><span class="score s4">No — browser</span></td><td><span class="score s2">Browser or native</span></td></tr>
+        <tr><td class="crit">Works for BYOD / locked-down IT</td><td><span class="score s1">Often not</span></td><td><span class="score s3">Usually</span></td><td><span class="score s2">Sometimes</span></td></tr>
+        <tr><td class="crit">Recurring cost</td><td><span class="score s2">$6–18/user/mo</span></td><td><span class="score s3">TURN bandwidth</span></td><td><span class="score s3">Relay + hosting</span></td></tr>
+        <tr><td class="crit">New failure modes introduced</td><td><span class="score s3">Few</span></td><td><span class="score s2">Many</span></td><td><span class="score s1">Very many</span></td></tr>
+        <tr><td class="crit">Time to working pilot</td><td><span class="score s4">Days</span></td><td><span class="score s2">Weeks</span></td><td><span class="score s1">Months</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================= 7 ======================= -->
+<section>
+  <h2>Section 7</h2>
+  <h3>LAN discovery — why the browser cannot do it</h3>
+
+  <p>The desired experience — open Aureus on Windows and see <em>"MacBook — Asad's device — available"</em> — is the part of this brief that is least achievable in a browser, and the reason is a deliberate privacy decision rather than a missing feature.</p>
+
+  <ul class="body">
+    <li>Chrome introduced <strong>mDNS obfuscation of ICE host candidates in 2019</strong>: instead of exposing <code>192.168.1.42</code>, the browser registers and advertises a random hostname such as <code>a1b2c3d4.local</code>. Other engines followed. Server-reflexive and relay candidates are unaffected, since those already carry public addresses. <span class="tag v">Verified</span></li>
+    <li>Consequently <strong>JavaScript cannot read local IP addresses</strong>, and there is no browser API for mDNS/DNS-SD service <em>browsing</em> at all. Browser-only LAN device enumeration is not merely hard — it is closed by design. <span class="tag v">Verified</span></li>
+  </ul>
+
+  <div class="note">
+    <b>The saving nuance.</b> Obfuscation does not prevent LAN <em>connectivity</em>. The browser's own ICE agent resolves those <code>.local</code> names internally, so two peers on the same subnet still connect over host candidates at full LAN speed — the page simply never learns the addresses involved. <strong>LAN transfer via WebRTC works; LAN discovery via WebRTC does not.</strong> <span class="tag i">Inference</span>
+  </div>
+
+  <p>Real discovery therefore requires a native agent using Bonjour on macOS or the built-in mDNS responder on Windows 10+. Two further obstacles apply even then: corporate WLANs commonly disable multicast or enable wireless client isolation, which breaks mDNS regardless of implementation; and shipping a native agent means two signed, auto-updating desktop builds that <strong>do not exist in this repository today</strong> — the NativePHP dependency present is mobile-only. <span class="tag r">Repo</span> <span class="tag i">Inference</span></p>
+
+  <p><strong>Practical substitute.</strong> Because Aureus already knows every authenticated user and (with a device table) every registered device, presence can be derived <em>server-side</em> — "Asad's MacBook, last seen 30 seconds ago, same office network by public-IP match" — and rendered as a device picker. This delivers the intended UX with no discovery protocol at all. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 8 ======================= -->
+<section>
+  <h2>Section 8</h2>
+  <h3>Technology comparison across the required dimensions</h3>
+
+  <p>Condensed from the full fourteen-technology sweep. Items that are not peer technologies at all are marked as such, because several are routinely mislabelled in P2P discussions.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Technology</th><th>Browser</th><th>Win / macOS</th><th>NAT traversal</th><th>Encryption</th><th>Laravel/PHP fit</th><th>Honest classification</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">WebRTC DataChannel</td><td><span class="score s4">All majors</span></td><td><span class="score s4">Both</span></td><td><span class="score s3">ICE</span></td><td><span class="score s4">DTLS, mandatory</span></td><td><span class="score s3">Signalling only</span></td><td>Direct P2P, degrading to relay</td></tr>
+        <tr><td class="crit">+ STUN</td><td><span class="score s4">Native to WebRTC</span></td><td><span class="score s4">Both</span></td><td><span class="score s3">Discovers mapping</span></td><td><span class="score s0">N/A</span></td><td><span class="score s4">No PHP involvement</span></td><td>Enabler of direct P2P</td></tr>
+        <tr><td class="crit">+ TURN</td><td><span class="score s4">Native to WebRTC</span></td><td><span class="score s4">Both</span></td><td><span class="score s4">Always works</span></td><td><span class="score s4">E2E preserved</span></td><td><span class="score s2">Separate service</span></td><td><strong>Relayed, not P2P</strong></td></tr>
+        <tr><td class="crit">libp2p</td><td><span class="score s3">js-libp2p</span></td><td><span class="score s4">Go / Rust</span></td><td><span class="score s4">DCUtR + relay</span></td><td><span class="score s4">Noise / TLS</span></td><td><span class="score s1">No PHP impl.</span></td><td>Direct P2P + relay fallback</td></tr>
+        <tr><td class="crit">QUIC</td><td><span class="score s1">Not exposed raw</span></td><td><span class="score s4">Both, native</span></td><td><span class="score s1">None built in</span></td><td><span class="score s4">TLS 1.3</span></td><td><span class="score s1">Native only</span></td><td>Transport only — not a P2P solution</td></tr>
+        <tr><td class="crit">Raw TCP sockets</td><td><span class="score s1">Unavailable</span></td><td><span class="score s4">Both, native</span></td><td><span class="score s1">None</span></td><td><span class="score s1">Roll your own</span></td><td><span class="score s1">Native only</span></td><td>LAN-only direct</td></tr>
+        <tr><td class="crit">WebSockets</td><td><span class="score s4">All majors</span></td><td><span class="score s4">Both</span></td><td><span class="score s0">Not needed</span></td><td><span class="score s4">TLS</span></td><td><span class="score s4">Reverb, first-party</span></td><td><strong>Centralised — not P2P</strong></td></tr>
+        <tr><td class="crit">mDNS / Bonjour / DNS-SD</td><td><span class="score s1">No API</span></td><td><span class="score s3">Both, native</span></td><td><span class="score s0">LAN only</span></td><td><span class="score s1">None</span></td><td><span class="score s1">Native agent</span></td><td>Discovery only, LAN scope</td></tr>
+        <tr><td class="crit">Tailscale</td><td><span class="score s1">No browser client</span></td><td><span class="score s4">First-class</span></td><td><span class="score s4">Excellent + DERP</span></td><td><span class="score s4">WireGuard E2E</span></td><td><span class="score s4">Zero app change</span></td><td>Direct network-layer P2P + relay</td></tr>
+        <tr><td class="crit">WireGuard alone</td><td><span class="score s1">No</span></td><td><span class="score s4">Both</span></td><td><span class="score s2">Manual config</span></td><td><span class="score s4">Noise</span></td><td><span class="score s4">Zero app change</span></td><td>Direct, with static config</td></tr>
+        <tr><td class="crit">Relay server</td><td><span class="score s4">Any</span></td><td><span class="score s4">Both</span></td><td><span class="score s4">Bypasses it</span></td><td><span class="score s3">Depends</span></td><td><span class="score s3">Feasible</span></td><td><strong>Centralised by definition</strong></td></tr>
+        <tr><td class="crit">Hybrid</td><td><span class="score s4">Yes</span></td><td><span class="score s4">Both</span></td><td><span class="score s4">Per-path</span></td><td><span class="score s4">Per-path</span></td><td><span class="score s4">Authority retained</span></td><td>Mixed, explicitly labelled per transfer</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Licensing is unproblematic across the board: WebRTC is an open standard with a BSD-licensed reference implementation, coturn is BSD, libp2p is MIT/Apache, WireGuard is GPLv2 with permissive userspace implementations, and Headscale is BSD. The only commercial dependency in the set is Tailscale's hosted control plane. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 9 ======================= -->
+<section>
+  <h2>Section 9</h2>
+  <h3>Security architecture</h3>
+
+  <div class="note stop">
+    <b>The governing principle.</b> A peer connection must never, under any circumstance, imply authorization. Establishing a DTLS session proves only that the other endpoint held the certificate fingerprint exchanged during signalling. It proves nothing about who that user is, which company they belong to, or what they may read. Every payload must be authorized by the server <em>before</em> the transfer, and verified cryptographically <em>after</em> it.
+  </div>
+
+  <h4>Device identity — net-new, but with a foundation</h4>
+  <p>Aureus has no device concept today, so this must be built. The natural shape is a <code>user_devices</code> table holding a server-assigned id, the owning user and company, a device-generated <strong>public key</strong>, a human label, platform, <code>last_seen_at</code>, and <code>revoked_at</code>. Private keys are generated on the device and never transmitted — WebCrypto with a non-extractable key persisted in IndexedDB for browsers, Keychain or DPAPI for a native agent. The existing <code>personal_access_tokens</code> table is a reasonable companion, but only after fixing the two defects found in this review: tokens are all named <code>api-token</code>, and <code>expiration</code> is <code>null</code>, making them permanent. <span class="tag r">Repo</span> <span class="tag i">Inference</span></p>
+
+  <h4>Authorization via short-lived capability grants</h4>
+  <p>The correct primitive is a server-signed, single-use, short-lived <strong>transfer grant</strong> — not a persistent peer trust relationship. It should carry: grant id and nonce, sender user and device, recipient user and device, <code>company_id</code>, the specific <code>document_id</code> and its expected SHA-256, a byte ceiling, the expected DTLS fingerprint, and an expiry measured in minutes.</p>
+  <p>This design puts every access decision back where it belongs. The <em>server</em> evaluates the existing <code>AccountingPermissions</code> checks and company isolation before issuing anything; the peers merely execute a transfer that has already been authorized. Binding the expected fingerprint into the grant lets each peer verify that the connection it is actually on is the one the server blessed, which is what defeats substitution and man-in-the-middle attempts at the signalling layer. <span class="tag i">Inference</span></p>
+
+  <h4>Threat-by-threat</h4>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Threat</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">Replay of an old grant</td><td>Single-use consumption recorded server-side, plus nonce and short expiry.</td></tr>
+        <tr><td class="crit">Man-in-the-middle</td><td>DTLS is mandatory; expected fingerprint pinned inside the server-signed grant.</td></tr>
+        <tr><td class="crit">Revoked or stolen device</td><td>Grants expire in minutes, so revocation is mostly expiry; <code>revoked_at</code> checked at issuance; long transfers re-validate via periodic server heartbeat.</td></tr>
+        <tr><td class="crit">Malicious peer sending junk</td><td>Recipient treats all inbound bytes as untrusted: verify SHA-256 against the server-supplied hash, enforce the existing <code>ALLOWED_MIME_TYPES</code> allowlist and size cap, quarantine until verified, never execute.</td></tr>
+        <tr><td class="crit">Unauthorized LAN device</td><td>Irrelevant by construction — no grant, no transfer. LAN proximity confers nothing.</td></tr>
+        <tr><td class="crit">Cross-company leakage</td><td><code>company_id</code> embedded in the grant and re-checked at issuance; <strong>requires fixing the REST tenant-isolation gap first</strong>.</td></tr>
+        <tr><td class="crit">Exfiltration at volume</td><td>Per-user grant-issuance rate limits, concurrent-transfer caps, daily byte ceilings.</td></tr>
+        <tr><td class="crit">Audit blind spot</td><td>See below — this one cannot be fully solved.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note stop">
+    <b>An irreducible weakness, stated plainly.</b> When bytes move peer-to-peer, the server does not observe the transfer. It can log that it <em>authorized</em> one and collect signed completion attestations from both peers (hash, byte count, duration), but it cannot independently prove what was actually transmitted. For an ERP whose document subsystem currently records every view and download in an append-only audit table, this is a genuine reduction in auditability — and for regulated financial records it may be disqualifying on its own. A reviewer should weigh this before any technical consideration. <span class="tag i">Inference</span>
+  </div>
+</section>
+
+<!-- ======================= 10 ======================= -->
+<section>
+  <h2>Section 10</h2>
+  <h3>Accounting safety, and why offline ledgers are a different class of problem</h3>
+
+  <p>The brief's initial assumption was that P2P should never directly mutate authoritative accounting data. <strong>That assumption is correct, and it can be proved rather than asserted.</strong></p>
+
+  <h4>Four invariants that require a single serialization point</h4>
+  <ol class="body">
+    <li><strong>Gapless sequential numbering.</strong> Journals and invoices carry per-company, per-journal sequences — this repository's own records show <code>BILL/2026/27</code> and <code>MISC/2026/25</code>, and its auto-naming overrides a caller-supplied name. A gapless sequence is a global invariant: it cannot be allocated on a disconnected device without either coordination (which defeats disconnection) or post-hoc renumbering (which invalidates any reference already issued to a vendor or tax authority). <span class="tag r">Repo</span></li>
+    <li><strong>Balance and control totals.</strong> Two devices can each create individually valid entries that jointly breach a period control total. Validity is not composable.</li>
+    <li><strong>Period locks.</strong> Posting into a closed period is illegal, and a disconnected device cannot know the period closed ten minutes ago.</li>
+    <li><strong>Approval semantics.</strong> An approval binds a person, a role, a moment, and <em>a specific version</em> of a record. It is not commutative and has no merge function — approving offline a record that changed server-side is either meaningless or dangerous.</li>
+  </ol>
+
+  <h4>Why CRDTs do not rescue this</h4>
+  <p>Conflict-free replicated data types work by guaranteeing that concurrent states can always be merged deterministically. That is exactly the wrong shape for a ledger. A posted journal is immutable by design in this codebase — <code>DocumentVersion</code> throws on <code>updating</code>, and the repository history records "immutable versions, posted-record locking, mandatory change reason." There is no valid merge of "posted" and "posted differently." Accounting resolves conflicts the opposite way: by appending a compensating entry that preserves both facts. <span class="tag r">Repo</span> <span class="tag i">Inference</span></p>
+
+  <p>Contrast <strong>"upload document"</strong>. A document is content-addressed by SHA-256, additive, and order-independent. Two devices uploading two documents yields two documents; no invariant is touched, and add-only merge is <em>semantically correct</em>. The same holds for <strong>"update draft note"</strong> — a draft carries no external commitment, so last-write-wins is acceptable — and for <strong>"cache reference data"</strong>, which is read-only replication with no writes to merge. This is the precise dividing line. <span class="tag i">Inference</span></p>
+
+  <h4>Data classification</h4>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Class</th><th>Examples</th><th>P2P?</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">Opaque verifiable blobs</td><td>Document bytes whose hash the server already knows</td><td><span class="score s3">Permissible</span></td><td>Integrity is independently checkable; authority stays in MySQL.</td></tr>
+        <tr><td class="crit">Ephemeral signals</td><td>Presence, typing, cursor position</td><td><span class="score s3">Permissible</span></td><td>Non-authoritative and disposable — though WebSockets are simpler.</td></tr>
+        <tr><td class="crit">Read-only reference cache</td><td>Chart of accounts, tax codes, partner list</td><td><span class="score s2">Marginal</span></td><td>Safe but stale-prone; little benefit over HTTP caching.</td></tr>
+        <tr><td class="crit">Document metadata</td><td>Title, type, attachment links, permissions</td><td><span class="score s1">No</span></td><td>Governs access; must be server-authoritative.</td></tr>
+        <tr><td class="crit">Posted ledger data</td><td>Journals, ledger lines, invoices, payments</td><td><span class="score s1">Never</span></td><td>All four invariants above.</td></tr>
+        <tr><td class="crit">Authorization events</td><td>Approvals, postings, payment release</td><td><span class="score s1">Never</span></td><td>Not mergeable; legally attributable acts.</td></tr>
+        <tr><td class="crit">Sensitive master data</td><td>Salaries, permissions, company config</td><td><span class="score s1">Never</span></td><td>Confidentiality plus authority.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note go">
+    <b>Challenging the assumption where it deserves challenge.</b> There <em>is</em> a legitimate offline pattern for accounting, and it is not synchronisation. Queue <strong>intents</strong> (commands), never states: the device records "I intend to create a bill with these fields" plus a client-generated idempotency key; on reconnect the server replays the intent, validates it against current state, assigns the sequence number at commit time, and <strong>may reject it</strong>. Authority never leaves MySQL. The UI must then show "pending submission" as a visibly distinct state from "recorded" — conflating them is how users come to believe an unposted entry is posted. This is deferred submission, not offline sync, and it needs no P2P whatsoever. <span class="tag i">Inference</span>
+  </div>
+
+  <h4>Fully decentralised ERP (reading F)</h4>
+  <p>Preserving the four invariants across multiple authoritative replicas requires distributed consensus — Raft or Paxos — which needs a live quorum. That defeats the entire purpose for disconnected devices, and buys enormous operational complexity for no business benefit in a single-tenant ERP. The systems that do run multi-master ledgers purchase it with consensus latency and append-only immutability, and even they do not model approval chains or HR hierarchies. <strong>Not recommended, on architectural grounds rather than difficulty.</strong> <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 11 ======================= -->
+<section>
+  <h2>Section 11</h2>
+  <h3>Five architecture options</h3>
+
+  <h4>Option A — WebRTC only</h4>
+  <p>Laravel authenticates and signals; browser-to-browser DataChannel carries payload; coturn provides STUN and TURN fallback. Zero install, works on both platforms. Costs: greenfield JavaScript in a repo with no runtime JS dependencies, new UDP/TLS infrastructure, and a 60–70% relay rate in the corporate networks that are the actual target.</p>
+
+  <h4>Option B — LAN P2P with a native agent</h4>
+  <p>Signed desktop agents for Windows and macOS perform mDNS discovery and direct socket transfer. Best raw performance and the only option delivering true device discovery. Costs: two native applications that do not exist today, code signing, MDM distribution, auto-update, and vulnerability to the multicast suppression and client isolation common on corporate WLANs.</p>
+
+  <h4>Option C — Tailscale / Headscale</h4>
+  <p>Enrol devices into an overlay network; every device becomes routable; the existing HTTP stack works unchanged across networks. Lowest effort by a wide margin and strongest security story. Costs: privileged client software on every machine (disqualifying for some IT policies) and either per-seat fees or self-hosting Headscale.</p>
+
+  <h4>Option D — libp2p with a coordination service</h4>
+  <p>A Go or Rust daemon alongside Laravel, with js-libp2p or native peers. Most capable, least justified: a new language runtime and deployment unit for a two-node problem, with no PHP participation possible.</p>
+
+  <h4>Option E — Hybrid (recommended)</h4>
+  <p>MySQL remains the sole authority. Each need is routed to the simplest adequate transport, and every transfer is explicitly labelled by the path it actually took.</p>
+
+  <pre class="diagram">AUTHORITY — unchanged, no P2P ever
+  Browser ──HTTPS──▶ Nginx ──▶ Laravel/Filament ──▶ Eloquent ──▶ MySQL
+                                    │
+                                    ├─ journals, invoices, payments, approvals
+                                    ├─ document metadata + permissions
+                                    └─ audit trail (append-only)
+
+REALTIME — centralised, server-authorized        [prerequisite, not P2P]
+  Browser ◀──WebSocket──▶ Reverb ──▶ Laravel      presence · notifications
+
+BULK BYTES — three paths, tried in order, each labelled in the audit row
+  1. direct WebRTC DataChannel   peer ◀────────────▶ peer      "direct"
+  2. TURN-relayed DataChannel    peer ◀──coturn───▶ peer      "relayed"
+  3. plain server transfer       peer ──▶ Laravel ──▶ peer      "server"
+     ▲ always available; 1 and 2 are optimisations over it, never
+       a replacement, and the canonical copy still reaches storage
+
+AUTHORIZATION for every path above
+  Laravel issues a signed, single-use, minutes-long transfer grant
+  bound to: user + device + company + document + SHA-256 + fingerprint</pre>
+
+  <p>The essential property is that path 3 is the baseline and is <em>never removed</em>. Paths 1 and 2 are bandwidth optimisations that can fail freely without any loss of function — which is what makes the whole design safe to ship incrementally and safe to switch off. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 12 ======================= -->
+<section>
+  <h2>Section 12</h2>
+  <h3>Decision matrix</h3>
+
+  <p>All criteria are phrased so that <span class="score s4">Excellent</span> is always the desirable end, avoiding the ambiguity of scoring "complexity." Scale: <span class="score s4">Excellent</span> <span class="score s3">Good</span> <span class="score s2">Acceptable</span> <span class="score s1">Poor</span> <span class="score s0">N/A</span>.</p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Criterion</th><th>WebRTC</th><th>libp2p</th><th>Tailscale</th><th>LAN P2P</th><th class="rec">Hybrid</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">Windows support</td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s3">Good</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">macOS support</td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s3">Good</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Browser support</td><td><span class="score s4">Excellent</span></td><td><span class="score s3">Good</span></td><td><span class="score s1">Not suitable</span></td><td><span class="score s1">Not suitable</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Internet P2P</td><td><span class="score s2">Acceptable</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s1">Not suitable</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">LAN P2P</td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">NAT traversal</td><td><span class="score s3">Good</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s0">N/A</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Security model</td><td><span class="score s3">Good</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s2">Acceptable</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Authentication fit to Aureus</td><td><span class="score s2">Acceptable</span></td><td><span class="score s2">Acceptable</span></td><td><span class="score s3">Good</span></td><td><span class="score s2">Acceptable</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Performance</td><td><span class="score s3">Good</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Large-file suitability</td><td><span class="score s2">Acceptable</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s4">Excellent</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Offline capability</td><td><span class="score s1">Not suitable</span></td><td><span class="score s2">Acceptable</span></td><td><span class="score s1">Not suitable</span></td><td><span class="score s2">Acceptable</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Laravel integration</td><td><span class="score s3">Good</span></td><td><span class="score s1">Poor</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Implementation simplicity</td><td><span class="score s1">Poor</span></td><td><span class="score s1">Not suitable</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s2">Acceptable</span></td></tr>
+        <tr><td class="crit">Maintainability</td><td><span class="score s2">Acceptable</span></td><td><span class="score s1">Poor</span></td><td><span class="score s3">Good</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Infrastructure cost</td><td><span class="score s2">Acceptable</span></td><td><span class="score s2">Acceptable</span></td><td><span class="score s1">Poor</span></td><td><span class="score s4">Excellent</span></td><td class="rec"><span class="score s2">Acceptable</span></td></tr>
+        <tr><td class="crit">Enterprise suitability</td><td><span class="score s2">Acceptable</span></td><td><span class="score s1">Poor</span></td><td><span class="score s3">Good</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s3">Good</span></td></tr>
+        <tr><td class="crit">Deployment ease</td><td><span class="score s1">Poor</span></td><td><span class="score s1">Poor</span></td><td><span class="score s3">Good</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s2">Acceptable</span></td></tr>
+        <tr><td class="crit">Scalability</td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s3">Good</span></td><td><span class="score s2">Acceptable</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Reliability</td><td><span class="score s2">Acceptable</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s2">Acceptable</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+        <tr><td class="crit">Fallback capability</td><td><span class="score s3">Good</span></td><td><span class="score s3">Good</span></td><td><span class="score s4">Excellent</span></td><td><span class="score s1">Poor</span></td><td class="rec"><span class="score s4">Excellent</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>The scores that decide it</h4>
+  <ul class="body">
+    <li><strong>WebRTC · Internet P2P · Acceptable</strong> — it connects, but the verified 60–70% enterprise relay rate means the majority of sessions are not peer-to-peer.</li>
+    <li><strong>WebRTC · Deployment ease · Poor</strong> — coturn needs UDP 3478, a wide UDP relay port range, and ideally TCP/TLS 443, against a compose file that publishes one HTTP port today. TURN on 443 also collides with Nginx unless separately addressed.</li>
+    <li><strong>libp2p · Laravel integration · Poor</strong> — no PHP implementation means Laravel cannot be a peer, only a credential issuer, so the new daemon buys nothing the WebRTC option does not.</li>
+    <li><strong>Tailscale · Browser support · Not suitable</strong> — it operates at the network layer, so it cannot serve a zero-install browser feature. This is also why it needs no application code.</li>
+    <li><strong>Tailscale · Infrastructure cost · Poor</strong> — $6–18/user/month is significant per-seat cost for an ERP, though Headscale removes it.</li>
+    <li><strong>LAN P2P · Fallback · Poor</strong> — when discovery fails, which it does on isolated corporate WLANs, there is no graceful degradation without building the server path anyway.</li>
+    <li><strong>Hybrid · Offline · Good</strong> — earned not by P2P but by the command-outbox pattern of §10, which is the only offline approach safe for accounting.</li>
+  </ul>
+</section>
+
+<!-- ======================= 13 ======================= -->
+<section>
+  <h2>Section 13</h2>
+  <h3>Recommendation — direct answers</h3>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Question</th><th>Answer</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">1. Best technology</td><td><strong>WebRTC DataChannels</strong> if an in-app peer feature is built. <strong>Tailscale or Headscale</strong> if the real need is cross-network reachability.</td></tr>
+        <tr><td class="crit">2. Best architecture</td><td><strong>Option E, Hybrid</strong> — MySQL authoritative, three labelled transfer paths, server path never removed.</td></tr>
+        <tr><td class="crit">3. Browser or native?</td><td><strong>Browser.</strong> Native only if true LAN discovery becomes a hard requirement — and note no desktop shell exists today, so that is a new product, not a feature.</td></tr>
+        <tr><td class="crit">4. Should Laravel remain coordinator?</td><td><strong>Yes, unconditionally.</strong> Authentication, authorization, grant issuance, signalling and audit all stay in Laravel.</td></tr>
+        <tr><td class="crit">5. Dedicated P2P service needed?</td><td><strong>No.</strong> Signalling fits in Laravel over HTTP, better over Reverb. A separate daemon is only required by libp2p, which is not recommended.</td></tr>
+        <tr><td class="crit">6. TURN/relay infrastructure needed?</td><td><strong>Yes — unavoidably.</strong> Without TURN the feature fails for the majority of corporate users. Budget relay bandwidth from day one and label relayed transfers honestly.</td></tr>
+        <tr><td class="crit">7. Use Tailscale?</td><td><strong>Only if</strong> devices are managed and the requirement is reachability rather than in-browser transfer. Then it is the best option by a wide margin.</td></tr>
+        <tr><td class="crit">8. Is libp2p justified?</td><td><strong>No.</strong> A new language runtime and deployment unit for a two-node problem, with no PHP participation.</td></tr>
+        <tr><td class="crit">9. What stays centralised?</td><td>All ledger data, all approvals and postings, all document <em>metadata</em> and permissions, all sensitive master data, the audit trail, and every authorization decision.</td></tr>
+        <tr><td class="crit">10. What may cross P2P?</td><td>Only opaque document <em>bytes</em> whose SHA-256 the server already holds, under a short-lived grant — plus, optionally, ephemeral presence signals better served by WebSockets.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note stop">
+    <b>Three prerequisites before any P2P work begins.</b> <b>(1)</b> Fix the file pipeline: streaming instead of <code>file_get_contents</code>, resumable chunked upload, direct-to-S3, and a raised size cap. This alone addresses most large-file pain and is a fraction of the effort. <b>(2)</b> Install Reverb and build server-side realtime, which is the correct substrate for presence, device pickers and signalling. <b>(3)</b> Close the REST tenant-isolation gap and introduce device-scoped, expiring tokens. Attempting P2P before these is building the hardest possible thing on top of three known defects. <span class="tag i">Inference</span>
+  </div>
+</section>
+
+<!-- ======================= 14 ======================= -->
+<section>
+  <h2>Section 14</h2>
+  <h3>Proof of concept — standalone, outside the ERP</h3>
+
+  <p>The POC should be a small separate Laravel application plus a single-page client. It must not touch Aureus. Its purpose is not to demonstrate that WebRTC works — that is established — but to <strong>measure the direct-connection rate on the customer's real networks</strong>, which is the only number that decides go or no-go.</p>
+
+  <div class="pocs">
+    <div class="poc"><div class="pid">TEST 1</div><h5>Windows Chrome ↔ macOS Safari</h5><p>Establish a DataChannel between the two target platforms and exchange a known payload.</p><div class="crit-line"><b>Pass:</b> byte-identical payload, both directions, Safari included — it is the most divergent implementation.</div></div>
+    <div class="poc"><div class="pid">TEST 2</div><h5>Same LAN</h5><p>Both peers on one office subnet. Record which candidate type wins.</p><div class="crit-line"><b>Pass:</b> selected pair is <code>host</code>/<code>host</code>, confirming LAN-direct despite mDNS obfuscation.</div></div>
+    <div class="poc"><div class="pid">TEST 3</div><h5>Different networks</h5><p>One peer on office WAN, one on home broadband, one on mobile tethering.</p><div class="crit-line"><b>Pass:</b> connection succeeds; record <code>srflx</code> versus <code>relay</code> for each pairing.</div></div>
+    <div class="poc"><div class="pid">TEST 4</div><h5>NAT traversal census</h5><p><strong>The decisive test.</strong> Run 1–3 across every real network the customer uses, including the guest and corporate WLANs.</p><div class="crit-line"><b>Pass:</b> ≥70% of pairings achieve a non-relay path. Below that, abandon P2P — you are building a relay service.</div></div>
+    <div class="poc"><div class="pid">TEST 5</div><h5>Failure → fallback</h5><p>Block UDP at the firewall, then block TURN, and confirm each degradation step.</p><div class="crit-line"><b>Pass:</b> falls direct → relay → plain server transfer with no user-visible failure, only slower.</div></div>
+    <div class="poc"><div class="pid">TEST 6</div><h5>Authentication</h5><p>Attempt a transfer with no grant, an expired grant, another user's grant, and a grant for a different company.</p><div class="crit-line"><b>Pass:</b> all four refused at the receiving peer, not merely hidden in the UI.</div></div>
+    <div class="poc"><div class="pid">TEST 7</div><h5>Peer revocation</h5><p>Revoke the sending device mid-transfer.</p><div class="crit-line"><b>Pass:</b> in-flight transfer aborts at the next heartbeat; no new grant issues; revocation is audited.</div></div>
+    <div class="poc"><div class="pid">TEST 8</div><h5>Encrypted transfer + tamper</h5><p>Confirm DTLS is active, then have a malicious sender flip one byte.</p><div class="crit-line"><b>Pass:</b> receiver's SHA-256 check rejects and quarantines; rejection is audited.</div></div>
+    <div class="poc"><div class="pid">TEST 9</div><h5>Large file</h5><p>Transfer 100&nbsp;MB, 500&nbsp;MB and 2&nbsp;GB with chunking and <code>bufferedAmount</code> backpressure.</p><div class="crit-line"><b>Pass:</b> completes without unbounded memory growth on either peer; record throughput versus plain HTTPS upload.</div></div>
+    <div class="poc"><div class="pid">TEST 10</div><h5>Interrupted resume</h5><p>Sever the network at 40% and reconnect.</p><div class="crit-line"><b>Pass:</b> resumes from the recorded offset rather than restarting; final hash matches.</div></div>
+  </div>
+
+  <p><strong>Instrumentation is the actual deliverable.</strong> Every run must record the selected candidate pair type, negotiation duration, throughput, relay bytes consumed, and failure cause — written to a table and reported as distributions, not anecdotes. Test 4's percentage and Test 9's throughput-versus-HTTPS comparison are what a reviewer should decide on. A POC that proves connectivity without quantifying the relay rate has proven nothing actionable. <span class="tag i">Inference</span></p>
+</section>
+
+<!-- ======================= 15 ======================= -->
+<section>
+  <h2>Section 15</h2>
+  <h3>Integration into Aureus, if approved</h3>
+
+  <p>Designed to extend existing subsystems rather than parallel them. No accounting or HR logic is touched; no authority moves out of MySQL.</p>
+
+  <h4>New tables — three, all additive</h4>
+  <ul class="body">
+    <li><code>user_devices</code> — id, user_id, company_id, public_key, label, platform, last_seen_at, revoked_at.</li>
+    <li><code>p2p_transfer_grants</code> — grant_id, nonce, sender/recipient user+device, company_id, document_id, expected_sha256, max_bytes, expected_fingerprint, expires_at, consumed_at.</li>
+    <li><code>p2p_transfer_attempts</code> — grant_id, <strong>path taken (direct/relay/server)</strong>, bytes, duration, outcome, failure reason, both peers' signed attestations.</li>
+  </ul>
+
+  <h4>Reuse rather than rebuild</h4>
+  <ul class="body">
+    <li><strong>Audit:</strong> add cases to the existing <code>DocumentAuditAction</code> enum — <code>p2p_grant_issued</code>, <code>p2p_transfer_completed</code>, <code>p2p_transfer_failed</code>, <code>p2p_integrity_rejected</code> — writing to <code>accounting_document_audits</code>. No new audit system. <span class="tag r">Repo</span></li>
+    <li><strong>Integrity:</strong> reuse <code>checksum_sha256</code> and the <code>readVerifiedBytes()</code> pattern; the recipient performs exactly the check the server already performs.</li>
+    <li><strong>Validation:</strong> reuse <code>ALLOWED_MIME_TYPES</code> and <code>MAX_FILE_SIZE_BYTES</code> (raised as part of prerequisite 1).</li>
+    <li><strong>Permissions:</strong> grant issuance calls the existing <code>AccountingPermissions::DownloadDocuments</code> check and <code>assertCompanyAccess()</code>. No new permission model — at most one new <code>accounting_transfer_documents_p2p</code> permission so the capability can be withheld per role.</li>
+    <li><strong>Storage:</strong> unchanged. <code>DocumentStorageProvider</code> remains the only writer of canonical bytes.</li>
+    <li><strong>Queue:</strong> reuse the database queue for attestation reconciliation and grant expiry sweeps.</li>
+  </ul>
+
+  <h4>New surfaces</h4>
+  <ul class="body">
+    <li><strong>Routes:</strong> <code>POST admin/api/v1/p2p/grants</code>, <code>POST .../signal</code>, <code>POST .../attest</code>, <code>DELETE admin/api/v1/devices/{id}</code> — all <code>auth:sanctum</code>, all company-scoped from the token rather than from request input.</li>
+    <li><strong>Services:</strong> <code>DeviceRegistrationService</code>, <code>TransferGrantService</code>, <code>SignalingService</code> — thin, and none of them a data-access path.</li>
+    <li><strong>UI:</strong> one action on the existing <code>DocumentAttachmentsRelationManager</code> — "Send to device" — plus a device list on the profile page. The transfer indicator must state the path in plain words: <em>"sent directly"</em>, <em>"sent via relay"</em>, <em>"sent via server"</em>.</li>
+    <li><strong>Monitoring:</strong> direct-versus-relay ratio, relay bytes per month, grant issuance rate, integrity-rejection count. The first two are cost and architecture-validity signals; the last is a security signal.</li>
+    <li><strong>Failure handling:</strong> every path falls back to plain server transfer, and the fallback is the tested default rather than an error branch.</li>
+  </ul>
+</section>
+
+<!-- ======================= 16–18 ======================= -->
+<section>
+  <h2>Sections 16–18</h2>
+  <h3>Risks, cost, and rollout</h3>
+
+  <h4>Risks, highest first</h4>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Risk</th><th>Severity</th><th>Response</th></tr></thead>
+      <tbody>
+        <tr><td class="crit">Reduced auditability of transferred bytes</td><td><span class="score s1">High</span></td><td>Signed dual attestations; accept residual gap, or do not ship P2P for regulated documents.</td></tr>
+        <tr><td class="crit">Relay rate makes it centralised anyway</td><td><span class="score s1">High</span></td><td>POC Test 4 gate at 70%; abandon below it.</td></tr>
+        <tr><td class="crit">Grant issuance built on the broken tenant boundary</td><td><span class="score s1">High</span></td><td>Prerequisite 3 — fix REST company scoping first.</td></tr>
+        <tr><td class="crit">Greenfield JS in a repo with no JS runtime deps</td><td><span class="score s2">Medium</span></td><td>Confine to one Vite entry point and one Livewire component; no SPA.</td></tr>
+        <tr><td class="crit">coturn operational burden and port exposure</td><td><span class="score s2">Medium</span></td><td>Separate host or IP from Nginx; time-limited HMAC credentials; bandwidth alerting.</td></tr>
+        <tr><td class="crit">Bouncer static-cache leak under a long-lived process</td><td><span class="score s2">Medium</span></td><td>Fix before any worker-resident signalling.</td></tr>
+        <tr><td class="crit">Users misreading "pending" as "recorded" in offline mode</td><td><span class="score s2">Medium</span></td><td>Visually distinct pending state; never render a queued intent as a posted record.</td></tr>
+        <tr><td class="crit">Two native desktop builds if LAN discovery is mandated</td><td><span class="score s1">High</span></td><td>Treat as a separate product decision, not a feature increment.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Cost and operations</h4>
+  <ul class="body">
+    <li><strong>Hybrid/WebRTC:</strong> one coturn instance (small VM), relay egress billed per GB for the 30–70% of transfers that relay, plus a Reverb process. Engineering cost is dominated by the client protocol — chunking, backpressure, resume, grants — not by the WebRTC handshake.</li>
+    <li><strong>Tailscale:</strong> $6/user/month Starter or $18/user/month Premium for SSO and audit logging <span class="tag v">Verified</span>; near-zero engineering. Headscale trades the fee for operating a control server.</li>
+    <li><strong>libp2p:</strong> a new runtime, build pipeline, and on-call surface — the highest total cost of ownership in the set for the least incremental benefit here.</li>
+    <li><strong>Do-nothing-P2P baseline:</strong> fixing the file pipeline and adding Reverb is a fraction of any option above and resolves most of the underlying user pain.</li>
+  </ul>
+
+  <h4>Rollout, if it proceeds</h4>
+  <div class="phase"><div class="pnum">0</div><div class="pbody"><h5>Prerequisites</h5><p>Streaming and resumable uploads, direct-to-S3, raised size cap; Reverb installed; REST tenant isolation and device-scoped expiring tokens fixed. Ship and measure before going further — this phase may well close the request on its own.</p></div></div>
+  <div class="phase"><div class="pnum">1</div><div class="pbody"><h5>Standalone POC</h5><p>All ten tests outside the ERP, on the customer's real networks. Decision gate: Test 4 ≥70% direct, and Test 9 showing a material throughput advantage over plain HTTPS.</p></div></div>
+  <div class="phase"><div class="pnum">2</div><div class="pbody"><h5>Device registry and grants, no transport</h5><p>Ship <code>user_devices</code>, grant issuance, revocation, audit actions and the device picker — with server transfer as the only path. Delivers the "send to Asad's MacBook" experience immediately, and every later path reuses this layer.</p></div></div>
+  <div class="phase"><div class="pnum">3</div><div class="pbody"><h5>WebRTC behind a feature flag</h5><p>Direct path first, relay second, both falling back to phase 2. Off by default, per-company opt-in, with the path shown in the UI and recorded in the audit row.</p></div></div>
+  <div class="phase"><div class="pnum">4</div><div class="pbody"><h5>Evaluate on production telemetry</h5><p>Keep it only if the measured direct rate holds and relay cost is justified. Retiring phase 3 must be a configuration change, which it is, because phase 2 never stopped working.</p></div></div>
+
+  <h4>Final go / no-go</h4>
+  <div class="note stop">
+    <b>No-go on P2P now. Go on prerequisites, and on phase 2 regardless.</b> The device registry, grant model and audit extensions are worth building on their own merits — they deliver the requested user experience, close real security gaps, and are a precondition for any future peer transport. The peer transport itself should wait behind a measured POC, and should be abandoned outright if the direct-connection rate on the customer's actual networks falls below 70%. If the underlying requirement turns out to be cross-network reachability rather than in-browser transfer, adopt Tailscale or Headscale and write no application code at all. <span class="tag i">Inference</span>
+  </div>
+
+  <h4>Assumptions that would change this</h4>
+  <ul class="body">
+    <li><span class="tag a">Assumption</span> Users are primarily on managed corporate networks. If they are mostly on home or mobile networks, relay rates drop toward 20% and WebRTC becomes materially more attractive.</li>
+    <li><span class="tag a">Assumption</span> Typical transfers are tens to hundreds of megabytes. At multi-gigabyte media scale the bandwidth argument strengthens considerably.</li>
+    <li><span class="tag a">Assumption</span> Installing privileged client software is unacceptable for some users. If every device is MDM-managed, Tailscale becomes the clear winner.</li>
+    <li><span class="tag a">Assumption</span> No regulatory obligation requires the server to observe every document transfer. If one does, P2P for documents is disqualified outright.</li>
+  </ul>
+</section>
+
+<footer>
+  <p><strong>Sources consulted:</strong> Laravel 13 broadcasting documentation; MDN WebRTC data-channel and RTCIceCandidate references; libp2p WebRTC transport documentation; published WebRTC TURN-usage measurements; Tailscale 2026 pricing. Repository findings are cited inline by path. Version facts verified from <code>composer.lock</code>: Laravel 13.8.0, Filament 5.6.3, Livewire 4.3.0, Sanctum 4.3.2, spatie/laravel-permission 7.4.1.</p>
+  <p>No code, migrations, or configuration were modified in producing this report.</p>
+</footer>
+
+</div>

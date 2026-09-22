@@ -1,0 +1,604 @@
+<title>Finance Role Access Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#F4F5F8;
+    --surface:#FFFFFF;
+    --surface-2:#EDEFF4;
+    --border:#DBDFE7;
+    --text:#1B2130;
+    --text-muted:#5B6472;
+    --text-faint:#8992A3;
+    --accent:#2F4FD6;
+    --accent-ink:#1E3AB0;
+    --accent-soft:#E9EDFC;
+    --pass:#1E7A54;
+    --pass-soft:#E3F4EC;
+    --pass-border:#BEE3CF;
+    --partial:#9A6B00;
+    --partial-soft:#FBF0D9;
+    --partial-border:#EFD693;
+    --bug:#B23A2E;
+    --bug-soft:#FBEAE7;
+    --bug-border:#F0C3BC;
+    --na:#68707E;
+    --na-soft:#EDEFF3;
+    --na-border:#D7DBE3;
+    --shadow: 0 1px 2px rgba(20,24,34,0.04), 0 8px 24px -12px rgba(20,24,34,0.10);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0E1116;
+      --surface:#161A22;
+      --surface-2:#1D222C;
+      --border:#2A2F3B;
+      --text:#E7E9F0;
+      --text-muted:#9AA2B2;
+      --text-faint:#6E7688;
+      --accent:#8098FF;
+      --accent-ink:#AFC0FF;
+      --accent-soft:#1C2340;
+      --pass:#59CB98;
+      --pass-soft:#132A21;
+      --pass-border:#20402F;
+      --partial:#E7B84A;
+      --partial-soft:#2E2408;
+      --partial-border:#4A3B10;
+      --bug:#F0897B;
+      --bug-soft:#33150F;
+      --bug-border:#4C2019;
+      --na:#8891A0;
+      --na-soft:#1B1F28;
+      --na-border:#2C3140;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1116;
+    --surface:#161A22;
+    --surface-2:#1D222C;
+    --border:#2A2F3B;
+    --text:#E7E9F0;
+    --text-muted:#9AA2B2;
+    --text-faint:#6E7688;
+    --accent:#8098FF;
+    --accent:#8098FF;
+    --accent-ink:#AFC0FF;
+    --accent-soft:#1C2340;
+    --pass:#59CB98;
+    --pass-soft:#132A21;
+    --pass-border:#20402F;
+    --partial:#E7B84A;
+    --partial-soft:#2E2408;
+    --partial-border:#4A3B10;
+    --bug:#F0897B;
+    --bug-soft:#33150F;
+    --bug-border:#4C2019;
+    --na:#8891A0;
+    --na-soft:#1B1F28;
+    --na-border:#2C3140;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.5);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  code, .mono{
+    font-family:"IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  }
+
+  .page{
+    max-width:900px;
+    margin:0 auto;
+    padding:56px 28px 96px;
+  }
+
+  /* ---------- Header ---------- */
+  header.doc-head{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    padding-bottom:32px;
+    border-bottom:1px solid var(--border);
+    margin-bottom:36px;
+  }
+  .eyebrow{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12px;
+    letter-spacing:0.09em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:600;
+  }
+  h1{
+    font-size:34px;
+    font-weight:700;
+    letter-spacing:-0.01em;
+    margin:0;
+    text-wrap:balance;
+  }
+  .doc-sub{
+    color:var(--text-muted);
+    font-size:16px;
+    max-width:62ch;
+  }
+  .meta-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:6px;
+  }
+  .meta-chip{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12.5px;
+    color:var(--text-muted);
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:5px 10px;
+  }
+
+  /* ---------- Summary strip ---------- */
+  .summary{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+    margin-bottom:20px;
+  }
+  .summary-card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 16px 14px;
+    box-shadow:var(--shadow);
+  }
+  .summary-card .role-name{
+    font-weight:600;
+    font-size:14.5px;
+    margin-bottom:10px;
+  }
+  .tally{
+    display:flex;
+    gap:10px;
+    font-family:"IBM Plex Mono", monospace;
+    font-size:13px;
+  }
+  .tally b{ font-weight:600; }
+  .tally .p{ color:var(--pass); }
+  .tally .a{ color:var(--partial); }
+  .tally .n{ color:var(--na); }
+
+  .headline{
+    display:flex;
+    gap:14px;
+    align-items:baseline;
+    flex-wrap:wrap;
+    background:var(--accent-soft);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+    margin-bottom:48px;
+    font-size:14.5px;
+    color:var(--text);
+  }
+  .headline strong{ color:var(--accent-ink); font-family:"IBM Plex Mono",monospace; }
+
+  /* ---------- Section ---------- */
+  section.role{
+    margin-bottom:52px;
+    scroll-margin-top:24px;
+  }
+  .role-head{
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    margin-bottom:6px;
+  }
+  .role-head h2{
+    font-size:22px;
+    font-weight:700;
+    margin:0;
+  }
+  .role-tag{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12px;
+    color:var(--text-faint);
+  }
+  .role-desc{
+    color:var(--text-muted);
+    font-size:14.5px;
+    max-width:70ch;
+    margin-bottom:18px;
+  }
+
+  table.tests{
+    width:100%;
+    border-collapse:collapse;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:var(--shadow);
+  }
+  .tests-wrap{ overflow-x:auto; border-radius:10px; }
+  table.tests th{
+    text-align:left;
+    font-size:11.5px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    font-weight:600;
+    background:var(--surface-2);
+    padding:10px 16px;
+    border-bottom:1px solid var(--border);
+    white-space:nowrap;
+  }
+  table.tests td{
+    padding:13px 16px;
+    border-bottom:1px solid var(--border);
+    font-size:14.5px;
+    vertical-align:top;
+  }
+  table.tests tr:last-child td{ border-bottom:none; }
+  table.tests td.num{
+    font-family:"IBM Plex Mono", monospace;
+    color:var(--text-faint);
+    font-size:13px;
+    white-space:nowrap;
+  }
+  table.tests td.note{
+    color:var(--text-muted);
+    font-size:13.5px;
+  }
+  table.tests td.test-name{ font-weight:500; min-width:200px; }
+
+  .verdict{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:0.02em;
+    padding:3px 9px;
+    border-radius:100px;
+    white-space:nowrap;
+  }
+  .verdict.pass{ background:var(--pass-soft); color:var(--pass); border:1px solid var(--pass-border); }
+  .verdict.partial{ background:var(--partial-soft); color:var(--partial); border:1px solid var(--partial-border); }
+  .verdict.na{ background:var(--na-soft); color:var(--na); border:1px solid var(--na-border); }
+
+  /* ---------- Findings ---------- */
+  .findings-intro{
+    color:var(--text-muted);
+    font-size:14.5px;
+    max-width:70ch;
+    margin-bottom:22px;
+  }
+  .finding{
+    display:grid;
+    grid-template-columns:4px 1fr;
+    gap:0;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    margin-bottom:14px;
+    overflow:hidden;
+    box-shadow:var(--shadow);
+  }
+  .finding .stripe{ background:var(--bug); }
+  .finding.followup .stripe{ background:var(--partial); }
+  .finding .body{ padding:16px 18px 18px; }
+  .finding-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+    margin-bottom:6px;
+  }
+  .finding-title{ font-weight:600; font-size:15.5px; }
+  .finding-status{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    border-radius:100px;
+    white-space:nowrap;
+  }
+  .finding-status.fixed{ background:var(--pass-soft); color:var(--pass); border:1px solid var(--pass-border); }
+  .finding-status.queued{ background:var(--partial-soft); color:var(--partial); border:1px solid var(--partial-border); }
+  .finding-desc{
+    color:var(--text-muted);
+    font-size:14px;
+    margin-bottom:10px;
+  }
+  .finding-file{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12px;
+    color:var(--text-faint);
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    border-radius:5px;
+    padding:3px 8px;
+    display:inline-block;
+  }
+  .finding-meta{
+    font-size:12px;
+    color:var(--text-faint);
+    margin-top:8px;
+  }
+
+  footer{
+    margin-top:56px;
+    padding-top:20px;
+    border-top:1px solid var(--border);
+    font-size:12.5px;
+    color:var(--text-faint);
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+
+  @media (max-width:720px){
+    .summary{ grid-template-columns:repeat(2,1fr); }
+    h1{ font-size:27px; }
+  }
+  @media (max-width:520px){
+    .summary{ grid-template-columns:1fr; }
+    .page{ padding:36px 16px 72px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="doc-head">
+    <div class="eyebrow">AureusERP &middot; Accounting Module</div>
+    <h1>Finance Role Access Report</h1>
+    <p class="doc-sub">Live, hands-on verification of what each finance role can and cannot do — Accounts Payable Officer, Controller, Internal Auditor, and VP Finance — walked through directly in the running application rather than inferred from permission code.</p>
+    <div class="meta-row">
+      <span class="meta-chip">branch: feature/accounting-plugin</span>
+      <span class="meta-chip">date: 2026-09-14</span>
+      <span class="meta-chip">method: manual, live browser</span>
+      <span class="meta-chip">environment: local (aureuserp)</span>
+    </div>
+  </header>
+
+  <div class="summary">
+    <div class="summary-card">
+      <div class="role-name">AP Officer</div>
+      <div class="tally"><b class="p">7 pass</b><span class="a">1 partial</span></div>
+    </div>
+    <div class="summary-card">
+      <div class="role-name">Controller</div>
+      <div class="tally"><b class="p">7 pass</b></div>
+    </div>
+    <div class="summary-card">
+      <div class="role-name">Internal Auditor</div>
+      <div class="tally"><b class="p">6 pass</b><span class="a">1 partial</span></div>
+    </div>
+    <div class="summary-card">
+      <div class="role-name">VP Finance</div>
+      <div class="tally"><b class="p">4 pass</b><span class="n">1 n/a</span></div>
+    </div>
+  </div>
+
+  <div class="headline">
+    <span><strong>4</strong> live security bugs found &amp; fixed during testing</span>
+    <span><strong>1</strong> root-cause data/config bug fixed (blocked all Vendor creation)</span>
+    <span><strong>1</strong> role-visibility bug fixed (oversight roles saw no records)</span>
+    <span><strong>3</strong> follow-ups queued for separate review</span>
+  </div>
+
+  <!-- ============ AP OFFICER ============ -->
+  <section class="role" id="ap-officer">
+    <div class="role-head">
+      <h2>1. Accounts Payable Officer</h2>
+      <span class="role-tag">test.apofficer@aureus.test</span>
+    </div>
+    <p class="role-desc">Front-line vendor bill entry: create vendors, enter bills, attach supporting evidence, track payables. No approval or posting authority.</p>
+    <div class="tests-wrap">
+    <table class="tests">
+      <thead><tr><th>#</th><th>Test</th><th>Verdict</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1.1</td><td class="test-name">Open Bills list (Vendors → Bills)</td><td><span class="verdict pass">PASS</span></td><td class="note">Loads normally, scoped to vendor workflow.</td></tr>
+        <tr><td class="num">1.2</td><td class="test-name">Create a new Vendor</td><td><span class="verdict pass">PASS</span></td><td class="note">Initially failed with a DB column error on every vendor in the app — traced to 3 migrations never applied to the live database. Fixed live; unblocked for all users, not just this test.</td></tr>
+        <tr><td class="num">1.3</td><td class="test-name">Create a new Bill</td><td><span class="verdict pass">PASS</span></td><td class="note">BILL/2026/27, PKR 25,000.</td></tr>
+        <tr><td class="num">1.4</td><td class="test-name">Open Aged Payable report</td><td><span class="verdict pass">PASS</span></td><td class="note">Loads correctly.</td></tr>
+        <tr><td class="num">1.5</td><td class="test-name">Upload a supporting document to a Bill</td><td><span class="verdict pass">PASS</span></td><td class="note">Uploads and syncs to Google Drive on attach — confirmed against the live Drive folder.</td></tr>
+        <tr><td class="num">1.6</td><td class="test-name">Link / Unlink a payment on a Bill</td><td><span class="verdict pass">PASS</span></td><td class="note">Works for this role's legitimate use; the underlying "Unlink" action was later found to have no permission check at all — see Finding F6.</td></tr>
+        <tr><td class="num">1.7</td><td class="test-name">Attempt an admin-only URL directly</td><td><span class="verdict pass">PASS</span></td><td class="note">Blocked.</td></tr>
+        <tr><td class="num">1.8</td><td class="test-name">Look for a dedicated "Release Payment" action</td><td><span class="verdict partial">PARTIAL</span></td><td class="note">No such action exists — preparing and releasing a payment aren't hard-separated in this codebase. Not a leak, but a segregation-of-duties gap worth a design decision.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ============ CONTROLLER ============ -->
+  <section class="role" id="controller">
+    <div class="role-head">
+      <h2>2. Controller</h2>
+      <span class="role-tag">test.controller@aureus.test</span>
+    </div>
+    <p class="role-desc">Accounting oversight and control: full reporting access, manual adjustments end-to-end, journal approval and posting — no system or user administration.</p>
+    <div class="tests-wrap">
+    <table class="tests">
+      <thead><tr><th>#</th><th>Test</th><th>Verdict</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td class="num">2.1</td><td class="test-name">Trial Balance report</td><td><span class="verdict pass">PASS</span></td><td class="note">Balanced, 1,557,500 both sides.</td></tr>
+        <tr><td class="num">2.2</td><td class="test-name">Balance Sheet report</td><td><span class="verdict pass">PASS</span></td><td class="note">Loads; Assets vs. Liabilities+Equity mismatch traced to accumulated test data, not a code defect.</td></tr>
+        <tr><td class="num">2.3</td><td class="test-name">Profit &amp; Loss report</td><td><span class="verdict pass">PASS</span></td><td class="note">—</td></tr>
+        <tr><td class="num">2.4</td><td class="test-name">General Ledger report</td><td><span class="verdict pass">PASS</span></td><td class="note">—</td></tr>
+        <tr><td class="num">2.5</td><td class="test-name">Manual Adjustment: create → approve → generate draft → post</td><td><span class="verdict pass">PASS</span></td><td class="note">Full lifecycle completed end-to-end.</td></tr>
+        <tr><td class="num">2.6</td><td class="test-name">Attempt Roles/Users administration</td><td><span class="verdict pass">PASS</span></td><td class="note">403 on <code>/admin/shield/roles</code>.</td></tr>
+        <tr><td class="num">2.7</td><td class="test-name">Attempt system/plugin settings</td><td><span class="verdict pass">PASS</span></td><td class="note">403 on real system settings (<code>manage-users</code>); retains its own accounting-configuration settings by design — not a leak.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ============ INTERNAL AUDITOR ============ -->
+  <section class="role" id="internal-auditor">
+    <div class="role-head">
+      <h2>3. Internal Auditor</h2>
+      <span class="role-tag">test.auditor@aureus.test</span>
+    </div>
+    <p class="role-desc">Independent read-only oversight of the full accounting trail. No create, edit, approve, post, or release capability anywhere.</p>
+    <div class="tests-wrap">
+    <table class="tests">
+      <thead><tr><th>#</th><th>Test</th><th>Verdict</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td class="num">3.1</td><td class="test-name">View all financial reports</td><td><span class="verdict pass">PASS</span></td><td class="note">Trial Balance, Balance Sheet, P&amp;L, General Ledger all load.</td></tr>
+        <tr><td class="num">3.2</td><td class="test-name">Manual Adjustments list — no Create button</td><td><span class="verdict pass">PASS</span></td><td class="note">Initially failed — see Finding F1, fixed live.</td></tr>
+        <tr><td class="num">3.3</td><td class="test-name">Open a single Manual Adjustment record</td><td><span class="verdict partial">PARTIAL</span></td><td class="note">Correctly blocked from editing, but the record can't be opened at all — no read-only view page exists yet. See Finding F5.</td></tr>
+        <tr><td class="num">3.4</td><td class="test-name">Exchange Rates list — no Create button</td><td><span class="verdict pass">PASS</span></td><td class="note">Safe by design.</td></tr>
+        <tr><td class="num">3.5</td><td class="test-name">Direct edit URL on a Bill</td><td><span class="verdict pass">PASS</span></td><td class="note">403 Forbidden.</td></tr>
+        <tr><td class="num">3.6</td><td class="test-name">View + download a document, no Upload</td><td><span class="verdict pass">PASS</span></td><td class="note">Download available, Upload correctly hidden.</td></tr>
+        <tr><td class="num">3.7</td><td class="test-name">Attempt Roles/Users administration</td><td><span class="verdict pass">PASS</span></td><td class="note">403 on both admin URLs.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ============ VP FINANCE ============ -->
+  <section class="role" id="vp-finance">
+    <div class="role-head">
+      <h2>4. VP Finance</h2>
+      <span class="role-tag">test.vpfinance@aureus.test</span>
+    </div>
+    <p class="role-desc">Senior read-only oversight — reports and exception queues, no create/edit/post of its own. Approval authority comes only from being assigned as a workflow approver, never from a standing permission.</p>
+    <div class="tests-wrap">
+    <table class="tests">
+      <thead><tr><th>#</th><th>Test</th><th>Verdict</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td class="num">4.1</td><td class="test-name">View all financial reports</td><td><span class="verdict pass">PASS</span></td><td class="note">Trial Balance, P&amp;L, General Ledger all balanced and loading.</td></tr>
+        <tr><td class="num">4.2</td><td class="test-name">Manual Adjustments list — no Create button</td><td><span class="verdict pass">PASS</span></td><td class="note">Confirms the live fix holds across roles.</td></tr>
+        <tr><td class="num">4.3</td><td class="test-name">Direct edit URL on a Bill</td><td><span class="verdict pass">PASS</span></td><td class="note">403 Forbidden.</td></tr>
+        <tr><td class="num">4.4</td><td class="test-name">Vendor → Bank Accounts tab</td><td><span class="verdict na">N/A</span></td><td class="note">VP Finance has no vendor master-data visibility by design — correctly scoped to reports and transaction drill-down only.</td></tr>
+        <tr><td class="num">4.5</td><td class="test-name">Attempt Roles/Users administration</td><td><span class="verdict pass">PASS</span></td><td class="note">403 on both admin URLs.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ============ FINDINGS ============ -->
+  <section class="role" id="findings">
+    <div class="role-head">
+      <h2>Findings &amp; Fixes</h2>
+    </div>
+    <p class="findings-intro">Everything below surfaced from actually operating the app as each role, not from a code read. The first four are real authorization bypasses — a role with view-only permission could still submit a real write through the UI. All four were fixed and re-verified live during this session.</p>
+
+    <div class="finding">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F1 — Vendor creation broken for every user</div>
+          <div class="finding-status fixed">Fixed</div>
+        </div>
+        <div class="finding-desc">3 migrations that add tax-identity columns existed on disk but were never applied to the live database. Every Vendor creation, by any role, failed with a DB error.</div>
+        <div class="finding-meta">Found during AP Officer test 1.2 &middot; fixed by applying the missing migrations</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F2 — Manual Adjustments: unguarded Create button</div>
+          <div class="finding-status fixed">Fixed</div>
+        </div>
+        <div class="finding-desc">The header "New manual adjustment" button had no authorization check — unlike the direct URL, a modal action bypasses Filament's built-in route protection entirely. A view-only role (Internal Auditor, VP Finance) could actually submit a new adjustment.</div>
+        <div class="finding-file">ListManualAdjustments.php</div>
+        <div class="finding-meta">Found during Internal Auditor test 3.2</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F3 — Journal Entries: same unguarded Create button</div>
+          <div class="finding-status fixed">Fixed</div>
+        </div>
+        <div class="finding-desc">Identical gap on the Journal Entries list — the Internal Auditor could open and submit the create-entry modal despite holding view-only access.</div>
+        <div class="finding-file">ListJournalEntries.php</div>
+        <div class="finding-meta">Found alongside F2</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F4 — Vendor → Bank Accounts: unguarded, and with no backstop at all</div>
+          <div class="finding-status fixed">Fixed</div>
+        </div>
+        <div class="finding-desc">The worst of the three — this action lives inside a relation manager with no dedicated route to fall back on, so nothing protected it. Any role that can view a vendor (including Internal Auditor) could add a real bank account to it.</div>
+        <div class="finding-file">BankAccountsRelationManager.php</div>
+        <div class="finding-meta">Found alongside F2</div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F5 — Oversight roles could see almost nothing</div>
+          <div class="finding-status fixed">Fixed</div>
+        </div>
+        <div class="finding-desc">Test accounts for Controller, Internal Auditor, and VP Finance were scoped to "individual" record visibility — meaning each could only see records it had personally created. For a pure oversight role that's structurally always zero. Corrected to company-wide visibility on all three accounts.</div>
+        <div class="finding-meta">Found during Internal Auditor test 3.x, when the Journal Entries list appeared empty despite 19 posted entries existing</div>
+      </div>
+    </div>
+
+    <div class="finding followup">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F6 — Manual Adjustments has no read-only view page</div>
+          <div class="finding-status queued">Follow-up queued</div>
+        </div>
+        <div class="finding-desc">A role with view-only access can see the list but can't open an individual record — there's no view route to send it to. Not a leak, but it defeats the purpose of granting read-only visibility in the first place.</div>
+        <div class="finding-meta">Found during Internal Auditor test 3.3</div>
+      </div>
+    </div>
+
+    <div class="finding followup">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F7 — Reconcile / Unlink actions have no permission check</div>
+          <div class="finding-status queued">Follow-up queued</div>
+        </div>
+        <div class="finding-desc">On any Invoice, Bill, Credit Note, or Refund page, the "Add" (reconcile) and "Unlink" (un-reconcile) buttons are wide open to anyone who can view the page — including a purely read-only auditor. This is a real data-integrity risk spanning five resource types in the base accounts plugin, scoped for its own review rather than a rushed fix.</div>
+        <div class="finding-meta">First noticed during AP Officer test 1.6, root-caused during Internal Auditor testing</div>
+      </div>
+    </div>
+
+    <div class="finding followup">
+      <div class="stripe"></div>
+      <div class="body">
+        <div class="finding-top">
+          <div class="finding-title">F8 — Same unguarded-button pattern swept for the rest of the plugin</div>
+          <div class="finding-status queued">Follow-up queued</div>
+        </div>
+        <div class="finding-desc">Report Templates, Business Rules, FS Tags, Party Classifications, and Import Profiles all use the same unguarded Create-button pattern as F2–F4. None are currently reachable by any of the four tested roles, so there's no active exposure today — queued so the fix lands before any role's permissions change.</div>
+        <div class="finding-meta">Identified via a codebase-wide grep after F2–F4</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Manual verification — no automated test suite substitutes for this walkthrough.</span>
+    <span class="mono">feature/accounting-plugin</span>
+  </footer>
+
+</div>
