@@ -137,3 +137,63 @@ it('throws an exception when Google Drive sync is disabled', function () {
     expect(fn () => $this->exportService->exportInvoice($this->user, $this->invoice))
         ->toThrow(RuntimeException::class, 'Google Drive sync is not enabled');
 });
+
+it('exports a paid invoice or bill to the dedicated Paid Invoices Drive folder', function () {
+    $sync = $this->exportService->exportPaidInvoice($this->user, $this->invoice);
+
+    expect($sync->status)->toBe(DriveSyncStatus::Synced)
+        ->and($sync->exists_in_drive)->toBeTrue()
+        ->and($sync->drive_file_id)->not->toBeNull();
+
+    // Verify Document attachment
+    $attachment = $this->invoice->documentAttachments()->whereHas('document', fn ($q) => $q->where('title', 'like', 'Paid %'))->first();
+    expect($attachment)->not->toBeNull();
+    expect($attachment->document->title)->toContain('Paid');
+
+    // Verify uploaded file in Drive has -PAID.pdf suffix
+    $uploadedFile = $this->fakeDrive->files[$sync->drive_file_id];
+    expect($uploadedFile['name'])->toContain('-PAID.pdf');
+
+    // Verify the folder in Drive is 'Paid Invoices'
+    $parentFolderId = $sync->drive_parent_folder_id;
+    expect($this->fakeDrive->folders[$parentFolderId]['name'])->toBe('Paid Invoices');
+});
+
+it('exports a paid vendor bill using Bill document type and bill layout', function () {
+    $expense = Account::factory()->create(['account_type' => AccountType::EXPENSE, 'currency_id' => $this->invoice->currency_id]);
+    $purchaseJournal = Journal::factory()->purchase()->create([
+        'company_id'         => $this->company->id,
+        'currency_id'        => $this->invoice->currency_id,
+        'default_account_id' => $expense->id,
+    ]);
+
+    $bill = Move::factory()->create([
+        'name'        => 'BILL/2026/0042',
+        'move_type'   => MoveType::IN_INVOICE,
+        'company_id'  => $this->company->id,
+        'currency_id' => $this->invoice->currency_id,
+        'journal_id'  => $purchaseJournal->id,
+        'partner_id'  => $this->invoice->partner_id,
+    ]);
+    MoveLine::factory()->create([
+        'move_id'      => $bill->id,
+        'display_type' => DisplayType::PRODUCT,
+        'account_id'   => $expense->id,
+        'company_id'   => $this->company->id,
+        'currency_id'  => $this->invoice->currency_id,
+        'quantity'     => 1,
+        'price_unit'   => 5000,
+    ]);
+    AccountFacade::computeAccountMove($bill->refresh());
+
+    $sync = $this->exportService->exportPaidInvoice($this->user, $bill);
+
+    expect($sync->status)->toBe(DriveSyncStatus::Synced);
+
+    $attachment = $bill->documentAttachments()->whereHas('document', fn ($q) => $q->where('title', 'like', 'Paid %'))->first();
+    expect($attachment)->not->toBeNull();
+    expect($attachment->document->document_type)->toBe(DocumentType::Bill);
+
+    $parentFolderId = $sync->drive_parent_folder_id;
+    expect($this->fakeDrive->folders[$parentFolderId]['name'])->toBe('Paid Invoices');
+});

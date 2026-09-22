@@ -1031,9 +1031,14 @@ class AccountManager
             $vals['payment'] = $payment = Payment::create($vals);
 
             if (! $accountingInstalled && ! $payment->outstanding_account_id) {
-                $payment->update([
-                    'outstanding_account_id' => $payment->getOutstandingAccount($payment->payment_type)->id,
-                ]);
+                $outstandingAccountId = $payment->getOutstandingAccount($payment->payment_type)?->id
+                    ?? $payment->journal?->default_account_id;
+
+                if ($outstandingAccountId) {
+                    $payment->update([
+                        'outstanding_account_id' => $outstandingAccountId,
+                    ]);
+                }
             }
 
             if (

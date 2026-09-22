@@ -42,7 +42,7 @@ class DriveSyncService
      * which is what actually makes that guarantee hold rather than just
      * the sequential-call case.
      */
-    public function export(Document $document): DocumentDriveSync
+    public function export(Document $document, ?array $overrideSegments = null): DocumentDriveSync
     {
         if (! config('accounting_drive.enabled')) {
             throw new RuntimeException('Google Drive sync is not enabled for this installation.');
@@ -71,7 +71,7 @@ class DriveSyncService
         $lock = Cache::lock("accounting-drive-sync:company:{$document->company_id}", 60);
 
         try {
-            return $lock->block(15, fn () => $this->exportLocked($document, $version));
+            return $lock->block(15, fn () => $this->exportLocked($document, $version, $overrideSegments));
         } catch (Throwable $e) {
             // A lock-acquisition timeout lands here without ever having
             // touched $sync -- still leave a Failed row behind rather
@@ -87,7 +87,7 @@ class DriveSyncService
         }
     }
 
-    private function exportLocked(Document $document, DocumentVersion $version): DocumentDriveSync
+    private function exportLocked(Document $document, DocumentVersion $version, ?array $overrideSegments = null): DocumentDriveSync
     {
         // A fresh query, not $document->driveSync -- that relation can be
         // cached stale (null) on this same $document instance from an
@@ -99,7 +99,7 @@ class DriveSyncService
         $sync->save();
 
         try {
-            $parentFolderId = $this->resolveLeafFolder($document);
+            $parentFolderId = $this->resolveLeafFolder($document, $overrideSegments);
 
             $contents = app(DocumentService::class)->readCurrentVersionForSync($document)['contents'];
 
@@ -170,9 +170,9 @@ class DriveSyncService
      * method) safe against two documents in the same company racing on
      * a shared folder segment too.
      */
-    private function resolveLeafFolder(Document $document): string
+    private function resolveLeafFolder(Document $document, ?array $overrideSegments = null): string
     {
-        $segments = $this->pathResolver->resolve($document);
+        $segments = $overrideSegments ?? $this->pathResolver->resolve($document);
         $parentId = config('accounting_drive.shared_drive_id');
 
         foreach ($segments as $name) {

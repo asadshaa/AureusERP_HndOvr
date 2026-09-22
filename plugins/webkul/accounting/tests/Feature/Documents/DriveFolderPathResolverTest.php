@@ -269,3 +269,13 @@ it('resolves Invoice to the company inbound folder when unify_invoice_and_inboun
         'Inbound',
     ]);
 });
+
+it('resolves the Paid Invoices folder under the company directory', function () {
+    $path = $this->resolver->resolvePaidFolder($this->company);
+
+    expect($path)->toBe([
+        'Aureus',
+        "{$this->company->name} ({$this->company->id})",
+        'Paid Invoices',
+    ]);
+});

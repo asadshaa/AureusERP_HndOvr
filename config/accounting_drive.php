@@ -85,6 +85,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Paid Invoices / Bills Google Drive folder
+    |--------------------------------------------------------------------------
+    |
+    | When a bill or invoice is marked as paid, a copy of the paid document
+    | can be synced directly to this folder under the company's Drive directory
+    | (e.g. Aureus/{company}/Paid Invoices).
+    |
+    */
+    'paid_folder_name' => env('ACCOUNTING_DRIVE_PAID_FOLDER', 'Paid Invoices'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Folder path templates
     |--------------------------------------------------------------------------
     |

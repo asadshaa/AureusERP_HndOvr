@@ -63,6 +63,21 @@ class DriveFolderPathResolver
         ];
     }
 
+    /**
+     * Dedicated folder path for paid invoices / bills:
+     * Aureus/{Company} ({id})/Paid Invoices
+     *
+     * @return array<int, string> ordered path segments, root folder name first
+     */
+    public function resolvePaidFolder(Company $company): array
+    {
+        return [
+            $this->sanitize(config('accounting_drive.root_folder_name', 'Aureus')),
+            $this->sanitize("{$company->name} ({$company->id})"),
+            $this->sanitize(config('accounting_drive.paid_folder_name', 'Paid Invoices')),
+        ];
+    }
+
     private function fillPlaceholder(string $segment, Document $document): string
     {
         return match ($segment) {

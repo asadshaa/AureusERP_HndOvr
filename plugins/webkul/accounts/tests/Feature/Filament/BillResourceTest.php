@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
 use Webkul\Account\Enums\MoveState;
@@ -15,6 +16,7 @@ use Webkul\Account\Filament\Resources\InvoiceResource\Actions\PayAction;
 use Webkul\Account\Filament\Resources\InvoiceResource\Actions\ResetToDraftAction;
 use Webkul\Account\Filament\Resources\InvoiceResource\Actions\ReverseAction;
 use Webkul\Account\Filament\Resources\InvoiceResource\Actions\SetAsCheckedAction;
+use Webkul\Account\Mail\Invoice\Actions\InvoiceEmail;
 use Webkul\Account\Models\Move;
 use Webkul\PluginManager\Models\Plugin;
 use Webkul\PluginManager\Package;
@@ -165,13 +167,88 @@ it('marks a posted bill as checked through the action', function () {
 it('registers a full payment and marks the bill paid through the action', function () {
     FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
 
-    AccountHelper::bankJournal();
+    $bankJournal = AccountHelper::bankJournal();
+    $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();
 
     $bill = postedBillRecord();
 
     Livewire::test(EditBill::class, ['record' => $bill->id])
         ->assertOk()
-        ->callAction(PayAction::class);
+        ->callAction(PayAction::class, data: [
+            'journal_id'             => $bankJournal->id,
+            'payment_method_line_id' => $paymentMethodLine->id,
+            'amount'                 => $bill->amount_total,
+            'currency_id'            => $bill->currency_id,
+            'payment_date'           => now()->format('Y-m-d'),
+            'communication'          => $bill->name,
+        ])
+        ->assertHasNoActionErrors();
 
     expect($bill->refresh()->payment_state)->toBe(PaymentState::PAID);
+});
+
+it('registers payment and sends paid bill email to vendor', function () {
+    Mail::fake();
+
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+
+    $bankJournal = AccountHelper::bankJournal();
+    $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();
+
+    $bill = postedBillRecord();
+    $bill->partner->update(['email' => 'vendor@supplier.com']);
+
+    Livewire::test(EditBill::class, ['record' => $bill->id])
+        ->assertOk()
+        ->callAction(PayAction::class, data: [
+            'journal_id'             => $bankJournal->id,
+            'payment_method_line_id' => $paymentMethodLine->id,
+            'amount'                 => $bill->amount_total,
+            'currency_id'            => $bill->currency_id,
+            'payment_date'           => now()->format('Y-m-d'),
+            'communication'          => $bill->name,
+            'send_receipt'           => true,
+            'recipient_email'        => 'vendor@supplier.com',
+            'email_subject'          => 'Paid Bill Receipt - '.$bill->name,
+            'sync_to_paid_drive'     => false,
+        ])
+        ->assertHasNoActionErrors();
+
+    expect($bill->refresh()->payment_state)->toBe(PaymentState::PAID);
+
+    Mail::assertSent(InvoiceEmail::class, function ($mail) {
+        return $mail->payload['to']['address'] === 'vendor@supplier.com';
+    });
+
+    expect($bill->messages()->count())->toBeGreaterThan(0);
+});
+
+it('updates partner email when paying bill if partner previously had no email', function () {
+    Mail::fake();
+
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+
+    $bankJournal = AccountHelper::bankJournal();
+    $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();
+
+    $bill = postedBillRecord();
+    $bill->partner->update(['email' => null]);
+
+    Livewire::test(EditBill::class, ['record' => $bill->id])
+        ->assertOk()
+        ->callAction(PayAction::class, data: [
+            'journal_id'             => $bankJournal->id,
+            'payment_method_line_id' => $paymentMethodLine->id,
+            'amount'                 => $bill->amount_total,
+            'currency_id'            => $bill->currency_id,
+            'payment_date'           => now()->format('Y-m-d'),
+            'communication'          => $bill->name,
+            'send_receipt'           => true,
+            'recipient_email'        => 'autofilled@supplier.com',
+            'sync_to_paid_drive'     => false,
+        ])
+        ->assertHasNoActionErrors();
+
+    expect($bill->refresh()->payment_state)->toBe(PaymentState::PAID)
+        ->and($bill->partner->refresh()->email)->toBe('autofilled@supplier.com');
 });
