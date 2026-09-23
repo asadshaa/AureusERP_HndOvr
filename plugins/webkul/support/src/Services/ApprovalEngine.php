@@ -100,11 +100,19 @@ final class ApprovalEngine
             'requester.employee.parent.user',
             'requester.employee.department.manager.user',
             'requester.employee.team.manager.user',
+            'subject',
         ]);
         $step = $request->currentStep();
         if (! $step) {
             return false;
         }
+
+        // Deliberately no Admin/Super Admin bypass here: every step must be
+        // decided by its actual matched approver (the named user, the
+        // matching role, or the resolved hierarchy manager) -- no account,
+        // including Admin, may approve on someone else's behalf. An Admin
+        // still sees and can manage every request elsewhere in the app; they
+        // just can't stand in for a step that isn't theirs.
         if ((int) $step->approver_user_id === (int) $actor->id) {
             return true;
         }
@@ -112,12 +120,46 @@ final class ApprovalEngine
             return true;
         }
 
+        // Hierarchy-based steps ("requester_manager" etc.) must route off the
+        // employee the request is ABOUT, not whoever happened to click
+        // Submit -- HR routinely submits a request on an employee's behalf
+        // (e.g. an HR reviewer filing a claim for someone), and in that case
+        // the requester's own manager is the wrong person entirely.
+        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+
         return match ($step->hierarchy_route) {
-            'requester_manager'  => (int) $request->requester?->employee?->parent?->user_id === (int) $actor->id,
-            'department_manager' => (int) $request->requester?->employee?->department?->manager?->user_id === (int) $actor->id,
-            'team_manager'       => (int) $request->requester?->employee?->team?->manager?->user_id === (int) $actor->id,
+            'requester_manager'  => (int) $subjectEmployee?->parent?->user_id === (int) $actor->id,
+            'department_manager' => (int) $subjectEmployee?->department?->manager?->user_id === (int) $actor->id,
+            'team_manager'       => (int) $subjectEmployee?->team?->manager?->user_id === (int) $actor->id,
             default              => false,
         };
+    }
+
+    /**
+     * The subject of an approval request is often the employee-relevant
+     * record itself (e.g. HR's EmployeeRequest has its own `employee`
+     * relation); fall back to the requester's own employee record for
+     * subject types with no such concept.
+     */
+    /**
+     * Deliberately untyped (not `?Employee`) -- this base "support" plugin
+     * must not take a hard dependency on the "employees" plugin's model;
+     * duck-typing via method_exists() above is what keeps this generic
+     * across any subject type that happens to expose an `employee()`
+     * relation, HR's EmployeeRequest today, potentially others later.
+     */
+    private function resolveHierarchySubjectEmployee(ApprovalRequest $request): mixed
+    {
+        $subject = $request->subject;
+
+        if ($subject && method_exists($subject, 'employee')) {
+            $employee = $subject->employee()->with(['parent.user', 'department.manager.user', 'team.manager.user'])->first();
+            if ($employee) {
+                return $employee;
+            }
+        }
+
+        return $request->requester?->employee;
     }
 
     /** @param array<string, mixed> $previousValues @param array<string, mixed> $newValues */

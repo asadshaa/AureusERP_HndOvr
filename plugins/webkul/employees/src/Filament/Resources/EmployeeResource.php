@@ -58,6 +58,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Employee\Enums\DistanceUnit;
 use Webkul\Employee\Enums\Gender;
@@ -78,8 +79,9 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Field\Filament\Traits\HasCustomFields;
+use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Filament\Resources\CompanyResource;
-use Webkul\Security\Filament\Resources\UserResource;
+use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Models\Calendar;
@@ -293,11 +295,6 @@ class EmployeeResource extends Resource
                                     ->preload()
                                     ->label(__('employees::filament/resources/employee.form.sections.fields.employee-tags'))
                                     ->createOptionForm(fn (Schema $schema) => EmployeeCategoryResource::form($schema)),
-                                Select::make('coach_id')
-                                    ->searchable()
-                                    ->preload()
-                                    ->relationship('coach', 'name', modifyQueryUsing: fn (Builder $query) => $query->where('company_id', Auth::user()?->default_company_id))
-                                    ->label(__('employees::filament/resources/employee.form.sections.fields.coach')),
                                 DatePicker::make('joining_date')
                                     ->label('Joining date')
                                     ->native(false),
@@ -374,23 +371,6 @@ class EmployeeResource extends Resource
                                                             ->prefixIcon('heroicon-o-map-pin')
                                                             ->createOptionForm(fn (Schema $schema) => WorkLocationResource::form($schema))
                                                             ->editOptionForm(fn (Schema $schema) => WorkLocationResource::form($schema)),
-                                                    ])->columns(1),
-                                                Fieldset::make(__('employees::filament/resources/employee.form.tabs.work-information.fields.approver'))
-                                                    ->schema([
-                                                        Select::make('leave_manager_id')
-                                                            ->options(fn () => User::pluck('name', 'id'))
-                                                            ->searchable()
-                                                            ->preload()
-                                                            ->live()
-                                                            ->suffixIcon('heroicon-o-clock')
-                                                            ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.time-off')),
-                                                        Select::make('attendance_manager_id')
-                                                            ->options(fn () => User::pluck('name', 'id'))
-                                                            ->searchable()
-                                                            ->preload()
-                                                            ->live()
-                                                            ->suffixIcon('heroicon-o-clock')
-                                                            ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.attendance-manager')),
                                                     ])->columns(1),
                                                 Fieldset::make(__('employees::filament/resources/employee.form.tabs.work-information.fields.schedule'))
                                                     ->schema([
@@ -836,7 +816,40 @@ class EmployeeResource extends Resource
                                                             ->preload()
                                                             ->label(__('employees::filament/resources/employee.form.tabs.settings.fields.related-user'))
                                                             ->prefixIcon('heroicon-o-user')
-                                                            ->createOptionForm(fn (Schema $schema) => UserResource::form($schema))
+                                                            ->helperText('Give this employee their own login so they can submit and track their own requests instead of HR submitting on their behalf. This always creates a plain Employee-level account -- no HR, Accounting, or Admin access.')
+                                                            ->createOptionForm([
+                                                                TextInput::make('name')
+                                                                    ->required()
+                                                                    ->maxLength(255),
+                                                                TextInput::make('email')
+                                                                    ->email()
+                                                                    ->required()
+                                                                    ->unique('users', 'email')
+                                                                    ->maxLength(255),
+                                                                TextInput::make('password')
+                                                                    ->password()
+                                                                    ->revealable()
+                                                                    ->required()
+                                                                    ->rule('min:8'),
+                                                            ])
+                                                            ->createOptionUsing(function (array $data) {
+                                                                $employeeRole = Role::query()->where('name', 'Employee')->where('guard_name', 'web')->first();
+
+                                                                $user = User::query()->create([
+                                                                    'name'                => $data['name'],
+                                                                    'email'               => $data['email'],
+                                                                    'password'            => Hash::make($data['password']),
+                                                                    'default_company_id'  => Auth::user()?->default_company_id,
+                                                                    'is_active'           => true,
+                                                                    'resource_permission' => PermissionType::INDIVIDUAL,
+                                                                ]);
+
+                                                                if ($employeeRole) {
+                                                                    $user->roles()->sync([$employeeRole->id]);
+                                                                }
+
+                                                                return $user->getKey();
+                                                            })
                                                             ->createOptionAction(
                                                                 fn (Action $action, Get $get) => $action
                                                                     ->fillForm(fn () => [
@@ -1236,17 +1249,6 @@ class EmployeeResource extends Resource
                                     ->multiple()
                                     ->preload(),
                             ),
-                        RelationshipConstraint::make('coach')
-                            ->label(__('employees::filament/resources/employee.table.filters.coach'))
-                            ->multiple()
-                            ->icon('heroicon-o-user')
-                            ->selectable(
-                                IsRelatedToOperator::make()
-                                    ->titleAttribute('name')
-                                    ->searchable()
-                                    ->multiple()
-                                    ->preload(),
-                            ),
                         RelationshipConstraint::make('privateState')
                             ->label(__('employees::filament/resources/employee.table.filters.private-state'))
                             ->multiple()
@@ -1357,9 +1359,6 @@ class EmployeeResource extends Resource
                     ->collapsible(),
                 Tables\Grouping\Group::make('parent.name')
                     ->label(__('employees::filament/resources/employee.table.groups.manager'))
-                    ->collapsible(),
-                Tables\Grouping\Group::make('coach.name')
-                    ->label(__('employees::filament/resources/employee.table.groups.coach'))
                     ->collapsible(),
                 Tables\Grouping\Group::make('department.complete_name')
                     ->label(__('employees::filament/resources/employee.table.groups.department'))
@@ -1594,9 +1593,6 @@ class EmployeeResource extends Resource
                                     ->formatStateUsing(fn ($state) => $state['label'])
                                     ->color(fn ($state) => Color::generateV3Palette($state['color']))
                                     ->listWithLineBreaks(),
-                                TextEntry::make('coach.name')
-                                    ->placeholder('—')
-                                    ->label(__('employees::filament/resources/employee.infolist.sections.entries.coach')),
                             ]),
                     ])->columnSpanFull(),
 

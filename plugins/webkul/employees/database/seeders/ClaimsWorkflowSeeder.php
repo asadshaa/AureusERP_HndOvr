@@ -2,13 +2,12 @@
 
 namespace Webkul\Employee\Database\Seeders;
 
-use Database\Seeders\FinanceRoleSeeder;
-use Database\Seeders\HrRoleSeeder;
 use Illuminate\Database\Seeder;
+use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Models\Account;
 use Webkul\Account\Models\Journal;
 use Webkul\Employee\Models\EmployeeRequestType;
-use Webkul\Security\Models\Role;
+use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
@@ -25,142 +24,237 @@ use Webkul\Support\Models\Company;
  * the rest (see ROUTES below) and ApprovalWorkflow.request_type has to be
  * unique per routing shape, not shared blindly across all nine.
  *
- * IMPORTANT -- what this seeder can and cannot configure:
+ * Approval chain, matching the client-provided org chart exactly:
+ *   Level 1 (HR Review)      -> Mehwish, by name, every category.
+ *   Level 2 (Line/Dept Head) -> hierarchy_route "requester_manager" (the
+ *                               employee's own Manager field) for every
+ *                               category except Tech, which uses
+ *                               "department_manager" (the department head);
+ *                               Real Estate has NO level 2 at all.
+ *   Level 3                  -> Raza Afzal, by name, for every category
+ *                               except Tech, which uses Haider Navid; Real
+ *                               Estate has no level 3.
+ *   Level 4                  -> Khurram, by name, for every category except
+ *                               Tech, which uses Raza Afzal; Real Estate's
+ *                               chain ends at level 2 (Khurram), so it has
+ *                               no level 4 either.
+ * Each named level is pinned to that specific person's User account via
+ * ApprovalStep.approver_user_id -- not a role -- because the org chart
+ * assigns named individuals, not job titles, to these steps. Mehwish,
+ * Khurram and Haider Navid are placeholder accounts (mehwish@truckitin.com,
+ * khurram@truckitin.com, haider.navid@truckitin.com) pending their real
+ * emails; Raza Afzal is the existing CEO account. Update the placeholder
+ * emails in USER_EMAILS below once the real addresses are known -- no other
+ * change is needed, the workflow re-seeds against whichever account matches.
  *
- * The documented routing names four specific individuals (Mehwish, Raza
- * Afzal, Khurram, Haider Navid) as Approval Levels 1/3/4 (Level 2 for Tech)
- * across every category. NONE of these four exist as Employee/User records
- * in this database (confirmed by direct query -- full table scan, plus
- * case-insensitive partial-name matching, zero results for all four). Per
- * the task's own explicit instruction ("If a person does not exist, do NOT
- * create a fake account automatically. Report missing workflow actors."),
- * this seeder does NOT fabricate approvers for them. It seeds only the
- * steps that resolve to something real today:
- *   - HR Review           -> role "hr_manager" (real, seeded by HrRoleSeeder)
- *   - Line Manager review -> hierarchy_route "requester_manager" (real,
- *                            Employee.parent_id -- the documented "Level 2"
- *                            for every category except Tech)
- *   - Department Head rev.-> hierarchy_route "department_manager" (real,
- *                            Department.manager_id -- Tech's "Level 2")
- *   - Finance Final Proc. -> role "controller" (real, seeded by FinanceRoleSeeder)
- *   - VP Finance oversight-> role "vp_finance" (real), gated by an amount
- *                            condition so it does NOT run on every claim --
- *                            see VP_FINANCE_THRESHOLD below.
- * The named-individual levels are simply omitted from the seeded workflow
- * (ApprovalStep requires exactly one of approver_user_id/approver_role_id/
- * hierarchy_route -- there is no way to create a step for an unresolved
- * person without fabricating one). Once real User accounts exist for these
- * four people, add their steps through the existing Approval Workflow admin
- * UI (Filament ApprovalWorkflowResource) -- no code change is needed for
- * that; the architecture already supports pinning a step to one specific
- * named user via approver_user_id. Real Estate's documented routing is
- * Level 1 = Mehwish, Level 2 = Khurram only -- BOTH unresolved -- so its
- * seeded workflow has no business-hierarchy step at all, only HR Review and
- * Finance Final Processing/VP Finance oversight.
+ * VP_FINANCE_THRESHOLD is not part of the client's diagram -- removed. If a
+ * value-based extra sign-off is wanted later, add it as a further step via
+ * the Approval Workflow admin UI.
  *
- * VP_FINANCE_THRESHOLD is a placeholder, not a confirmed business policy --
- * flagged in the implementation report; adjust via the admin UI (edit the
- * "VP Finance Oversight" step's Conditions) once Finance leadership confirms
- * the real amount, no code change needed either way.
- *
- * Debit/credit accounts and journal are real, existing company records
- * (standard double-entry: Dr Expenses, Cr Accounts Payable -- a draft
- * liability until Accounting actually pays it, not a cash/bank posting),
- * not a fabricated or category-specific chart-of-accounts assumption.
+ * Debit account and journal are real, existing company records -- the
+ * journal must be a PURCHASE-type journal (e.g. "Vendor Bills"), because an
+ * approved claim now posts as a real vendor Bill (move_type = IN_INVOICE)
+ * via EmployeeRequestService::createAccountingDraft(), not a generic
+ * MoveType::ENTRY journal entry. The debit (expense) account is the only
+ * account configured here: the credit/payable side of the Bill is resolved
+ * automatically at posting time (the vendor Partner's own payable account,
+ * or else the company's Accounts Payable account) exactly like any other
+ * vendor Bill -- credit_account_id is retained for backward compatibility
+ * and admin visibility only, and is not read when posting.
  */
 class ClaimsWorkflowSeeder extends Seeder
 {
-    private const VP_FINANCE_THRESHOLD = '100000.0000';
+    /** @var array<string, string> */
+    private const USER_EMAILS = [
+        'mehwish'      => 'mehwish@truckitin.com',
+        'raza_afzal'   => 'raza.afzal@truckitin.com',
+        'khurram'      => 'khurram@truckitin.com',
+        'haider_navid' => 'haider.navid@truckitin.com',
+    ];
 
-    /** @var array<string, array{name: string, route: 'requester_manager'|'department_manager'|null, natures: string}> */
+    /**
+     * @var array<string, array{
+     *     name: string,
+     *     route: 'requester_manager'|'department_manager'|null,
+     *     level3: string|null,
+     *     level4: string|null,
+     *     natures: string,
+     * }>
+     */
     private const CATEGORIES = [
-        'travel_entertainment'  => ['name' => 'Travel & Entertainment', 'route' => 'requester_manager', 'natures' => 'Airfare, Hotel, Meals, Client Entertainment, Local Transport'],
-        'professional_services' => ['name' => 'Professional Services', 'route' => 'requester_manager', 'natures' => 'Legal Fees, Consulting Fees, Audit Fees, Training/Certification'],
-        'tech'                  => ['name' => 'Tech', 'route' => 'department_manager', 'natures' => 'Software License, Hardware, Cloud Hosting, IT Support'],
-        'digital_marketing'     => ['name' => 'Digital Marketing', 'route' => 'requester_manager', 'natures' => 'Advertising Spend, Content/Design, Marketing Tools, Sponsorship'],
-        'returns_waivers'       => ['name' => 'Returns and Waivers', 'route' => 'requester_manager', 'natures' => 'Customer Refund, Fee Waiver, Goodwill Credit'],
-        'financial_provisions'  => ['name' => 'Financial Provisions', 'route' => 'requester_manager', 'natures' => 'Bad Debt Provision, Contingency Provision, Other Provision'],
-        'others'                => ['name' => 'Others', 'route' => 'requester_manager', 'natures' => 'Miscellaneous, Other'],
-        'people'                => ['name' => 'People', 'route' => 'requester_manager', 'natures' => 'Team Event, Gift, Training, Other'],
-        'real_estate'           => ['name' => 'Real Estate', 'route' => null, 'natures' => 'Rent, Maintenance, Utilities, Security Deposit'],
+        'people' => [
+            'name'    => 'People',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Payroll, G-Suite, Shell, EOBI, Earned Wage Access, Health Insurance, Munshiana, Income Tax, Zong, BYOD, Medical Bills, Employee Engagement, Team Event',
+        ],
+        'real_estate' => [
+            'name'    => 'Real Estate',
+            'route'   => null,
+            // Real Estate's chain is only two levels: Mehwish (HR Review),
+            // then Khurram directly -- no line manager step, no level 3/4.
+            'level2'  => 'khurram',
+            'level3'  => null,
+            'level4'  => null,
+            'natures' => 'Office Rent, Apartment Rent, Utilities, Groceries, Other, Maintenance Charges, Leopard Courier',
+        ],
+        'digital_marketing' => [
+            'name'    => 'Digital Marketing',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'SEO Services, Facebook, Tilism Technologies',
+        ],
+        'financial_provisions' => [
+            'name'    => 'Financial Provisions',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Bank charges, Service Charges, Aspire',
+        ],
+        'tech' => [
+            'name'    => 'Tech',
+            'route'   => 'department_manager',
+            'level3'  => 'haider_navid',
+            'level4'  => 'raza_afzal',
+            'natures' => 'Tech tools, Laptop repairs',
+        ],
+        'professional_services' => [
+            'name'    => 'Professional Services',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Tax Consultancy, Stamp Paper, Legal Costs, Legal Consultancy, Audit Agency, First Base, VAPT, Corporate Docs, PSEB',
+        ],
+        'travel_entertainment' => [
+            'name'    => 'Travel and Entertainment',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Travel, Accommodation, Daily Allowance, Fuel, Food, Sports Activity, Farewell',
+        ],
+        'returns_waivers' => [
+            'name'    => 'Returns and Waivers',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Detention',
+        ],
+        'others' => [
+            'name'    => 'Others',
+            'route'   => 'requester_manager',
+            'level3'  => 'raza_afzal',
+            'level4'  => 'khurram',
+            'natures' => 'Miscellaneous, Other',
+        ],
     ];
 
     public function run(): void
     {
-        app(HrRoleSeeder::class)->run();
-        app(FinanceRoleSeeder::class)->run();
+        $approvers = collect(self::USER_EMAILS)->mapWithKeys(
+            fn (string $email, string $key) => [$key => User::query()->where('email', $email)->first()]
+        );
 
-        $hrReviewRole = Role::query()->where('name', 'hr_manager')->where('guard_name', 'web')->first();
-        $financeRole = Role::query()->where('name', 'controller')->where('guard_name', 'web')->first();
-        $vpFinanceRole = Role::query()->where('name', 'vp_finance')->where('guard_name', 'web')->first();
-
-        if (! $hrReviewRole || ! $financeRole || ! $vpFinanceRole) {
-            $this->command?->warn('ClaimsWorkflowSeeder: one or more expected roles (hr_manager/controller/vp_finance) were not found -- skipping the steps that depend on them.');
+        $missing = $approvers->filter(fn (?User $user) => ! $user)->keys();
+        if ($missing->isNotEmpty()) {
+            $this->command?->warn('ClaimsWorkflowSeeder: missing User accounts for '.$missing->implode(', ').' -- their approval steps will be skipped until those accounts exist.');
         }
 
-        Company::query()->each(function (Company $company) use ($hrReviewRole, $financeRole, $vpFinanceRole): void {
-            $journal = Journal::query()->where('company_id', $company->id)->where('type', 'general')->first();
+        Company::query()->each(function (Company $company) use ($approvers): void {
+            // A real vendor Bill (move_type = IN_INVOICE) must post through a
+            // PURCHASE-type journal -- see EmployeeRequestService::createAccountingDraft().
+            $journal = Journal::query()->where('company_id', $company->id)->where('type', JournalType::PURCHASE)->first();
             $debitAccount = Account::query()->where('code', '600000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
+            // Still resolved and stored on credit_account_id for backward
+            // compatibility / admin visibility, even though posting no
+            // longer reads it (the Bill's payable line is auto-resolved --
+            // see createAccountingDraft()'s doc comment).
             $creditAccount = Account::query()->where('code', '211000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
             $isFinancial = (bool) ($journal && $debitAccount && $creditAccount);
             if (! $isFinancial) {
-                $this->command?->warn("ClaimsWorkflowSeeder: company #{$company->id} has no general journal / Expenses (600000) / Accounts Payable (211000) account -- claim types seeded as non-financial (no accounting handoff) until configured via the Employee Request Types admin UI.");
+                $this->command?->warn("ClaimsWorkflowSeeder: company #{$company->id} has no Purchase journal / Expenses (600000) / Accounts Payable (211000) account -- claim types seeded as non-financial (no accounting handoff) until configured via the Employee Request Types admin UI.");
             }
 
             foreach (self::CATEGORIES as $category => $config) {
                 $requestTypeCode = 'claim_'.$category;
 
-                $requestType = EmployeeRequestType::query()->firstOrCreate(
+                $typeData = [
+                    'name'                  => $config['name'],
+                    'category'              => $category,
+                    'approval_request_type' => $requestTypeCode,
+                    'requires_amount'       => true,
+                    'requires_document'     => true,
+                    'is_active'             => true,
+                    'configuration'         => ['expense_natures' => $config['natures']],
+                ];
+
+                $existingType = EmployeeRequestType::query()->where('company_id', $company->id)->where('code', $requestTypeCode)->first();
+                if ($isFinancial) {
+                    $typeData['is_financial'] = true;
+                    $typeData['journal_id'] = $journal->id;
+                    $typeData['debit_account_id'] = $debitAccount->id;
+                    $typeData['credit_account_id'] = $creditAccount->id;
+                } elseif (! $existingType) {
+                    $typeData['is_financial'] = false;
+                }
+
+                $requestType = EmployeeRequestType::query()->updateOrCreate(
                     ['company_id' => $company->id, 'code' => $requestTypeCode],
-                    [
-                        'name'                  => $config['name'].' Claim',
-                        'category'              => $category,
-                        'approval_request_type' => $requestTypeCode,
-                        'is_financial'          => $isFinancial,
-                        'requires_amount'       => true,
-                        'requires_document'     => true,
-                        'is_active'             => true,
-                        'journal_id'            => $journal?->id,
-                        'debit_account_id'      => $debitAccount?->id,
-                        'credit_account_id'     => $creditAccount?->id,
-                        'configuration'         => ['expense_natures' => $config['natures']],
-                    ]
+                    $typeData
                 );
 
                 $workflow = ApprovalWorkflow::query()->firstOrCreate(
                     ['company_id' => $company->id, 'request_type' => $requestTypeCode],
-                    ['name' => $config['name'].' Claim Approval', 'is_active' => true]
+                    ['name' => $config['name'].' Approval', 'is_active' => true]
                 );
 
-                if ($workflow->steps()->exists()) {
-                    continue;
-                }
+                // Rebuild the steps every run so a corrected hierarchy (or a
+                // placeholder email finally matching a real account) actually
+                // takes effect, rather than silently keeping stale steps.
+                $workflow->steps()->delete();
 
                 $sequence = 1;
-                if ($hrReviewRole) {
+
+                $level1 = $approvers->get('mehwish');
+                if ($level1) {
                     ApprovalStep::query()->create([
                         'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'HR Review', 'approver_role_id' => $hrReviewRole->id, 'required_approvals' => 1,
+                        'name'        => 'HR Review', 'approver_user_id' => $level1->id, 'required_approvals' => 1,
                     ]);
                 }
+
                 if ($config['route']) {
                     ApprovalStep::query()->create([
                         'workflow_id'     => $workflow->id, 'sequence' => $sequence++,
                         'name'            => $config['route'] === 'department_manager' ? 'Department Head Review' : 'Line Manager Review',
                         'hierarchy_route' => $config['route'], 'required_approvals' => 1,
                     ]);
+                } elseif (! empty($config['level2'])) {
+                    // No hierarchy route for this category (e.g. Real Estate) --
+                    // level 2 is a specific named approver instead.
+                    $level2 = $approvers->get($config['level2']);
+                    if ($level2) {
+                        ApprovalStep::query()->create([
+                            'workflow_id' => $workflow->id, 'sequence' => $sequence++,
+                            'name'        => 'Level 2 Approval', 'approver_user_id' => $level2->id, 'required_approvals' => 1,
+                        ]);
+                    }
                 }
-                if ($financeRole) {
+
+                $level3 = $config['level3'] ? $approvers->get($config['level3']) : null;
+                if ($level3) {
                     ApprovalStep::query()->create([
                         'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'Finance Final Processing', 'approver_role_id' => $financeRole->id, 'required_approvals' => 1,
+                        'name'        => 'Level 3 Approval', 'approver_user_id' => $level3->id, 'required_approvals' => 1,
                     ]);
                 }
-                if ($vpFinanceRole) {
+
+                $level4 = $config['level4'] ? $approvers->get($config['level4']) : null;
+                if ($level4) {
                     ApprovalStep::query()->create([
                         'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'VP Finance Oversight', 'approver_role_id' => $vpFinanceRole->id, 'required_approvals' => 1,
-                        'conditions'  => [['field' => 'amount', 'operator' => 'gte', 'value' => self::VP_FINANCE_THRESHOLD]],
+                        'name'        => 'Level 4 Approval', 'approver_user_id' => $level4->id, 'required_approvals' => 1,
                     ]);
                 }
             }

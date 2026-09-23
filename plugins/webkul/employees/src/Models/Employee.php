@@ -304,6 +304,12 @@ class Employee extends Model
 
         static::saving(function (self $employee): void {
             static::assertHierarchyIsSameCompany($employee);
+
+            // Time-off approval always follows the reporting line: the line manager set in
+            // "Manager" is who approves this employee's leave, never a separately-picked person.
+            $employee->leave_manager_id = $employee->parent_id
+                ? static::query()->find($employee->parent_id)?->user_id
+                : null;
         });
 
         static::saved(function (self $employee) {
