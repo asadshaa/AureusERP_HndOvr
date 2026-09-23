@@ -31,6 +31,14 @@ enum DocumentAuditAction: string implements HasLabel
 
     case DriveSyncFailed = 'drive_sync_failed';
 
+    // Import-direction Drive ingestion (Phase 1: DriveIngestionService).
+    // Recorded once a Drive file discovered in a company's inbound folder
+    // has been registered as a new Document -- never for a file that
+    // merely got discovered or downloaded, and never for a file
+    // recognized as Aureus's own export (RecognizedInternalOrigin skips
+    // registration entirely).
+    case DriveImported = 'drive_imported';
+
     // Intra-instance user-to-user transfer (DocumentTransferService). These
     // were referenced by that service but never defined here, so every call
     // to send()/claim()/cancel() fatalled -- found while designing the peer
@@ -75,6 +83,7 @@ enum DocumentAuditAction: string implements HasLabel
             self::AccessDenied          => __('accounting::enums/document-audit-action.access-denied'),
             self::DriveExported         => __('accounting::enums/document-audit-action.drive-exported'),
             self::DriveSyncFailed       => __('accounting::enums/document-audit-action.drive-sync-failed'),
+            self::DriveImported         => __('accounting::enums/document-audit-action.drive-imported'),
             self::TransferSent          => __('accounting::enums/document-audit-action.transfer-sent'),
             self::TransferDelivered     => __('accounting::enums/document-audit-action.transfer-delivered'),
             self::TransferCancelled     => __('accounting::enums/document-audit-action.transfer-cancelled'),

@@ -45,6 +45,7 @@ class FinanceRoleSeeder extends Seeder
         'vp_finance',
         'cfo',
         'internal_auditor',
+        'external_auditor',
     ];
 
     public function run(): void

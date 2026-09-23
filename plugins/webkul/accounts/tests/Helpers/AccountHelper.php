@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Auth;
+use Webkul\Account\Database\Seeders\PaymentMethodSeeder;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\AmountType;
 use Webkul\Account\Enums\DelayType;
@@ -27,6 +28,7 @@ use Webkul\Account\Models\Move;
 use Webkul\Account\Models\MoveLine;
 use Webkul\Account\Models\Partner;
 use Webkul\Account\Models\PaymentDueTerm;
+use Webkul\Account\Models\PaymentMethod;
 use Webkul\Account\Models\PaymentMethodLine;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Account\Models\PaymentTerm;
@@ -319,13 +321,20 @@ class AccountHelper
 
     public static function bankJournal(): Journal
     {
+        if (PaymentMethod::where('code', 'manual')->count() < 2) {
+            (new PaymentMethodSeeder)->run();
+        }
+
+        $defaultAccount = Account::factory()->create([
+            'account_type' => AccountType::ASSET_CASH,
+            'currency_id'  => static::currency()->id,
+        ]);
+
         $journal = Journal::factory()->bank()->create([
-            'company_id'         => static::company()->id,
-            'currency_id'        => static::currency()->id,
-            'default_account_id' => Account::factory()->create([
-                'account_type' => AccountType::ASSET_CASH,
-                'currency_id'  => static::currency()->id,
-            ])->id,
+            'company_id'          => static::company()->id,
+            'currency_id'         => static::currency()->id,
+            'default_account_id'  => $defaultAccount->id,
+            'suspense_account_id' => $defaultAccount->id,
         ]);
 
         foreach (Journal::getDefaultInboundPaymentMethodLines() as $data) {

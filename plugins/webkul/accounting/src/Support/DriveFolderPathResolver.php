@@ -3,7 +3,9 @@
 namespace Webkul\Accounting\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use Webkul\Accounting\Enums\DocumentType;
 use Webkul\Accounting\Models\Document;
+use Webkul\Support\Models\Company;
 
 /**
  * Turns a Document into a concrete, ordered list of Drive folder names --
@@ -20,6 +22,14 @@ class DriveFolderPathResolver
      */
     public function resolve(Document $document): array
     {
+        if (config('accounting_drive.unify_invoice_and_inbound_folders', true) && in_array($document->document_type, [DocumentType::Invoice, DocumentType::Bill])) {
+            $company = $document->company ?? Company::query()->find($document->company_id);
+
+            if ($company) {
+                return $this->resolveInboundFolder($company);
+            }
+        }
+
         $template = config('accounting_drive.path_templates.'.$document->document_type->value)
             ?? config('accounting_drive.path_templates.default');
 
@@ -31,6 +41,40 @@ class DriveFolderPathResolver
         return [
             $this->sanitize(config('accounting_drive.root_folder_name', 'Aureus')),
             ...array_map($this->sanitize(...), $segments),
+        ];
+    }
+
+    /**
+     * The Drive -> Aureus mirror of resolve(): a company's single
+     * ingestion inbox, "Aureus/{Company} ({id})/Inbound", rather than a
+     * per-document-type tree. Uses the exact same company_id-suffixed
+     * segment as companySegmentFor() so the same folder that already
+     * appears under a company's export tree is reused, not a
+     * differently-keyed duplicate.
+     *
+     * @return array<int, string> ordered path segments, root folder name first
+     */
+    public function resolveInboundFolder(Company $company): array
+    {
+        return [
+            $this->sanitize(config('accounting_drive.root_folder_name', 'Aureus')),
+            $this->sanitize("{$company->name} ({$company->id})"),
+            $this->sanitize(config('accounting_drive.inbound_folder_name', 'Inbound')),
+        ];
+    }
+
+    /**
+     * Dedicated folder path for paid invoices / bills:
+     * Aureus/{Company} ({id})/Paid Invoices
+     *
+     * @return array<int, string> ordered path segments, root folder name first
+     */
+    public function resolvePaidFolder(Company $company): array
+    {
+        return [
+            $this->sanitize(config('accounting_drive.root_folder_name', 'Aureus')),
+            $this->sanitize("{$company->name} ({$company->id})"),
+            $this->sanitize(config('accounting_drive.paid_folder_name', 'Paid Invoices')),
         ];
     }
 
@@ -87,7 +131,7 @@ class DriveFolderPathResolver
      * -- strip it and trim so a name like "Trade Debtors / Local" can't
      * silently create an extra folder level.
      */
-    private function sanitize(string $segment): string
+    public function sanitize(string $segment): string
     {
         return trim(str_replace(['/', '\\'], '-', $segment));
     }

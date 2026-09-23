@@ -56,6 +56,47 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inbound (Drive -> Aureus) ingestion folder
+    |--------------------------------------------------------------------------
+    |
+    | Phase 1 of Drive -> Aureus ingestion (DriveIngestionService) only
+    | ever looks inside ONE folder per company: Aureus/{company}/{this
+    | name}. It is found-or-created the same way export's per-document
+    | folders are (see DriveFolderPathResolver::resolveInboundFolder()),
+    | so it's minimal new config surface -- no separate template array
+    | the way path_templates needs one per DocumentType, because inbound
+    | discovery isn't keyed by document type at all yet.
+    |
+    */
+    'inbound_folder_name' => env('ACCOUNTING_DRIVE_INBOUND_FOLDER', 'Inbound'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Unified Inbound / Outbound Folder
+    |--------------------------------------------------------------------------
+    |
+    | When true, invoices and bills exported to Google Drive are saved directly
+    | into the company's designated inbound Drive folder (Aureus/{company}/{inbound}),
+    | matching where files are dropped and retrieved from. When false, documents
+    | follow the separate path_templates hierarchy below.
+    |
+    */
+    'unify_invoice_and_inbound_folders' => env('ACCOUNTING_DRIVE_UNIFY_INVOICE_FOLDERS', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Paid Invoices / Bills Google Drive folder
+    |--------------------------------------------------------------------------
+    |
+    | When a bill or invoice is marked as paid, a copy of the paid document
+    | can be synced directly to this folder under the company's Drive directory
+    | (e.g. Aureus/{company}/Paid Invoices).
+    |
+    */
+    'paid_folder_name' => env('ACCOUNTING_DRIVE_PAID_FOLDER', 'Paid Invoices'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Folder path templates
     |--------------------------------------------------------------------------
     |

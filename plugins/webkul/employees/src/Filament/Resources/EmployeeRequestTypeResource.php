@@ -17,6 +17,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Webkul\Account\Enums\JournalType;
 use Webkul\Employee\Filament\Resources\EmployeeRequestTypeResource\Pages\ManageEmployeeRequestTypes;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Support\HrPermissions;
@@ -78,16 +79,19 @@ class EmployeeRequestTypeResource extends Resource
             Toggle::make('requires_document'),
             Toggle::make('is_active')->default(true),
             Select::make('journal_id')
-                ->relationship('journal', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', $companyId)->where('type', 'general'))
+                ->label('Purchase journal')
+                ->helperText('Financial requests post as a real vendor Bill, which requires a Purchase-type journal.')
+                ->relationship('journal', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', $companyId)->where('type', JournalType::PURCHASE))
                 ->visible(fn ($get): bool => (bool) $get('is_financial'))->searchable()->preload(),
             Select::make('debit_account_id')
-                ->label('Debit account')
+                ->label('Debit account (expense)')
                 ->relationship('debitAccount', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query
                     ->postable()->where('deprecated', false)
                     ->whereHas('companies', fn (Builder $companies): Builder => $companies->where('companies.id', $companyId)))
                 ->visible(fn ($get): bool => (bool) $get('is_financial'))->searchable()->preload(),
             Select::make('credit_account_id')
-                ->label('Credit account')
+                ->label('Credit account (not used for posting)')
+                ->helperText('Informational only. The posted Bill\'s payable line is resolved automatically (vendor\'s payable account, or the company\'s Accounts Payable account), the same way a real vendor Bill works.')
                 ->relationship('creditAccount', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query
                     ->postable()->where('deprecated', false)
                     ->whereHas('companies', fn (Builder $companies): Builder => $companies->where('companies.id', $companyId)))

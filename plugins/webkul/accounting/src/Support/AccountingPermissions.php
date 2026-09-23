@@ -718,4 +718,16 @@ final class AccountingPermissions
             'view_support_approval::workflow',
         ];
     }
+
+    /**
+     * External Auditor -- independent external audit and control review.
+     * Strictly read-only audit access across accounting, reports, journals, and approvals.
+     * Zero write/post/pay/approve/mutate permissions.
+     *
+     * @return array<int, string>
+     */
+    public static function externalAuditor(): array
+    {
+        return self::internalAuditor();
+    }
 }

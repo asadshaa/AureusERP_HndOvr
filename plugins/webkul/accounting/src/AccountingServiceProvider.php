@@ -15,6 +15,7 @@ use Webkul\Accounting\Console\Commands\AuthorizeDriveCommand;
 use Webkul\Accounting\Console\Commands\CheckDocumentIntegrityCommand;
 use Webkul\Accounting\Console\Commands\ExpireDocumentTransfersCommand;
 use Webkul\Accounting\Console\Commands\ExpireWebRtcSessionsCommand;
+use Webkul\Accounting\Console\Commands\SyncDriveIngestionsCommand;
 use Webkul\Accounting\Contracts\DocumentStorageProvider;
 use Webkul\Accounting\Contracts\DriveClient;
 use Webkul\Accounting\Contracts\InvoicePayloadFormatter;
@@ -108,6 +109,9 @@ class AccountingServiceProvider extends PackageServiceProvider
                 // it entirely, exactly as this array is what plugin-manager
                 // uses to discover which migrations to run at all.
                 '2026_09_16_000005_create_accounting_webrtc_sessions_table',
+                '2026_09_17_000001_create_accounting_drive_ingestions_table',
+                '2026_09_18_000001_create_accounting_drive_ingestion_classifications_table',
+                '2026_09_19_000001_add_invoice_posting_fields_to_drive_ingestion_classifications_table',
             ])
             ->runsMigrations()
             ->hasSeeders([
@@ -120,6 +124,7 @@ class AccountingServiceProvider extends PackageServiceProvider
                 AuthorizeDriveCommand::class,
                 ExpireDocumentTransfersCommand::class,
                 ExpireWebRtcSessionsCommand::class,
+                SyncDriveIngestionsCommand::class,
             ])
             ->icon('accounting')
             ->hasInstallCommand(function (InstallCommand $command) {

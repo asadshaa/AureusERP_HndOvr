@@ -36,6 +36,10 @@ class SyncDocumentToDriveJob implements ShouldQueue
 
     public function handle(DriveSyncService $driveSyncService): void
     {
+        if (! config('accounting_drive.enabled')) {
+            return;
+        }
+
         $document = Document::query()->find($this->documentId);
 
         if (! $document) {

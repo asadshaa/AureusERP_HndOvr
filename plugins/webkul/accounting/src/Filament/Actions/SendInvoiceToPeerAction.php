@@ -3,6 +3,7 @@
 namespace Webkul\Accounting\Filament\Actions;
 
 use Filament\Actions\Action;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -11,9 +12,11 @@ use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Move;
 use Webkul\Accounting\Models\Peer;
+use Webkul\Accounting\Services\Drive\InvoiceDriveExportService;
 use Webkul\Accounting\Services\Peers\DocumentExchangeService;
 use Webkul\Accounting\Services\Peers\WebRtcSignalingService;
 use Webkul\Accounting\Support\AccountingPermissions;
+use Webkul\Accounting\Support\DriveFolderPathResolver;
 
 /**
  * The one entry point for sending an invoice outside this instance.
@@ -41,10 +44,25 @@ class SendInvoiceToPeerAction
                         'direct'   => config('webrtc.enabled', true)
                             ? 'Someone who is online right now (direct encrypted browser transfer)'
                             : null,
+                        'drive'    => config('accounting_drive.enabled', false)
+                            ? 'Linked Google Drive'
+                            : null,
                     ]))
                     ->default('peer')
                     ->live()
                     ->required(),
+
+                Placeholder::make('drive_info')
+                    ->label('Destination')
+                    ->content(function (Move $record): string {
+                        $company = $record->company;
+                        $path = $company
+                            ? app(DriveFolderPathResolver::class)->resolveInboundFolder($company)
+                            : [config('accounting_drive.root_folder_name', 'Aureus'), 'Company', config('accounting_drive.inbound_folder_name', 'Inbound')];
+
+                        return 'Will be uploaded to your company Google Drive folder: '.implode(' > ', $path);
+                    })
+                    ->visible(fn (Get $get) => $get('channel') === 'drive'),
 
                 Select::make('peer_id')
                     ->label('Peer')
@@ -66,6 +84,16 @@ class SendInvoiceToPeerAction
                 $exchange = app(DocumentExchangeService::class);
 
                 try {
+                    if ($data['channel'] === 'drive') {
+                        app(InvoiceDriveExportService::class)->exportInvoice(Auth::user(), $record);
+
+                        Notification::make()->success()
+                            ->title('Exported to Google Drive')
+                            ->body("Invoice {$record->name} was successfully uploaded to your linked Google Drive folder.")
+                            ->send();
+
+                        return;
+                    }
                     // Hands the sender off to their own transfer console,
                     // where their browser makes the offer. Nothing is queued:
                     // this transport has no store-and-forward, by design.

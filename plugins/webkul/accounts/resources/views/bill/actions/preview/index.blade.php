@@ -269,11 +269,11 @@
                 <tbody>
                     @foreach ($record->invoiceLines as $item)
                     <tr>
-                        <td>{{ $item->product->name }}</td>
+                        <td>{{ $item->product?->name ?? $item->name }}</td>
                         <td>{{ number_format($item->quantity) }}</td>
 
                         @if (settings(\Webkul\Product\Settings\ProductSettings::class)->enable_uom)
-                            <td>{{ $item->product->uom->name }}</td>
+                            <td>{{ $item->product?->uom?->name ?? ($item->uom?->name ?? '') }}</td>
                         @endif
 
                         <td>{{ money($item->price_unit, $record->currency->name) }}</td>

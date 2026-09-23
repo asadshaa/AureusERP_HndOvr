@@ -264,7 +264,7 @@ it('routes leave through the shared approval engine with company isolation', fun
         ->and($approved->rejection_reason)->toBeNull();
 });
 
-it('sends an approved financial employee request to a balanced draft accounting journal exactly once', function (): void {
+it('sends an approved financial employee request to a balanced, posted vendor Bill exactly once', function (): void {
     $currency = Currency::query()->where('code', 'PKR')->firstOrFail();
     $company = Company::factory()->create(['currency_id' => $currency->id, 'is_active' => true]);
     $employeeUser = hrPlatformUser($company);
@@ -277,18 +277,28 @@ it('sends an approved financial employee request to a balanced draft accounting 
         'is_group'    => false,
         'deprecated'  => false,
     ]);
+    // LIABILITY_PAYABLE, not LIABILITY_CURRENT: an approved claim posts as a
+    // real Bill, whose balancing payable line is auto-resolved from the
+    // company's LIABILITY_PAYABLE account -- see EmployeeRequestService::
+    // createAccountingDraft(). reconcile => true matches the real company-1
+    // "Account Payable" account (211000): without it,
+    // MoveLine::computeAmountResidual() forces the residual to 0 and the
+    // fresh Bill's payment_state would incorrectly compute as PAID.
     $payable = Account::factory()->create([
         'currency_id' => $currency->id,
-        'account_type'=> AccountType::LIABILITY_CURRENT,
+        'account_type'=> AccountType::LIABILITY_PAYABLE,
         'is_group'    => false,
         'deprecated'  => false,
+        'reconcile'   => true,
     ]);
     $expense->companies()->attach($company->id);
     $payable->companies()->attach($company->id);
+    // PURCHASE, not GENERAL: an approved claim posts as a real vendor Bill
+    // (move_type = IN_INVOICE), which requires a Purchase-type journal.
     $journal = Journal::factory()->create([
         'company_id'  => $company->id,
         'currency_id' => $currency->id,
-        'type'        => JournalType::GENERAL,
+        'type'        => JournalType::PURCHASE,
         'code'        => 'HR-'.$company->id,
     ]);
     $type = EmployeeRequestType::query()->create([
@@ -321,7 +331,13 @@ it('sends an approved financial employee request to a balanced draft accounting 
     $service->createAccountingDraft($employeeRequest);
 
     expect($employeeRequest->status)->toBe('approved')
-        ->and($employeeRequest->accountingMove->state)->toBe(MoveState::DRAFT)
+        // Posted immediately via AccountFacade::confirmMove() -- the same
+        // mechanism a real Bill's "Confirm" action and Drive-ingested
+        // vendor bills use -- not left as an unposted draft. Posting is not
+        // paying: no Payment is created here, and registering one remains a
+        // fully separate, manual "Register Payment" action.
+        ->and($employeeRequest->accountingMove->state)->toBe(MoveState::POSTED)
+        ->and($employeeRequest->accountingMove->move_type->value)->toBe('in_invoice')
         ->and((float) $employeeRequest->accountingMove->lines->sum('debit'))->toBe(5000.0)
         ->and((float) $employeeRequest->accountingMove->lines->sum('credit'))->toBe(5000.0)
         ->and($employeeRequest->accountingMove->accounting_source_type)->toBe('employee_request')

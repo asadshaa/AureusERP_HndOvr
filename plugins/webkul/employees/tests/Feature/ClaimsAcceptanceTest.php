@@ -41,6 +41,13 @@ use Webkul\Support\Services\ApprovalEngine;
  * type actually resolves is_financial=true -- the same "is there really
  * somewhere for this to post" condition a production company would need,
  * not a shortcut that makes the accounting checks vacuously true.
+ *
+ * Also creates real Users for the four named individuals ClaimsWorkflowSeeder
+ * pins Level 1/3/4 approval steps to by email (mehwish@truckitin.com,
+ * raza.afzal@truckitin.com, khurram@truckitin.com, haider.navid@truckitin.com)
+ * -- BEFORE the seeder runs, so it wires them into this company's workflow
+ * exactly as it would the real people, instead of silently skipping those
+ * steps the way it does for an email with no matching account.
  */
 function claimsAcceptanceFixture(): array
 {
@@ -59,15 +66,33 @@ function claimsAcceptanceFixture(): array
     $employee = Employee::query()->create(['company_id' => $company->id, 'department_id' => $department->id, 'parent_id' => $manager->id, 'user_id' => $employeeUser->id, 'name' => 'Acceptance Claimant']);
     $employeeUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
 
+    $mehwishUser = User::factory()->create(['email' => 'mehwish@truckitin.com', 'default_company_id' => $company->id, 'is_active' => true]);
+    $mehwishUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
+    $razaUser = User::factory()->create(['email' => 'raza.afzal@truckitin.com', 'default_company_id' => $company->id, 'is_active' => true]);
+    $razaUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
+    $khurramUser = User::factory()->create(['email' => 'khurram@truckitin.com', 'default_company_id' => $company->id, 'is_active' => true]);
+    $khurramUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
+    $haiderUser = User::factory()->create(['email' => 'haider.navid@truckitin.com', 'default_company_id' => $company->id, 'is_active' => true]);
+    $haiderUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
+
     app(HrRoleSeeder::class)->run();
     app(FinanceRoleSeeder::class)->run();
     app(ClaimsWorkflowSeeder::class)->run();
 
     $expense = Account::factory()->create(['currency_id' => $currency->id, 'account_type' => AccountType::EXPENSE, 'is_group' => false, 'deprecated' => false]);
-    $payable = Account::factory()->create(['currency_id' => $currency->id, 'account_type' => AccountType::LIABILITY_CURRENT, 'is_group' => false, 'deprecated' => false]);
+    // LIABILITY_PAYABLE, not LIABILITY_CURRENT: a fully-approved claim posts
+    // as a real Bill, whose balancing payable line is auto-resolved from the
+    // company's LIABILITY_PAYABLE account -- see EmployeeRequestService::
+    // createAccountingDraft(). reconcile => true matches the real company-1
+    // "Account Payable" account (211000): without it,
+    // MoveLine::computeAmountResidual() forces the residual to 0 and the
+    // fresh Bill's payment_state would incorrectly compute as PAID.
+    $payable = Account::factory()->create(['currency_id' => $currency->id, 'account_type' => AccountType::LIABILITY_PAYABLE, 'is_group' => false, 'deprecated' => false, 'reconcile' => true]);
     $expense->companies()->attach($company->id);
     $payable->companies()->attach($company->id);
-    $journal = Journal::factory()->create(['company_id' => $company->id, 'currency_id' => $currency->id, 'type' => JournalType::GENERAL, 'code' => 'ACCEPT-'.$company->id]);
+    // PURCHASE, not GENERAL: an approved claim now posts as a real vendor
+    // Bill (move_type = IN_INVOICE), which requires a Purchase-type journal.
+    $journal = Journal::factory()->create(['company_id' => $company->id, 'currency_id' => $currency->id, 'type' => JournalType::PURCHASE, 'code' => 'ACCEPT-'.$company->id]);
 
     $requestType = EmployeeRequestType::query()->where('company_id', $company->id)->where('code', 'claim_people')->firstOrFail();
     $requestType->update(['is_financial' => true, 'journal_id' => $journal->id, 'debit_account_id' => $expense->id, 'credit_account_id' => $payable->id]);
@@ -89,7 +114,7 @@ function claimsAcceptanceFixture(): array
     $unrelatedEmployee = Employee::query()->create(['company_id' => $company->id, 'department_id' => $department->id, 'parent_id' => $unrelatedManager->id, 'user_id' => $unrelatedEmployeeUser->id, 'name' => 'Unrelated Claimant']);
     $unrelatedEmployeeUser->allowedCompanies()->syncWithoutDetaching([$company->id]);
 
-    return compact('company', 'department', 'manager', 'managerUser', 'employee', 'employeeUser', 'hrUser', 'controllerUser', 'unrelatedEmployee', 'unrelatedEmployeeUser', 'requestType');
+    return compact('company', 'department', 'manager', 'managerUser', 'employee', 'employeeUser', 'hrUser', 'controllerUser', 'mehwishUser', 'razaUser', 'khurramUser', 'haiderUser', 'unrelatedEmployee', 'unrelatedEmployeeUser', 'requestType');
 }
 
 /**
@@ -182,13 +207,17 @@ it('TEST 2 PASS: submitting the claim starts HR review under the correct workflo
         ->and($approval->workflow->request_type)->toBe('claim_people');
 
     // HR review/approval workflow begins: the request is pending at the
-    // workflow's first step, which is HR Review, and the seeded HR
-    // reviewer can act on it right now -- not just a status string, the
-    // live routing genuinely points at HR.
+    // workflow's first step, which is HR Review, and the named HR reviewer
+    // (Mehwish) can act on it right now -- not just a status string, the
+    // live routing genuinely points at her, by name, not by role.
     expect($approval->status)->toBe('pending')
         ->and($approval->current_step_sequence)->toBe(1)
         ->and($approval->currentStep()->name)->toBe('HR Review')
-        ->and(app(ApprovalEngine::class)->canAct($approval, $f['hrUser']))->toBeTrue()
+        ->and(app(ApprovalEngine::class)->canAct($approval, $f['mehwishUser']))->toBeTrue()
+        // Holding the old 'hr_manager' role is not enough any more -- only
+        // the named approver can act (ApprovalEngine::canAct() no longer has
+        // any role-tier bypass).
+        ->and(app(ApprovalEngine::class)->canAct($approval, $f['hrUser']))->toBeFalse()
         // The Line Manager (a later step) cannot act yet -- confirms this
         // is genuinely sequential, not just an open free-for-all.
         ->and(app(ApprovalEngine::class)->canAct($approval, $f['managerUser']))->toBeFalse();
@@ -204,29 +233,26 @@ it('TEST 2 PASS: submitting the claim starts HR review under the correct workflo
 // ---------------------------------------------------------------------
 // TEST 3 -- Level 1 approver / Line Manager.
 //
-// IMPORTANT, read before the assertions below: the script asks to log in
-// as a "Level 1 approver" and separately expects the workflow to reach
-// "Level 3" after the Line Manager. Neither exists. Level 1 (Mehwish) and
-// Level 3 (Raza Afzal) are two of the four missing named actors reported
-// at the end of Section 8 -- they were deliberately never wired into the
-// seeded workflow because those people do not exist in this database, and
-// ApprovalStep requires a real approver_user_id/role/hierarchy_route, not
-// a placeholder. The People workflow's real, seeded sequence is:
-//   1. HR Review            (role hr_manager)      -- done in TEST 2
-//   2. Line Manager Review  (hierarchy_route)       -- tested below
-//   3. Finance Final Processing (role controller)   -- the real next step
-//   4. VP Finance Oversight (role vp_finance, amount-gated)
-// So this test exercises the real step 2 (Line Manager, which the script's
-// own second block also calls "Line Manager" and separately expects to
-// exist) and confirms the workflow advances to the real step 3 (Finance
-// Final Processing) rather than asserting a "Level 3" that was never built.
+// The acceptance script asks to log in as a "Level 1 approver" and
+// separately expects the workflow to reach "Level 3" after the Line
+// Manager -- both are now literally true against the real seeded chain:
+// ClaimsWorkflowSeeder pins Level 1 to Mehwish and Level 3 to Raza Afzal by
+// name, and claimsAcceptanceFixture() creates real Users for both before
+// running the seeder, exactly as a production company would have them. The
+// People workflow's real, seeded sequence is:
+//   1. HR Review        (Mehwish, named)     -- done in TEST 2
+//   2. Line Manager Review (hierarchy_route) -- tested below
+//   3. Level 3 Approval (Raza Afzal, named)  -- the real next step
+//   4. Level 4 Approval (Khurram, named)
+// So this test exercises the real step 2 (Line Manager) and confirms the
+// workflow advances to the real step 3 (Level 3 Approval / Raza Afzal).
 // ---------------------------------------------------------------------
-it('TEST 3 PASS: the Line Manager sees only their own report\'s claim, can approve it, and the workflow advances to Finance', function () {
+it('TEST 3 PASS: the Line Manager sees only their own report\'s claim, can approve it, and the workflow advances to Level 3', function () {
     $f = claimsAcceptanceFixture();
     Auth::login($f['employeeUser']);
     $claim = createAcceptancePeopleClaim($f);
     app(EmployeeRequestService::class)->submit($claim, $f['employeeUser']);
-    app(EmployeeRequestService::class)->approve($claim->fresh(), $f['hrUser'], 'HR reviewed');
+    app(EmployeeRequestService::class)->approve($claim->fresh(), $f['mehwishUser'], 'HR reviewed');
     $claim->refresh();
 
     // A second claim from an unrelated employee, for the isolation check.
@@ -274,10 +300,14 @@ it('TEST 3 PASS: the Line Manager sees only their own report\'s claim, can appro
         ->and($approval->decisions->last()->actor_id)->toBe($f['managerUser']->id)
         ->and($approval->decisions->last()->reason)->toBe('Line manager approved');
 
-    // Workflow advances -- to the real next step, Finance Final Processing.
+    // Workflow advances -- to the real next step, Level 3 Approval (Raza Afzal).
     expect($approval->fresh()->current_step_sequence)->toBe(3)
-        ->and($approval->fresh()->currentStep()->name)->toBe('Finance Final Processing')
-        ->and(app(ApprovalEngine::class)->canAct($approval->fresh(), $f['controllerUser']))->toBeTrue();
+        ->and($approval->fresh()->currentStep()->name)->toBe('Level 3 Approval')
+        ->and(app(ApprovalEngine::class)->canAct($approval->fresh(), $f['razaUser']))->toBeTrue()
+        // Finance's 'controller' role held this step under the old
+        // role-based chain -- it has no standing on it any more, only
+        // Raza Afzal by name does.
+        ->and(app(ApprovalEngine::class)->canAct($approval->fresh(), $f['controllerUser']))->toBeFalse();
 });
 
 // ---------------------------------------------------------------------
@@ -296,7 +326,7 @@ it('TEST 6 PASS: a claim rejected at the Line Manager step becomes Rejected, can
         'attachments'   => ['employees/requests/receipt.pdf'],
     ]);
     app(EmployeeRequestService::class)->submit($claim, $f['employeeUser']);
-    app(EmployeeRequestService::class)->approve($claim->fresh(), $f['hrUser'], 'HR reviewed');
+    app(EmployeeRequestService::class)->approve($claim->fresh(), $f['mehwishUser'], 'HR reviewed');
 
     $moveCountBefore = Move::query()->count();
 
@@ -314,11 +344,12 @@ it('TEST 6 PASS: a claim rejected at the Line Manager step becomes Rejected, can
 
     // Subsequent approval levels cannot approve it -- the request is
     // terminal (rejected), so canAct() is false for every later step's
-    // holder, and Finance specifically cannot process it.
+    // holder, and the real next approver (Raza Afzal, Level 3) specifically
+    // cannot process it.
     $approval = $rejected->approvalRequest->fresh();
     expect($approval->status)->toBe('rejected')
-        ->and(app(ApprovalEngine::class)->canAct($approval, $f['controllerUser']))->toBeFalse()
-        ->and(fn () => app(EmployeeRequestService::class)->approve($rejected->fresh(), $f['controllerUser']))
+        ->and(app(ApprovalEngine::class)->canAct($approval, $f['razaUser']))->toBeFalse()
+        ->and(fn () => app(EmployeeRequestService::class)->approve($rejected->fresh(), $f['razaUser']))
         ->toThrow(RuntimeException::class);
 
     // History retained, not overwritten: both the HR approval and the

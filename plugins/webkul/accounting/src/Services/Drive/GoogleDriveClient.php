@@ -30,8 +30,10 @@ class GoogleDriveClient implements DriveClient
         $client->setClientId(config('accounting_drive.client_id'));
         $client->setClientSecret(config('accounting_drive.client_secret'));
         $client->setScopes(config('accounting_drive.scopes', []));
-        $client->setAccessType('offline');
-        $client->refreshToken(config('accounting_drive.refresh_token'));
+        $token = $client->refreshToken(config('accounting_drive.refresh_token'));
+        if (is_array($token) && isset($token['error'])) {
+            throw new RuntimeException('Google Drive OAuth authentication failed: '.($token['error_description'] ?? $token['error']).". Please re-authorize via 'php artisan accounting:drive:authorize'.");
+        }
 
         $this->service = new DriveService($client);
     }
@@ -149,5 +151,35 @@ class GoogleDriveClient implements DriveClient
     public function webViewLink(string $fileId): string
     {
         return "https://drive.google.com/file/d/{$fileId}/view";
+    }
+
+    public function listFiles(string $parentFolderId): array
+    {
+        $result = $this->service->files->listFiles([
+            'q'                         => "'{$parentFolderId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false",
+            'spaces'                    => 'drive',
+            'fields'                    => 'files(id, name, mimeType, size, modifiedTime)',
+            'supportsAllDrives'         => true,
+            'includeItemsFromAllDrives' => true,
+            'pageSize'                  => 1000,
+        ]);
+
+        return array_map(fn (DriveFile $file) => [
+            'id'           => $file->getId(),
+            'name'         => $file->getName(),
+            'mimeType'     => $file->getMimeType(),
+            'size'         => (int) $file->getSize(),
+            'modifiedTime' => $file->getModifiedTime(),
+        ], $result->getFiles());
+    }
+
+    public function downloadFileContent(string $fileId): string
+    {
+        $response = $this->service->files->get($fileId, [
+            'alt'               => 'media',
+            'supportsAllDrives' => true,
+        ]);
+
+        return (string) $response->getBody();
     }
 }
