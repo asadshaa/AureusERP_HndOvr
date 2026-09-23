@@ -3,10 +3,13 @@
 namespace Webkul\TimeOff;
 
 use Filament\Panel;
+use Illuminate\Support\Facades\Event;
+use Webkul\Employee\Models\Employee;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\TimeOff\Listeners\AllocateDefaultLeaveOnEmployeeCreated;
 
 class TimeOffServiceProvider extends PackageServiceProvider
 {
@@ -49,5 +52,15 @@ class TimeOffServiceProvider extends PackageServiceProvider
         Panel::configureUsing(function (Panel $panel): void {
             $panel->plugin(TimeOffPlugin::make());
         });
+    }
+
+    public function packageBooted(): void
+    {
+        // time-off declares a dependency on employees (see hasDependencies
+        // above), never the other way around -- listening for the plain
+        // Eloquent "created" event here keeps that one-directional
+        // relationship intact instead of the employees plugin needing to
+        // know time-off exists at all.
+        Event::listen('eloquent.created: '.Employee::class, AllocateDefaultLeaveOnEmployeeCreated::class);
     }
 }

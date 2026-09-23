@@ -12,7 +12,7 @@ use Webkul\TimeOff\Models\LeaveType;
 /**
  * Section 3 ("IMPLEMENTATION SECTION 3 -- LEAVE / TIME OFF") "Verify/
  * configure" requirement: the Time Off plugin's Employee -> Submit -> Line
- * Manager Review -> Final Review (Admin) -> Approved/Rejected flow already exists in full
+ * Manager Review -> HR Review -> Approved/Rejected flow already exists in full
  * (LeaveApprovalService + ApprovalEngine + TimeOffResource's submit/approve/
  * refuse actions), but two prerequisites it depends on were never actually
  * provisioned anywhere in this repo:
@@ -53,14 +53,15 @@ class LeaveWorkflowSeeder extends Seeder
 
     public function run(): void
     {
-        // Deliberately Admin, not Hr_manager -- the HR Manager (Zainab) is
-        // herself the most likely person to submit a leave request, and
-        // nothing in ApprovalEngine::canAct() stops someone from approving
-        // their own request if they hold the matching role. Admin (Raza)
-        // is never the requester in practice, so this closes that
-        // self-approval gap without building a generic requester-exclusion
-        // mechanism the client didn't ask for.
-        $secondApproverRole = Role::query()->where('name', 'Admin')->where('guard_name', 'web')->first();
+        // Client decision: Time Off's second step is HR (Hr_manager role),
+        // not Admin -- Admin/Raza is deliberately kept out of the Time Off
+        // approval chain entirely. Known, accepted tradeoff: nothing in
+        // ApprovalEngine::canAct() stops someone from approving their own
+        // request if they hold the matching role, so an HR Manager
+        // submitting their own leave could approve it themselves at this
+        // step -- flagged to the client, kept as-is per their explicit
+        // instruction rather than silently reintroducing Admin.
+        $secondApproverRole = Role::query()->where('name', 'Hr_manager')->where('guard_name', 'web')->first();
 
         Company::query()->each(function (Company $company) use ($secondApproverRole): void {
             foreach (self::LEAVE_TYPE_NAMES as $name) {
@@ -105,7 +106,7 @@ class LeaveWorkflowSeeder extends Seeder
                 ApprovalStep::query()->updateOrCreate(
                     ['workflow_id' => $workflow->id, 'sequence' => 2],
                     [
-                        'name'               => 'Final Review',
+                        'name'               => 'HR Review',
                         'approver_role_id'   => $secondApproverRole->id,
                         'hierarchy_route'    => null,
                         'required_approvals' => 1,

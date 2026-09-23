@@ -45,9 +45,14 @@ class MyTimeOffWidget extends BaseWidget
         foreach ($leaveTypes as $leaveType) {
             $availableDays = $this->calculateAvailableDays($employeeId, $leaveType->id, $endOfYear);
 
+            // LeaveType.color is nullable in the schema and not required on
+            // the create/edit form -- a type saved without picking one (as
+            // every leave type this app ships with is, out of the box)
+            // must not crash this widget for every employee who opens
+            // their dashboard.
             $stats[] = Stat::make(__($leaveType->name), $availableDays['days'])
                 ->description(__('time-off::filament/widgets/my-time-off-widget.stats.valid-until', ['date' => $endOfYear->format('Y-m-d')]))
-                ->color(Color::generateV3Palette($leaveType->color));
+                ->color(Color::generateV3Palette($leaveType->color ?? '#6B7280'));
         }
 
         $pendingRequests = $this->calculatePendingRequests($employeeId);
