@@ -3,7 +3,6 @@
 namespace Webkul\Security\Filament\Resources;
 
 use Closure;
-use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -49,8 +48,8 @@ use Webkul\Security\Filament\Resources\UserResource\Pages\ViewUsers;
 use Webkul\Security\Models\User;
 use Webkul\Security\Settings\UserSettings;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
-use Webkul\Support\Models\Company;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Models\Company;
 
 class UserResource extends Resource
 {
@@ -67,7 +66,7 @@ class UserResource extends Resource
         return __('security::filament/resources/user.navigation.title');
     }
 
-    public static function getNavigationGroup(): string | \UnitEnum
+    public static function getNavigationGroup(): string|\UnitEnum
     {
         return NavigationGroup::Setting;
     }
@@ -214,12 +213,6 @@ class UserResource extends Resource
                                     ->columns(1),
                                 Section::make(__('security::filament/resources/user.form.sections.multi-company.title'))
                                     ->schema([
-                                        Select::make('allowed_companies')
-                                            ->label(__('security::filament/resources/user.form.sections.multi-company.allowed-companies'))
-                                            ->relationship('allowedCompanies', 'name')
-                                            ->multiple()
-                                            ->preload()
-                                            ->searchable(),
                                         Select::make('default_company_id')
                                             ->label(__('security::filament/resources/user.form.sections.multi-company.default-company'))
                                             ->relationship(
@@ -233,20 +226,6 @@ class UserResource extends Resource
                                             ->disableOptionWhen(fn ($label) => str_contains($label, ' (Deleted)'))
                                             ->required()
                                             ->searchable()
-                                            ->createOptionForm(fn (Schema $schema) => CompanyResource::form($schema))
-                                            ->createOptionAction(function (Action $action) {
-                                                $action
-                                                    ->fillForm(function (array $arguments): array {
-                                                        return [
-                                                            'user_id' => Auth::id(),
-                                                        ];
-                                                    })
-                                                    ->mutateDataUsing(function (array $data) {
-                                                        $data['user_id'] = Auth::id();
-
-                                                        return $data;
-                                                    });
-                                            })
                                             ->afterStateHydrated(function (Select $component, $state) {
                                                 if (empty($state)) {
                                                     $component->state(null);

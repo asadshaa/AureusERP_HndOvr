@@ -79,6 +79,17 @@ class CompanyResource extends Resource
         return ['name', 'email'];
     }
 
+    /**
+     * This deployment is scoped to a single client (Truck It In). Creating additional
+     * companies through the UI is intentionally disabled; the existing company records
+     * remain editable/viewable so data already tied to them (e.g. the demo company's
+     * journal history) stays intact.
+     */
+    public static function canCreate(): bool
+    {
+        return false;
+    }
+
     public static function getGlobalSearchResultDetails(Model $record): array
     {
         return [
