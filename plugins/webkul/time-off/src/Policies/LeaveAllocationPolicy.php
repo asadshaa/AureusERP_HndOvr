@@ -14,11 +14,22 @@ class LeaveAllocationPolicy
     public function __construct(protected HrHierarchyService $hierarchy) {}
 
     /**
-     * Determine whether the user can view any models.
+     * This one Policy class governs BOTH the HR-facing Management ->
+     * Allocations resource (permission family "time_off_allocation") and
+     * the employee-facing My Time -> My Allocations self-service resource
+     * (permission family "time_off_my::allocation") -- they share the same
+     * underlying LeaveAllocation model, so a Laravel Policy is resolved for
+     * both regardless of which Filament resource is asking. Every check
+     * below must therefore accept EITHER permission family, or else one of
+     * the two resources silently loses access even for users who hold the
+     * "right" permission for their side of it -- confirmed live: an HR
+     * Manager holding view_any_time_off_allocation could not see Management
+     * -> Allocations at all, because this method previously checked only
+     * the self-service "my::" permission.
      */
     public function viewAny(User $user): bool
     {
-        return $user->can('view_any_time_off_my::allocation');
+        return $user->can('view_any_time_off_allocation') || $user->can('view_any_time_off_my::allocation');
     }
 
     /**
@@ -31,7 +42,7 @@ class LeaveAllocationPolicy
      */
     public function view(User $user, LeaveAllocation $leaveAllocation): bool
     {
-        if (! $user->can('view_time_off_my::allocation')) {
+        if (! $user->can('view_time_off_allocation') && ! $user->can('view_time_off_my::allocation')) {
             return false;
         }
 
@@ -43,7 +54,7 @@ class LeaveAllocationPolicy
      */
     public function create(User $user): bool
     {
-        return $user->can('create_time_off_my::allocation');
+        return $user->can('create_time_off_allocation') || $user->can('create_time_off_my::allocation');
     }
 
     /**
@@ -51,7 +62,7 @@ class LeaveAllocationPolicy
      */
     public function update(User $user, LeaveAllocation $leaveAllocation): bool
     {
-        if (! $user->can('update_time_off_my::allocation')) {
+        if (! $user->can('update_time_off_allocation') && ! $user->can('update_time_off_my::allocation')) {
             return false;
         }
 
@@ -63,7 +74,7 @@ class LeaveAllocationPolicy
      */
     public function delete(User $user, LeaveAllocation $leaveAllocation): bool
     {
-        if (! $user->can('delete_time_off_my::allocation')) {
+        if (! $user->can('delete_time_off_allocation') && ! $user->can('delete_time_off_my::allocation')) {
             return false;
         }
 
@@ -75,6 +86,6 @@ class LeaveAllocationPolicy
      */
     public function deleteAny(User $user): bool
     {
-        return $user->can('delete_any_time_off_my::allocation');
+        return $user->can('delete_any_time_off_allocation') || $user->can('delete_any_time_off_my::allocation');
     }
 }

@@ -103,7 +103,7 @@ final class HrPermissions
             'page_recruitment_recruitments',
             'view_any_time_off_time::off', 'view_time_off_time::off', 'update_time_off_time::off',
             'view_any_time_off_leave::type', 'view_time_off_leave::type', 'create_time_off_leave::type', 'update_time_off_leave::type',
-            'view_any_time_off_allocation', 'view_time_off_allocation',
+            'view_any_time_off_allocation', 'view_time_off_allocation', 'create_time_off_allocation', 'update_time_off_allocation',
             'view_any_time_off_accrual::plan', 'view_time_off_accrual::plan', 'create_time_off_accrual::plan', 'update_time_off_accrual::plan',
             'view_any_time_off_mandatory::day', 'view_time_off_mandatory::day', 'create_time_off_mandatory::day', 'update_time_off_mandatory::day',
             'view_any_time_off_public::holiday', 'view_time_off_public::holiday', 'create_time_off_public::holiday', 'update_time_off_public::holiday',
@@ -148,6 +148,15 @@ final class HrPermissions
             self::ManageEmployeeRequests,
             self::ViewAnalytics,
             'view_any_support_approval::request', 'view_support_approval::request',
+            // ApproveLeave ('hr_approve_leave') only governs submitting a
+            // leave request on someone else's behalf -- it does NOT gate
+            // the Time Off -> Management screen itself, which Filament
+            // authorizes against these resource-level permissions. Without
+            // them a line manager has no way to even see, let alone act
+            // on, their own reports' leave requests -- confirmed live: the
+            // Manager role had zero Time Off permissions of any kind.
+            'view_any_time_off_time::off', 'view_time_off_time::off', 'update_time_off_time::off',
+            'view_any_time_off_allocation', 'view_time_off_allocation',
         ];
     }
 

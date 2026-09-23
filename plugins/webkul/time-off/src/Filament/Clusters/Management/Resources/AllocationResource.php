@@ -118,13 +118,23 @@ class AllocationResource extends Resource
                                     ->schema([
                                         Select::make('holiday_status_id')
                                             ->label(__('time-off::filament/clusters/management/resources/allocation.form.fields.time-off-type'))
-                                            ->relationship('holidayStatus', 'name')
+                                            ->relationship(
+                                                'holidayStatus',
+                                                'name',
+                                                modifyQueryUsing: fn (Builder $query): Builder => $query
+                                                    ->where('company_id', Auth::user()?->default_company_id),
+                                            )
                                             ->searchable()
                                             ->preload()
                                             ->required(),
                                         Select::make('employee_id')
                                             ->label(__('time-off::filament/clusters/management/resources/allocation.form.fields.employee-name'))
-                                            ->relationship('employee', 'name')
+                                            ->relationship(
+                                                'employee',
+                                                'name',
+                                                modifyQueryUsing: fn (Builder $query): Builder => $query
+                                                    ->where('company_id', Auth::user()?->default_company_id),
+                                            )
                                             ->searchable()
                                             ->preload()
                                             ->required(),

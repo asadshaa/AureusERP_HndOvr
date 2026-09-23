@@ -3,6 +3,7 @@
 namespace Webkul\TimeOff\Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use Webkul\Security\Models\Role;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
@@ -11,7 +12,7 @@ use Webkul\TimeOff\Models\LeaveType;
 /**
  * Section 3 ("IMPLEMENTATION SECTION 3 -- LEAVE / TIME OFF") "Verify/
  * configure" requirement: the Time Off plugin's Employee -> Submit -> Line
- * Manager Review -> Approved/Rejected flow already exists in full
+ * Manager Review -> Final Review (Admin) -> Approved/Rejected flow already exists in full
  * (LeaveApprovalService + ApprovalEngine + TimeOffResource's submit/approve/
  * refuse actions), but two prerequisites it depends on were never actually
  * provisioned anywhere in this repo:
@@ -52,7 +53,16 @@ class LeaveWorkflowSeeder extends Seeder
 
     public function run(): void
     {
-        Company::query()->each(function (Company $company): void {
+        // Deliberately Admin, not Hr_manager -- the HR Manager (Zainab) is
+        // herself the most likely person to submit a leave request, and
+        // nothing in ApprovalEngine::canAct() stops someone from approving
+        // their own request if they hold the matching role. Admin (Raza)
+        // is never the requester in practice, so this closes that
+        // self-approval gap without building a generic requester-exclusion
+        // mechanism the client didn't ask for.
+        $secondApproverRole = Role::query()->where('name', 'Admin')->where('guard_name', 'web')->first();
+
+        Company::query()->each(function (Company $company) use ($secondApproverRole): void {
             foreach (self::LEAVE_TYPE_NAMES as $name) {
                 LeaveType::query()->firstOrCreate(
                     ['company_id' => $company->id, 'name' => $name],
@@ -75,14 +85,32 @@ class LeaveWorkflowSeeder extends Seeder
                 ['name' => 'Leave Request Approval', 'is_active' => true]
             );
 
-            if ($workflow->steps()->doesntExist()) {
-                ApprovalStep::query()->create([
-                    'workflow_id'         => $workflow->id,
-                    'sequence'            => 1,
-                    'name'                => 'Line Manager Review',
-                    'hierarchy_route'     => 'requester_manager',
-                    'required_approvals'  => 1,
-                ]);
+            ApprovalStep::query()->firstOrCreate(
+                ['workflow_id' => $workflow->id, 'sequence' => 1],
+                [
+                    'name'               => 'Line Manager Review',
+                    'hierarchy_route'    => 'requester_manager',
+                    'required_approvals' => 1,
+                ]
+            );
+
+            // Second, role-based step: line manager approves first, then
+            // this role signs off before the leave is finally approved --
+            // both steps are decided by whoever actually holds that
+            // role/position, per ApprovalEngine.canAct(), never a
+            // stand-in. updateOrCreate (not firstOrCreate) so re-running
+            // this seeder after the approver role changes actually applies
+            // the change to an already-provisioned company.
+            if ($secondApproverRole) {
+                ApprovalStep::query()->updateOrCreate(
+                    ['workflow_id' => $workflow->id, 'sequence' => 2],
+                    [
+                        'name'               => 'Final Review',
+                        'approver_role_id'   => $secondApproverRole->id,
+                        'hierarchy_route'    => null,
+                        'required_approvals' => 1,
+                    ]
+                );
             }
         });
     }
