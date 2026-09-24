@@ -25,10 +25,14 @@ use Webkul\Accounting\Models\DriveIngestionClassification;
 use Webkul\Accounting\Support\AccountingPermissions;
 
 /**
- * Phase 2 review queue: read-only (list + view). There is no invoice
- * creation action here on purpose -- turning an approved classification
- * into an actual invoice/bill is a later phase's job with no backend yet
- * to call into (see DriveIngestionClassification::synchronizeApprovalState()).
+ * Phase 2 review queue: the list/table here is read-only (view only) --
+ * the actual editing surface is ViewDriveIngestionClassification's
+ * "Resolve & Submit" header action, which lets an accountant correct
+ * whatever Phase 2's heuristic extraction got wrong (vendor name
+ * misread, amount missed, wrong FS Tag) and re-submits for approval.
+ * DriveInvoicePostingService (Phase 3) posts exactly whatever ends up
+ * stored on the row once approved, so a bad extraction left uncorrected
+ * would either get stuck failing validation or, worse, post wrong data.
  */
 class DriveIngestionClassificationResource extends Resource
 {

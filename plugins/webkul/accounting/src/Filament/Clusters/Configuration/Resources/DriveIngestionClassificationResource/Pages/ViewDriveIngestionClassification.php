@@ -11,11 +11,13 @@ use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Support\Facades\Storage;
 use Webkul\Account\Models\Account;
 use Webkul\Accounting\Enums\DriveClassificationStatus;
+use Webkul\Accounting\Enums\DriveDocumentType;
 use Webkul\Accounting\Filament\Clusters\Configuration\Resources\DriveIngestionClassificationResource;
 use Webkul\Accounting\Filament\Clusters\Customers\Resources\InvoiceResource;
 use Webkul\Accounting\Filament\Clusters\Vendors\Resources\BillResource;
 use Webkul\Accounting\Models\FsTag;
 use Webkul\Accounting\Services\Drive\DriveClassificationService;
+use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Partner\Models\Partner;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
@@ -29,11 +31,29 @@ class ViewDriveIngestionClassification extends ViewRecord
     {
         return [
             Action::make('resolve')
-                ->label('Resolve & Submit')
+                ->label('Edit & Submit')
                 ->icon('heroicon-o-check-circle')
                 ->color('primary')
-                ->visible(fn () => $this->record->validation_status === DriveClassificationStatus::NeedsReview)
+                ->authorize(AccountingPermissions::ManageDocuments)
+                // Previously only shown for NeedsReview -- an accountant
+                // needs to be able to correct the extracted/resolved
+                // fields (wrong vendor match, a flagged possible
+                // duplicate that's actually legitimate, a posting that
+                // failed after approval, etc.) in every pre-posted state,
+                // not only the one specific status Phase 2 happened to
+                // leave it in. Once an invoice has actually been created
+                // (created_invoice_id set / Posted), this correctly stays
+                // hidden -- correcting a posted transaction is a
+                // reversal/correction workflow, not an edit of the
+                // source document.
+                ->visible(fn () => $this->record->created_invoice_id === null
+                    && $this->record->validation_status !== DriveClassificationStatus::Posted)
                 ->form([
+                    Select::make('document_type')
+                        ->label('Document Type')
+                        ->options(collect(DriveDocumentType::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()]))
+                        ->default($this->record->document_type?->value)
+                        ->required(),
                     Select::make('resolved_partner_id')
                         ->label('Partner')
                         ->options(fn () => Partner::query()->where('company_id', $this->record->company_id)->pluck('name', 'id'))
@@ -107,6 +127,7 @@ class ViewDriveIngestionClassification extends ViewRecord
                         ->where('company_id', $record->company_id)
                         ->find($data['resolved_partner_id']);
 
+                    $record->document_type = DriveDocumentType::from($data['document_type']);
                     $record->resolved_partner_id = $partner?->id;
                     $record->extracted_partner_name = $partner?->name ?? $record->extracted_partner_name;
                     $record->resolved_fs_tag_id = $fsTag->id;
