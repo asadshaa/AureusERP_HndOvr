@@ -216,6 +216,19 @@ class PdfInvoiceTextExtractor
         return $unescaped;
     }
 
+    /**
+     * Money-direction detection -- deliberately refuses to guess. The bare
+     * word "invoice" is genuinely ambiguous in everyday language (people
+     * call a vendor's bill "an invoice" just as often as a customer
+     * invoice), so it used to default straight to customer_invoice (money
+     * IN) whenever no other qualifier was present -- meaning a plain
+     * vendor-issued PDF titled just "INVOICE" would silently get the
+     * money direction backwards. Only return a type when there's an
+     * unambiguous, explicit signal either way; otherwise return null and
+     * let the existing "could not determine document type" path route it
+     * to NeedsReview for a human to set explicitly via Edit & Submit,
+     * exactly as an unrecognized filename already does.
+     */
     private function detectDocumentType(string $text): ?string
     {
         $lower = strtolower($text);
@@ -232,7 +245,17 @@ class PdfInvoiceTextExtractor
             return 'vendor_bill';
         }
 
-        if (str_contains($lower, 'tax invoice') || str_contains($lower, 'sales invoice') || str_contains($lower, 'invoice')) {
+        if (str_contains($lower, 'tax invoice') || str_contains($lower, 'sales invoice') || str_contains($lower, 'customer invoice')) {
+            return 'customer_invoice';
+        }
+
+        // "Bill To" (addressed to a customer, billing them) is a genuine,
+        // unambiguous signal distinct from the bare word "invoice" -- this
+        // app's own real customer-invoice PDF template says only "Invoice
+        // ID #..." as its title (no "tax"/"sales"/"customer" qualifier),
+        // but always renders a "Bill To" label next to the customer's
+        // name, which never appears on a vendor bill's PDF at all.
+        if (str_contains($lower, 'bill to') && str_contains($lower, 'invoice')) {
             return 'customer_invoice';
         }
 
