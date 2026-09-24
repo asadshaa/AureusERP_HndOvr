@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Services\Security;
 
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Security\Models\Permission;
@@ -102,7 +103,24 @@ class AccountingPermissionRegistrar
         $accountantRoles = $this->rolesNamed(['accountant', 'accounting', 'finance_user', 'finance user']);
 
         $this->grant($adminRoles->pluck('id')->all(), $permissionIds->values()->all());
+
+        // The curated AccountingPermissions::all() list above only covers
+        // hand-defined "business action" permissions (post journal, review
+        // bank transactions, manage FS tags, ...). It never included the
+        // separate, auto-generated per-resource Filament permissions
+        // (view/create/update on Journal Entries, Chart of Accounts, FS
+        // Tags, Bank Statements, Currencies, Products, Payment Terms,
+        // Report Templates, ...) -- Admin only has those through an
+        // unrelated, plugin-agnostic "grant literally everything" sync
+        // elsewhere, which this registrar never touches. Confirmed live: an
+        // Accounting_manager user could post/approve/pay but could not even
+        // *view* the Chart of Accounts or Journal Entries screens. Manager
+        // tier is meant to be full parity with Admin for this plugin, so it
+        // gets both sets; accountant tier deliberately keeps the narrower,
+        // curated bundle only (segregation of duties).
         $this->grant($managerRoles->pluck('id')->all(), $permissionIds->values()->all());
+        $this->grant($managerRoles->pluck('id')->all(), $this->accountingResourcePermissionIds()->all());
+
         $this->grant(
             $accountantRoles->pluck('id')->all(),
             $permissionIds->only(AccountingPermissions::accountant())->values()->all(),
@@ -129,6 +147,31 @@ class AccountingPermissionRegistrar
             'accountant_roles'    => $accountantRoles->count(),
             'finance_role_grants' => $financeRoleGrants,
         ];
+    }
+
+    /**
+     * Every real Permission row whose resource belongs to the accounting
+     * plugin -- the auto-generated Filament/Shield per-resource
+     * permissions (view_any_accounting_journal::entry,
+     * view_accounting_fs::tag, create_accounting_bill, ...), which live
+     * outside the hand-curated AccountingPermissions::all() list entirely.
+     * Matched by the same "accounting" token boundary Admin's own
+     * permission set was compared against to find this gap in the first
+     * place -- not a guess, verified against the live permissions table.
+     *
+     * @return Collection<int, int>
+     */
+    private function accountingResourcePermissionIds()
+    {
+        return Permission::query()
+            ->where('guard_name', 'web')
+            ->where(function ($query): void {
+                $query->where('name', 'like', 'accounting\_%')
+                    ->orWhere('name', 'like', '%\_accounting\_%')
+                    ->orWhere('name', 'like', 'page\_accounting%')
+                    ->orWhere('name', 'like', 'widget\_accounting%');
+            })
+            ->pluck('id');
     }
 
     private function rolesNamed(array $names)
