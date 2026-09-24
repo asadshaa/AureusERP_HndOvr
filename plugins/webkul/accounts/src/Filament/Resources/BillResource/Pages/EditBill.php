@@ -52,6 +52,8 @@ class EditBill extends EditRecord
                 ->activityPlans($this->getRecord()->activityPlans()),
             BaseActions\PreviewAction::make()
                 ->setTemplate('accounts::bill/actions/preview.index'),
+            BaseActions\PrintAndSendAction::make()
+                ->setTemplate('accounts::bill/actions/preview.index'),
             BaseActions\PayAction::make(),
             BaseActions\ConfirmAction::make(),
             BaseActions\CancelAction::make(),

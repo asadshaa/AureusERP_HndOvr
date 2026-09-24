@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Webkul\Account\Enums\MoveType;
+use Webkul\Account\Enums\PaymentState;
 use Webkul\Account\Models\Move;
 use Webkul\Accounting\Enums\DocumentType;
 use Webkul\Accounting\Models\DocumentDriveSync;
@@ -213,8 +214,80 @@ class InvoiceDriveExportService
         }
 
         $company = $invoice->company ?? Company::query()->find($invoice->company_id);
-        $paidFolderSegments = $company ? $this->pathResolver->resolvePaidFolder($company) : null;
+        $paidFolderSegments = $company ? $this->pathResolver->resolvePaidFolder($company, $invoice->partner?->name) : null;
 
         return $this->driveSyncService->export($document, $paidFolderSegments);
+    }
+
+    /**
+     * Exports one extra file (e.g. a bank transfer or EasyPaisa payment
+     * screenshot attached alongside the bill/invoice) into the SAME folder
+     * an invoice/bill would land in -- Paid Invoices/{vendor or customer
+     * name} when the record is fully paid, the plain company Invoices
+     * folder otherwise -- so proof of payment sits next to the document it
+     * proves, not scattered into an unrelated folder. Each call creates its
+     * own Document/DocumentDriveSync (never merged into the bill's own
+     * document as a "version"), since a screenshot and a bill PDF are two
+     * genuinely distinct files, not two versions of the same one.
+     */
+    public function exportSupportingFile(?User $user, Move $record, string $diskPath, string $title): DocumentDriveSync
+    {
+        if (! config('accounting_drive.enabled')) {
+            throw new RuntimeException('Google Drive sync is not enabled for this installation.');
+        }
+
+        $user = $user ?? Auth::user() ?? User::query()->first();
+        if (! $user) {
+            throw new RuntimeException('No acting user found to record this file.');
+        }
+
+        if (! Storage::disk('public')->exists($diskPath)) {
+            throw new RuntimeException("File not found on the public disk: {$diskPath}");
+        }
+
+        $extension = pathinfo($diskPath, PATHINFO_EXTENSION) ?: 'bin';
+        $mimeType = Storage::disk('public')->mimeType($diskPath) ?: 'application/octet-stream';
+        $fileContent = Storage::disk('public')->get($diskPath);
+
+        $tempPath = tempnam(sys_get_temp_dir(), 'supporting_');
+        file_put_contents($tempPath, $fileContent);
+        $uploadedFile = new UploadedFile($tempPath, Str::slug($title).'.'.$extension, $mimeType, null, true);
+
+        $docType = match ($record->move_type) {
+            MoveType::IN_INVOICE => DocumentType::Bill,
+            default              => DocumentType::Invoice,
+        };
+
+        $document = $this->documentService->upload(
+            $user,
+            $record->company_id,
+            $docType,
+            $title,
+            "Supporting file for {$record->name}",
+            $uploadedFile,
+            request()?->ip(),
+        );
+
+        $this->documentService->attach(
+            $user,
+            $document,
+            $record,
+            note: 'Supporting file (e.g. payment proof) sent alongside '.$record->name,
+            ipAddress: request()?->ip(),
+        );
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+
+        $company = $record->company ?? Company::query()->find($record->company_id);
+
+        $folderSegments = $company
+            ? ($record->payment_state === PaymentState::PAID
+                ? $this->pathResolver->resolvePaidFolder($company, $record->partner?->name)
+                : $this->pathResolver->resolve($document))
+            : null;
+
+        return $this->driveSyncService->export($document, $folderSegments);
     }
 }

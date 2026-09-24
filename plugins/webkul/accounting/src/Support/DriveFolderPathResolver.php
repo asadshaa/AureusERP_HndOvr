@@ -65,17 +65,29 @@ class DriveFolderPathResolver
 
     /**
      * Dedicated folder path for paid invoices / bills:
-     * Aureus/{Company} ({id})/Paid Invoices
+     * Aureus/{Company} ({id})/Paid Invoices/{Vendor or Customer name}
+     *
+     * $partnerName groups paid documents by who they were paid to/by (the
+     * vendor on a bill, the customer on an invoice) -- without it, every
+     * paid document lands in one flat folder, indistinguishable by
+     * counterparty. Omitted (null/blank) falls back to the old flat
+     * behaviour so a caller that genuinely has no partner still works.
      *
      * @return array<int, string> ordered path segments, root folder name first
      */
-    public function resolvePaidFolder(Company $company): array
+    public function resolvePaidFolder(Company $company, ?string $partnerName = null): array
     {
-        return [
+        $segments = [
             $this->sanitize(config('accounting_drive.root_folder_name', 'Aureus')),
             $this->sanitize("{$company->name} ({$company->id})"),
             $this->sanitize(config('accounting_drive.paid_folder_name', 'Paid Invoices')),
         ];
+
+        if (filled($partnerName)) {
+            $segments[] = $this->sanitize($partnerName);
+        }
+
+        return $segments;
     }
 
     private function fillPlaceholder(string $segment, Document $document): string

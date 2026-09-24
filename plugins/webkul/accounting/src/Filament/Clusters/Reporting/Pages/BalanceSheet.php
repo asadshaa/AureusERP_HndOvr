@@ -525,7 +525,15 @@ class BalanceSheet extends Page implements HasForms
             'retained_accounts'       => $retainedEarningsAccounts,
             'total_equity'            => $totalEquity,
             'total_retained'          => $totalRetained,
-            'total'                   => abs($totalUnallocated) + $totalEquity + $totalRetained,
+            // Was abs($totalUnallocated) -- flipped a net loss's negative
+            // unallocated-earnings figure to positive, which then made
+            // Total Equity overstate by 2x the loss and broke the balance
+            // sheet equation (Assets != Liabilities + Equity) by that same
+            // amount. Confirmed live: a real PKR 5,000 net loss correctly
+            // showed as -5,000 in "Total Unallocated Earnings" two lines
+            // above this, but "Total EQUITY" showed +5,000 -- the signed
+            // value must flow through unchanged for the equation to hold.
+            'total'                   => $totalUnallocated + $totalEquity + $totalRetained,
         ];
     }
 

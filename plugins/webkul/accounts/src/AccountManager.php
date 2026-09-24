@@ -207,8 +207,16 @@ class AccountManager
 
         $viewTemplate = 'accounts::mail/invoice/actions/invoice';
 
+        // Optional override so this can be sent to a different real person
+        // at the vendor/customer than whoever is on file as the Partner's
+        // own email -- e.g. a specific AP contact rather than a generic
+        // company inbox. Applies to every selected partner in this send.
+        $overrideEmail = trim((string) ($data['override_email'] ?? ''));
+
         foreach ($partners as $partner) {
-            if (! $partner->email) {
+            $recipientEmail = $overrideEmail !== '' ? $overrideEmail : $partner->email;
+
+            if (! $recipientEmail) {
                 continue;
             }
 
@@ -224,17 +232,19 @@ class AccountManager
             app(EmailService::class)->send(
                 mailClass: InvoiceEmail::class,
                 view: $viewTemplate,
-                payload: $this->preparePayloadForSendByEmail($record, $partner, $data),
+                payload: $this->preparePayloadForSendByEmail($record, $partner, $data, $recipientEmail),
                 attachments: $attachments,
             );
         }
+
+        $lastRecipientEmail = $overrideEmail !== '' ? $overrideEmail : ($partner->email ?? null);
 
         $messageData = [
             'from' => [
                 'company' => Auth::user()->defaultCompany->toArray(),
             ],
             'body' => view($viewTemplate, [
-                'payload' => $this->preparePayloadForSendByEmail($record, $partner, $data),
+                'payload' => $this->preparePayloadForSendByEmail($record, $partner, $data, $lastRecipientEmail),
             ])->render(),
             'type' => 'comment',
         ];
@@ -250,7 +260,7 @@ class AccountManager
         return $record;
     }
 
-    private function preparePayloadForSendByEmail($record, $partner, $data)
+    private function preparePayloadForSendByEmail($record, $partner, $data, ?string $recipientEmail = null)
     {
         return [
             'record_name'    => $record->name,
@@ -258,7 +268,7 @@ class AccountManager
             'subject'        => $data['subject'],
             'description'    => $data['description'],
             'to'             => [
-                'address' => $partner?->email,
+                'address' => $recipientEmail ?? $partner?->email,
                 'name'    => $partner?->name,
             ],
         ];

@@ -83,4 +83,12 @@ interface DriveClient
      * new Aureus Document.
      */
     public function downloadFileContent(string $fileId): string;
+
+    /**
+     * Move $fileId to Drive's trash (recoverable there for ~30 days,
+     * matching Drive's own default retention -- never a hard, unrecoverable
+     * delete). Used for administrative cleanup of documents this app
+     * exported in error; not part of any normal export/ingestion flow.
+     */
+    public function trashFile(string $fileId): void;
 }

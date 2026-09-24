@@ -18,11 +18,11 @@ use Webkul\Account\Models\FiscalPosition;
 use Webkul\Account\Models\PaymentMethodLine;
 use Webkul\Account\Models\PaymentTerm;
 use Webkul\Account\Models\Tax;
+use Webkul\Partner\Filament\Resources\PartnerResource\Support\PartnerSchemaRegistry;
+use Webkul\Partner\Models\Partner;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
-use Webkul\Partner\Filament\Resources\PartnerResource\Support\PartnerSchemaRegistry;
-use Webkul\Partner\Models\Partner;
 use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Product\Filament\Resources\ProductResource\Support\ProductSchemaRegistry;
 use Webkul\Product\Models\Product;
@@ -104,6 +104,7 @@ class AccountServiceProvider extends PackageServiceProvider
                 '2026_02_25_044931_alter_accounts_full_reconciles_table',
                 '2026_03_03_120000_alter_accounts_journals_bank_account_foreign_key',
                 '2026_04_17_000001_add_parent_id_to_accounts_accounts_table',
+                '2026_09_24_071601_add_unique_constraint_to_accounts_product_taxes_table',
             ])
             ->runsMigrations()
             ->hasSettings([

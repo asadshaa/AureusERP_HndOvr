@@ -182,4 +182,19 @@ class GoogleDriveClient implements DriveClient
 
         return (string) $response->getBody();
     }
+
+    public function trashFile(string $fileId): void
+    {
+        try {
+            $this->service->files->update($fileId, new DriveFile(['trashed' => true]), [
+                'supportsAllDrives' => true,
+            ]);
+        } catch (GoogleServiceException $e) {
+            if ($e->getCode() === 404) {
+                return;
+            }
+
+            throw new RuntimeException('Could not trash the Drive file: '.$e->getMessage(), previous: $e);
+        }
+    }
 }

@@ -162,10 +162,20 @@ class FakeDriveClient implements DriveClient
         return $id;
     }
 
-    /** Test helper: simulate the Drive file having been trashed/deleted. */
+    /** Test helper: simulate the Drive file having been trashed/deleted externally (not via this app). */
     public function trash(string $fileId): void
     {
         $this->files[$fileId]['trashed'] = true;
+    }
+
+    public function trashFile(string $fileId): void
+    {
+        if (! isset($this->files[$fileId])) {
+            return;
+        }
+
+        $this->files[$fileId]['trashed'] = true;
+        $this->writeLog[] = ['op' => 'trash', 'file_id' => $fileId];
     }
 
     /**

@@ -683,7 +683,28 @@ class JournalEntryResource extends Resource
                 Hidden::make('display_type'),
                 Select::make('account_id')
                     ->label(__('accounting::filament/clusters/accounting/resources/journal-entry.form.tabs.lines.repeater.fields.account'))
-                    ->relationship('account', 'name')
+                    ->relationship(
+                        'account',
+                        'name',
+                        // Was completely unscoped -- every account in the
+                        // whole database showed up here regardless of
+                        // company, including deprecated/duplicate accounts
+                        // from other companies' Chart of Accounts imports.
+                        // Confirmed live: the picker showed the same
+                        // account name (e.g. "Accrued expenses") 3+ times.
+                        // Scope to the company this journal entry actually
+                        // belongs to, and hide deprecated/non-postable
+                        // (group) accounts, matching how a real Chart of
+                        // Accounts is meant to be used.
+                        modifyQueryUsing: function (Builder $query, Get $get) {
+                            $companyId = $get('../../company_id') ?? Auth::user()?->default_company_id;
+
+                            return $query
+                                ->when($companyId, fn (Builder $q) => $q->whereHas('companies', fn (Builder $q) => $q->where('companies.id', $companyId)))
+                                ->where('deprecated', false)
+                                ->where('is_group', false);
+                        },
+                    )
                     ->searchable()
                     ->required()
                     ->preload()
