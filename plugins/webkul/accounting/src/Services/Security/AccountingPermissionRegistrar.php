@@ -121,6 +121,18 @@ class AccountingPermissionRegistrar
         $this->grant($managerRoles->pluck('id')->all(), $permissionIds->values()->all());
         $this->grant($managerRoles->pluck('id')->all(), $this->accountingResourcePermissionIds()->all());
 
+        // Client decision: Khurram (Accounting_manager) takes over Raza/Admin's
+        // "plugin invoice and accounting" responsibility in full -- not just the
+        // accounting plugin's own resources above, but the adjacent plugins an
+        // invoice/GL workflow actually touches: the base GL/invoicing resources
+        // (account_*), the separate invoice panel (invoice_*), the products/
+        // services catalogue an invoice line references (product_*), and
+        // customers/vendors/contacts an invoice is billed to/from (partner_*).
+        // Deliberately does NOT touch employee_*/recruitment_*/time_*/hr_*/
+        // security_*/field_*/plugin_*/role_*/timesheet_* -- those stay Admin/HR
+        // territory, outside what the client asked to transfer.
+        $this->grant($managerRoles->pluck('id')->all(), $this->invoicingDomainPermissionIds()->all());
+
         $this->grant(
             $accountantRoles->pluck('id')->all(),
             $permissionIds->only(AccountingPermissions::accountant())->values()->all(),
@@ -170,6 +182,43 @@ class AccountingPermissionRegistrar
                     ->orWhere('name', 'like', '%\_accounting\_%')
                     ->orWhere('name', 'like', 'page\_accounting%')
                     ->orWhere('name', 'like', 'widget\_accounting%');
+            })
+            ->pluck('id');
+    }
+
+    /**
+     * Every real Permission row for the adjacent plugins an invoice/GL
+     * workflow actually depends on: base accounts/GL (account_*), the
+     * separate invoice panel (invoice_*), products/services line items
+     * (product_*), and customers/vendors/contacts (partner_*) -- plus only
+     * the specific shared "support" plugin resources an invoice references
+     * (bank, currency, numbering sequence, country/state for partner
+     * addresses, unit-of-measure category for products). Deliberately
+     * excludes support_activity::type/calendar/company -- CRM/scheduling/
+     * company-administration, not part of the invoice/accounting domain
+     * being transferred. reorder_* (Filament's generic drag-to-reorder
+     * action) is scoped to only the resources already included above, since
+     * it also exists for unrelated resources (field_field,
+     * plugin_manager_plugin, security_company) that must stay excluded.
+     *
+     * @return Collection<int, int>
+     */
+    private function invoicingDomainPermissionIds()
+    {
+        $supportResources = ['bank', 'currency', 'sequence', 'country', 'state', 'u::o::m::category'];
+
+        return Permission::query()
+            ->where('guard_name', 'web')
+            ->where(function ($query) use ($supportResources): void {
+                foreach (['account', 'invoice', 'product', 'partner'] as $domain) {
+                    $query->orWhere('name', 'like', "{$domain}\\_%")
+                        ->orWhere('name', 'like', "%\\_{$domain}\\_%");
+                }
+
+                foreach ($supportResources as $resource) {
+                    $query->orWhere('name', 'like', "%\\_support\\_{$resource}")
+                        ->orWhere('name', 'like', "support\\_{$resource}");
+                }
             })
             ->pluck('id');
     }
