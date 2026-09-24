@@ -5,6 +5,7 @@ namespace Webkul\Purchase\Filament\Admin\Clusters\Orders\Resources;
 use BackedEnum;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Webkul\Purchase\Enums\OrderState;
 use Webkul\Purchase\Enums\RequisitionType;
 use Webkul\Purchase\Filament\Admin\Clusters\Orders;
 use Webkul\Purchase\Filament\Admin\Clusters\Orders\Resources\QuotationResource\Pages\CreateQuotation;
@@ -42,6 +43,22 @@ class QuotationResource extends OrderResource
         return __('purchases::filament/admin/clusters/orders/resources/quotation.navigation.title');
     }
 
+    /**
+     * Only "to_approve" needs a human right now -- draft/sent RFQs are
+     * still being worked on, and purchase/done/canceled are resolved.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()->where('state', OrderState::TO_APPROVE)->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getRecordSubNavigation(Page $page): array
     {
         return $page->generateNavigationItems([
@@ -55,11 +72,11 @@ class QuotationResource extends OrderResource
     public static function getPages(): array
     {
         return [
-            'index'    => ListQuotations::route('/'),
-            'create'   => CreateQuotation::route('/create'),
-            'view'     => ViewQuotation::route('/{record}'),
-            'edit'     => EditQuotation::route('/{record}/edit'),
-            'bills'    => ManageBills::route('/{record}/bills'),
+            'index'      => ListQuotations::route('/'),
+            'create'     => CreateQuotation::route('/create'),
+            'view'       => ViewQuotation::route('/{record}'),
+            'edit'       => EditQuotation::route('/{record}/edit'),
+            'bills'      => ManageBills::route('/{record}/bills'),
             'operations' => ManageReceipts::route('/{record}/receipts'),
         ];
     }

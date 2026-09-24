@@ -64,6 +64,20 @@ class AllocationResource extends Resource
         return __('time-off::filament/clusters/management/resources/allocation.navigation.title');
     }
 
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()
+            ->whereIn('state', [State::CONFIRM->value, State::VALIDATE_ONE->value])
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
         return ['employee.name', 'holidayStatus.name'];
@@ -197,9 +211,24 @@ class AllocationResource extends Resource
                     ->formatStateUsing(fn ($state) => State::options()[$state])
                     ->label(__('time-off::filament/clusters/management/resources/allocation.table.columns.status'))
                     ->badge()
+                    // state stays a raw string on this model (not cast to
+                    // the State enum -- several other places compare it
+                    // with === against State::X->value or use it as an
+                    // array key via State::options()[$state], so casting it
+                    // would silently break those). Color it explicitly
+                    // instead of relying on Filament's automatic
+                    // enum-instance badge coloring.
+                    ->color(fn (string $state): string => match ($state) {
+                        'confirm'      => 'warning',
+                        'validate_one' => 'info',
+                        'validate_two' => 'success',
+                        'refuse'       => 'danger',
+                        default        => 'gray',
+                    })
                     ->sortable()
                     ->searchable(),
             ])
+            ->defaultSort('date_from', 'desc')
             ->groups([
                 Tables\Grouping\Group::make('employee.name')
                     ->label(__('time-off::filament/clusters/management/resources/allocation.table.groups.employee-name'))

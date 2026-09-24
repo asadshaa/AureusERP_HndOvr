@@ -52,6 +52,29 @@ class BankTransactionMappingResource extends Resource
         return 'Transaction Mapping';
     }
 
+    /**
+     * Unmapped/suggested/needs_review are the statuses that still need a
+     * human decision; approved/rejected/posted/matched/do-not-post are
+     * already resolved and shouldn't inflate the badge.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()
+            ->whereIn('review_status', [
+                BankReviewStatus::Unmapped,
+                BankReviewStatus::Suggested,
+                BankReviewStatus::NeedsReview,
+            ])
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
@@ -401,7 +424,13 @@ class BankTransactionMappingResource extends Resource
                         'reviewed_at'    => now(),
                     ])),
             ])
-            ->defaultSort('statement_line_id');
+            // Unresolved rows (unmapped/suggested/needs_review) sort to the top so
+            // reviewers see what still needs a decision before already-resolved rows,
+            // instead of the previous plain statement_line_id order.
+            ->defaultSort(fn (Builder $query): Builder => $query->orderByRaw(
+                'FIELD(review_status, ?, ?, ?) DESC',
+                [BankReviewStatus::Unmapped->value, BankReviewStatus::Suggested->value, BankReviewStatus::NeedsReview->value]
+            )->orderBy('statement_line_id'));
     }
 
     public static function canCreate(): bool

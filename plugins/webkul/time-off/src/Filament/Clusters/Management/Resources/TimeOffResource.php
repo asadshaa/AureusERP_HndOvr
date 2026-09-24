@@ -60,6 +60,27 @@ class TimeOffResource extends Resource
         return __('time-off::filament/clusters/management/resources/time-off.navigation.title');
     }
 
+    /**
+     * Count of leave requests still awaiting a decision (submitted or
+     * past the line-manager step, not yet fully approved/refused) within
+     * this user's already-scoped visible hierarchy -- getEloquentQuery()
+     * below handles the hierarchy scoping, so this only adds the
+     * state filter on top of it.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()
+            ->whereIn('state', [State::CONFIRM, State::VALIDATE_ONE])
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
         return ['employee.name', 'holidayStatus.name', 'date_from', 'date_to'];
@@ -116,6 +137,7 @@ class TimeOffResource extends Resource
                     ->badge()
                     ->searchable(),
             ])
+            ->defaultSort('date_from', 'asc')
             ->groups([
                 Tables\Grouping\Group::make('employee.name')
                     ->label(__('time-off::filament/clusters/management/resources/time-off.table.groups.employee-name'))

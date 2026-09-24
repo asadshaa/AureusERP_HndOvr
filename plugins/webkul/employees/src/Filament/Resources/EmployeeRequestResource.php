@@ -55,6 +55,25 @@ class EmployeeRequestResource extends Resource
         return 'Employee Requests';
     }
 
+    /**
+     * getEloquentQuery() below already scopes to exactly what this user is
+     * allowed to see (their own reports, or everything for HR/finance
+     * roles) -- filtering that same scoped query to pending_approval gives
+     * a badge that's automatically correct for whoever is looking at it,
+     * without duplicating the hierarchy/role logic here.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()->where('status', 'pending_approval')->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function isFinanceUser(?User $user): bool
     {
         if (! $user) {
@@ -243,185 +262,187 @@ class EmployeeRequestResource extends Resource
             }),
             TextColumn::make('accountingMove.name')->label('Accounting draft')->placeholder('—'),
             TextColumn::make('submitted_at')->dateTime()->placeholder('Not submitted'),
-        ])->filters([
-            SelectFilter::make('status')->options([
-                'draft'    => 'Draft', 'pending_approval' => 'Pending approval',
-                'approved' => 'Approved', 'rejected' => 'Rejected',
-            ]),
-        ])->recordActions([
-            Action::make('submit')
-                ->icon('heroicon-o-paper-airplane')->color('primary')->requiresConfirmation()
-                ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true))
-                ->action(function (EmployeeRequest $record): void {
-                    try {
-                        app(EmployeeRequestService::class)->submit($record, Auth::user());
-                        Notification::make()->success()->title('Employee request submitted for approval')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Could not submit')->body($e->getMessage())->send();
-                    }
-                }),
-            Action::make('adjust_tax')
-                ->label('Review & Edit Tax')
-                ->icon('heroicon-o-calculator')
-                ->color('warning')
-                ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
-                    && static::isFinanceUser(Auth::user())
-                    && (bool) $record->requestType?->is_financial
-                )
-                ->fillForm(fn (EmployeeRequest $record): array => [
-                    'billed_amount'        => $record->billed_amount,
-                    'tax_deduction_rate'   => $record->tax_deduction_rate,
-                    'income_tax_deduction' => $record->income_tax_deduction,
-                    'sales_tax_deduction'  => $record->sales_tax_deduction,
-                    'amount'               => $record->amount,
-                ])
-                ->schema([
-                    TextInput::make('billed_amount')
-                        ->label('Claim/budget')
-                        ->numeric()
-                        ->readOnly(),
-                    TextInput::make('tax_deduction_rate')
-                        ->label('Tax deduction rate (%)')
-                        ->numeric()->minValue(0)->maxValue(100)->suffix('%')
-                        ->live(onBlur: true)
-                        ->afterStateUpdated(function (Set $set, Get $get): void {
-                            $billed = (float) ($get('billed_amount') ?? 0);
-                            $rate = $get('tax_deduction_rate');
-                            if (filled($rate)) {
-                                $set('income_tax_deduction', round($billed * ((float) $rate / 100), 4));
-                            }
-                            $inc = (float) ($get('income_tax_deduction') ?? 0);
-                            $sal = (float) ($get('sales_tax_deduction') ?? 0);
-                            $set('amount', round($billed - $inc - $sal, 4));
-                        }),
-                    TextInput::make('income_tax_deduction')
-                        ->label('Deduction amount of income tax')
-                        ->numeric()->minValue(0)
-                        ->live(onBlur: true)
-                        ->afterStateUpdated(function (Set $set, Get $get): void {
-                            $billed = (float) ($get('billed_amount') ?? 0);
-                            $inc = (float) ($get('income_tax_deduction') ?? 0);
-                            $sal = (float) ($get('sales_tax_deduction') ?? 0);
-                            $set('amount', round($billed - $inc - $sal, 4));
-                        }),
-                    TextInput::make('sales_tax_deduction')
-                        ->label('Deduction amount of sales tax')
-                        ->numeric()->minValue(0)
-                        ->live(onBlur: true)
-                        ->afterStateUpdated(function (Set $set, Get $get): void {
-                            $billed = (float) ($get('billed_amount') ?? 0);
-                            $inc = (float) ($get('income_tax_deduction') ?? 0);
-                            $sal = (float) ($get('sales_tax_deduction') ?? 0);
-                            $set('amount', round($billed - $inc - $sal, 4));
-                        }),
-                    TextInput::make('amount')
-                        ->label('Net payment')
-                        ->numeric()
-                        ->readOnly()
-                        ->helperText('Claim/budget minus tax deductions -- calculated automatically.'),
-                ])
-                ->action(function (EmployeeRequest $record, array $data): void {
-                    $billed = (float) ($record->billed_amount ?? 0);
-                    $incomeTax = (float) ($data['income_tax_deduction'] ?? 0);
-                    $salesTax = (float) ($data['sales_tax_deduction'] ?? 0);
-                    $net = round($billed - $incomeTax - $salesTax, 4);
+        ])
+            ->defaultSort('created_at', 'desc')
+            ->filters([
+                SelectFilter::make('status')->options([
+                    'draft'    => 'Draft', 'pending_approval' => 'Pending approval',
+                    'approved' => 'Approved', 'rejected' => 'Rejected',
+                ]),
+            ])->recordActions([
+                Action::make('submit')
+                    ->icon('heroicon-o-paper-airplane')->color('primary')->requiresConfirmation()
+                    ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true))
+                    ->action(function (EmployeeRequest $record): void {
+                        try {
+                            app(EmployeeRequestService::class)->submit($record, Auth::user());
+                            Notification::make()->success()->title('Employee request submitted for approval')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not submit')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('adjust_tax')
+                    ->label('Review & Edit Tax')
+                    ->icon('heroicon-o-calculator')
+                    ->color('warning')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
+                        && static::isFinanceUser(Auth::user())
+                        && (bool) $record->requestType?->is_financial
+                    )
+                    ->fillForm(fn (EmployeeRequest $record): array => [
+                        'billed_amount'        => $record->billed_amount,
+                        'tax_deduction_rate'   => $record->tax_deduction_rate,
+                        'income_tax_deduction' => $record->income_tax_deduction,
+                        'sales_tax_deduction'  => $record->sales_tax_deduction,
+                        'amount'               => $record->amount,
+                    ])
+                    ->schema([
+                        TextInput::make('billed_amount')
+                            ->label('Claim/budget')
+                            ->numeric()
+                            ->readOnly(),
+                        TextInput::make('tax_deduction_rate')
+                            ->label('Tax deduction rate (%)')
+                            ->numeric()->minValue(0)->maxValue(100)->suffix('%')
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (Set $set, Get $get): void {
+                                $billed = (float) ($get('billed_amount') ?? 0);
+                                $rate = $get('tax_deduction_rate');
+                                if (filled($rate)) {
+                                    $set('income_tax_deduction', round($billed * ((float) $rate / 100), 4));
+                                }
+                                $inc = (float) ($get('income_tax_deduction') ?? 0);
+                                $sal = (float) ($get('sales_tax_deduction') ?? 0);
+                                $set('amount', round($billed - $inc - $sal, 4));
+                            }),
+                        TextInput::make('income_tax_deduction')
+                            ->label('Deduction amount of income tax')
+                            ->numeric()->minValue(0)
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (Set $set, Get $get): void {
+                                $billed = (float) ($get('billed_amount') ?? 0);
+                                $inc = (float) ($get('income_tax_deduction') ?? 0);
+                                $sal = (float) ($get('sales_tax_deduction') ?? 0);
+                                $set('amount', round($billed - $inc - $sal, 4));
+                            }),
+                        TextInput::make('sales_tax_deduction')
+                            ->label('Deduction amount of sales tax')
+                            ->numeric()->minValue(0)
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (Set $set, Get $get): void {
+                                $billed = (float) ($get('billed_amount') ?? 0);
+                                $inc = (float) ($get('income_tax_deduction') ?? 0);
+                                $sal = (float) ($get('sales_tax_deduction') ?? 0);
+                                $set('amount', round($billed - $inc - $sal, 4));
+                            }),
+                        TextInput::make('amount')
+                            ->label('Net payment')
+                            ->numeric()
+                            ->readOnly()
+                            ->helperText('Claim/budget minus tax deductions -- calculated automatically.'),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        $billed = (float) ($record->billed_amount ?? 0);
+                        $incomeTax = (float) ($data['income_tax_deduction'] ?? 0);
+                        $salesTax = (float) ($data['sales_tax_deduction'] ?? 0);
+                        $net = round($billed - $incomeTax - $salesTax, 4);
 
-                    $record->update([
-                        'tax_deduction_rate'   => $data['tax_deduction_rate'] ?? null,
-                        'income_tax_deduction' => $incomeTax,
-                        'sales_tax_deduction'  => $salesTax,
-                        'amount'               => $net,
-                    ]);
-
-                    if ($record->approval_request_id) {
-                        $record->approvalRequest?->update([
-                            'amount' => (string) $net,
+                        $record->update([
+                            'tax_deduction_rate'   => $data['tax_deduction_rate'] ?? null,
+                            'income_tax_deduction' => $incomeTax,
+                            'sales_tax_deduction'  => $salesTax,
+                            'amount'               => $net,
                         ]);
-                    }
 
-                    Notification::make()
-                        ->success()
-                        ->title('Tax deductions updated')
-                        ->body("Net payment recalculated to {$net}")
-                        ->send();
-                }),
-            Action::make('approve_request')
-                ->label('Approve')
-                ->icon('heroicon-o-check')
-                ->color('success')
-                ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
-                    && $record->approvalRequest !== null
-                    && Auth::user() !== null
-                    && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
-                )
-                ->schema([
-                    Textarea::make('reason')->label('Approval note'),
-                ])
-                ->action(function (EmployeeRequest $record, array $data): void {
-                    try {
-                        app(EmployeeRequestService::class)->approve($record, Auth::user(), $data['reason'] ?? null);
-                        Notification::make()->success()->title('Request approved successfully')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Could not approve')->body($e->getMessage())->send();
-                    }
-                }),
-            Action::make('reject_request')
-                ->label('Reject')
-                ->icon('heroicon-o-x-mark')
-                ->color('danger')
-                ->requiresConfirmation()
-                ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
-                    && $record->approvalRequest !== null
-                    && Auth::user() !== null
-                    && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
-                )
-                ->schema([
-                    Textarea::make('reason')->label('Rejection reason')->required(),
-                ])
-                ->action(function (EmployeeRequest $record, array $data): void {
-                    try {
-                        app(EmployeeRequestService::class)->reject($record, Auth::user(), (string) $data['reason']);
-                        Notification::make()->success()->title('Request rejected')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Could not reject')->body($e->getMessage())->send();
-                    }
-                }),
-            Action::make('refresh_approval')
-                ->label('Refresh approval')
-                ->icon('heroicon-o-arrow-path')
-                ->visible(fn (EmployeeRequest $record): bool => $record->approval_request_id !== null && $record->status === 'pending_approval')
-                ->action(function (EmployeeRequest $record): void {
-                    app(EmployeeRequestService::class)->synchronize($record);
-                    Notification::make()->success()->title('Approval status refreshed')->send();
-                }),
-            EditAction::make()
-                ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true)
-                    || ($record->status === 'pending_approval' && static::isFinanceUser(Auth::user()))
-                )
-                ->after(function (EmployeeRequest $record): void {
-                    if ($record->approval_request_id && $record->status === 'pending_approval') {
-                        $record->approvalRequest?->update([
-                            'amount' => (string) $record->amount,
-                        ]);
-                    }
-                }),
-            DeleteAction::make()->visible(fn (EmployeeRequest $record): bool => $record->status === 'draft'),
-        ])->headerActions([
-            CreateAction::make()->label('Save Draft'),
-            Action::make('submit_new')
-                ->label('Submit')
-                ->icon('heroicon-o-paper-airplane')->color('primary')
-                ->schema(fn (): array => static::formComponents())
-                ->action(function (array $data): void {
-                    $record = EmployeeRequest::query()->create($data);
-                    try {
-                        app(EmployeeRequestService::class)->submit($record, Auth::user());
-                        Notification::make()->success()->title('Request submitted for approval')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Saved as draft -- could not submit')->body($e->getMessage())->send();
-                    }
-                }),
-        ]);
+                        if ($record->approval_request_id) {
+                            $record->approvalRequest?->update([
+                                'amount' => (string) $net,
+                            ]);
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title('Tax deductions updated')
+                            ->body("Net payment recalculated to {$net}")
+                            ->send();
+                    }),
+                Action::make('approve_request')
+                    ->label('Approve')
+                    ->icon('heroicon-o-check')
+                    ->color('success')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
+                        && $record->approvalRequest !== null
+                        && Auth::user() !== null
+                        && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
+                    )
+                    ->schema([
+                        Textarea::make('reason')->label('Approval note'),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->approve($record, Auth::user(), $data['reason'] ?? null);
+                            Notification::make()->success()->title('Request approved successfully')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not approve')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('reject_request')
+                    ->label('Reject')
+                    ->icon('heroicon-o-x-mark')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
+                        && $record->approvalRequest !== null
+                        && Auth::user() !== null
+                        && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
+                    )
+                    ->schema([
+                        Textarea::make('reason')->label('Rejection reason')->required(),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->reject($record, Auth::user(), (string) $data['reason']);
+                            Notification::make()->success()->title('Request rejected')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not reject')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('refresh_approval')
+                    ->label('Refresh approval')
+                    ->icon('heroicon-o-arrow-path')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->approval_request_id !== null && $record->status === 'pending_approval')
+                    ->action(function (EmployeeRequest $record): void {
+                        app(EmployeeRequestService::class)->synchronize($record);
+                        Notification::make()->success()->title('Approval status refreshed')->send();
+                    }),
+                EditAction::make()
+                    ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true)
+                        || ($record->status === 'pending_approval' && static::isFinanceUser(Auth::user()))
+                    )
+                    ->after(function (EmployeeRequest $record): void {
+                        if ($record->approval_request_id && $record->status === 'pending_approval') {
+                            $record->approvalRequest?->update([
+                                'amount' => (string) $record->amount,
+                            ]);
+                        }
+                    }),
+                DeleteAction::make()->visible(fn (EmployeeRequest $record): bool => $record->status === 'draft'),
+            ])->headerActions([
+                CreateAction::make()->label('Save Draft'),
+                Action::make('submit_new')
+                    ->label('Submit')
+                    ->icon('heroicon-o-paper-airplane')->color('primary')
+                    ->schema(fn (): array => static::formComponents())
+                    ->action(function (array $data): void {
+                        $record = EmployeeRequest::query()->create($data);
+                        try {
+                            app(EmployeeRequestService::class)->submit($record, Auth::user());
+                            Notification::make()->success()->title('Request submitted for approval')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Saved as draft -- could not submit')->body($e->getMessage())->send();
+                        }
+                    }),
+            ]);
     }
 
     public static function getEloquentQuery(): Builder

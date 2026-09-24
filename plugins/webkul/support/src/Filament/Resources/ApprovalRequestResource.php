@@ -35,6 +35,38 @@ class ApprovalRequestResource extends Resource
         return 'Approval Queue';
     }
 
+    /**
+     * Counts only requests the CURRENT viewer can actually act on right
+     * now -- not every pending request company-wide, which would often be
+     * misleading (a request waiting on someone else's approval step isn't
+     * something this user can do anything about). Reuses the exact same
+     * canAct() check the row-level Approve/Reject buttons already gate on,
+     * so the badge and what's actually clickable always agree.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $user = Auth::user();
+
+        if (! $user) {
+            return null;
+        }
+
+        $engine = app(ApprovalEngine::class);
+
+        $count = static::getEloquentQuery()
+            ->where('status', 'pending')
+            ->get()
+            ->filter(fn (ApprovalRequest $request): bool => $engine->canAct($request, $user))
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
@@ -63,6 +95,11 @@ class ApprovalRequestResource extends Resource
                 TextColumn::make('submitted_at')->dateTime()->sortable(),
                 TextColumn::make('completed_at')->dateTime()->placeholder('Pending'),
             ])
+            // Oldest pending first -- unlike a "new arrivals" queue, an
+            // approval sitting unactioned the longest is the one most
+            // likely to be blocking someone else's downstream work, so it
+            // belongs at the top, not a freshly-submitted one.
+            ->defaultSort('submitted_at', 'asc')
             ->filters([
                 SelectFilter::make('status')->options([
                     'pending' => 'Pending', 'approved' => 'Approved', 'rejected' => 'Rejected',

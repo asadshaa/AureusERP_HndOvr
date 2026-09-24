@@ -112,6 +112,22 @@ class QuotationResource extends Resource
         return __('sales::filament/clusters/orders/resources/quotation.navigation.title');
     }
 
+    /**
+     * Sent quotations are the ones actually awaiting a customer response;
+     * drafts are still being worked on internally, so they don't count.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()->where('state', OrderState::SENT)->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
         return ['name', 'partner.name', 'client_order_ref'];
