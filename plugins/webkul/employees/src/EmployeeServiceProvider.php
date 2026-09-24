@@ -50,6 +50,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 // existed in the long-lived dev database only because it was
                 // migrated manually at the time it was written.
                 '2026_09_16_000001_add_claim_fields_to_employees_requests_table',
+                '2026_09_24_123304_add_unique_constraints_to_employees_identity_fields',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')

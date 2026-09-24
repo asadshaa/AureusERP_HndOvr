@@ -55,6 +55,26 @@ class AccountManager
 
     public function confirmMove(AccountMove $record): AccountMove
     {
+        return DB::transaction(function () use ($record): AccountMove {
+            // Re-fetch and row-lock fresh from the database before checking
+            // state -- the $record passed in may be a stale in-memory copy
+            // (e.g. a slow page, or two near-simultaneous confirm clicks
+            // both loading the same still-draft record). Without this lock,
+            // isConfirmAllowedForMove()'s state check below can pass twice
+            // for the same move, double-posting it: double-firing
+            // MoveConfirmed, double-incrementing customer_rank/
+            // supplier_rank, and risking duplicate balancing lines. Every
+            // caller of confirmMove() already uses its return value (never
+            // the passed-in reference afterward), so reassigning $record to
+            // this freshly-locked instance is safe.
+            $record = AccountMove::query()->lockForUpdate()->findOrFail($record->id);
+
+            return $this->confirmMoveLocked($record);
+        });
+    }
+
+    private function confirmMoveLocked(AccountMove $record): AccountMove
+    {
         $this->isConfirmAllowedForMove($record);
 
         $wasPostedBefore = $record->posted_before;

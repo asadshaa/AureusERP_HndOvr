@@ -105,6 +105,9 @@ class AccountServiceProvider extends PackageServiceProvider
                 '2026_03_03_120000_alter_accounts_journals_bank_account_foreign_key',
                 '2026_04_17_000001_add_parent_id_to_accounts_accounts_table',
                 '2026_09_24_071601_add_unique_constraint_to_accounts_product_taxes_table',
+                '2026_09_24_123137_add_unique_constraint_to_accounts_account_moves_name',
+                '2026_09_24_123219_add_unique_constraint_to_accounts_journals_code',
+                '2026_09_24_123432_add_unique_constraint_to_accounts_taxes',
             ])
             ->runsMigrations()
             ->hasSettings([
