@@ -62,15 +62,28 @@ class DriveIngestionClassificationResource extends Resource
     public static function getNavigationBadge(): ?string
     {
         $count = static::getEloquentQuery()
-            ->whereIn('validation_status', [
-                DriveClassificationStatus::PendingReview,
-                DriveClassificationStatus::NeedsReview,
-                DriveClassificationStatus::DuplicateSuspected,
-                DriveClassificationStatus::PostingFailed,
-            ])
+            ->whereIn('validation_status', static::needsAttentionStatuses())
             ->count();
 
         return $count > 0 ? (string) $count : null;
+    }
+
+    /**
+     * Shared by the navigation badge above and the per-row "New" tag in
+     * table() below, so both always agree on exactly which rows count as
+     * still needing a human -- rather than two independently-maintained
+     * lists silently drifting apart.
+     *
+     * @return array<int, DriveClassificationStatus>
+     */
+    private static function needsAttentionStatuses(): array
+    {
+        return [
+            DriveClassificationStatus::PendingReview,
+            DriveClassificationStatus::NeedsReview,
+            DriveClassificationStatus::DuplicateSuspected,
+            DriveClassificationStatus::PostingFailed,
+        ];
     }
 
     public static function getNavigationBadgeColor(): ?string
@@ -256,6 +269,18 @@ class DriveIngestionClassificationResource extends Resource
     {
         return $table
             ->columns([
+                TextColumn::make('is_new_tag')
+                    ->label('')
+                    // ->visible() on a table column hides/shows the whole
+                    // column, not per-row -- the per-row toggle has to live
+                    // in the state itself instead: null for an
+                    // already-handled row renders as nothing (no empty
+                    // badge chip), "New" for one still needing attention
+                    // renders as the badge.
+                    ->state(fn (DriveIngestionClassification $record): ?string => in_array($record->validation_status, static::needsAttentionStatuses(), true) ? 'New' : null)
+                    ->badge()
+                    ->color('warning')
+                    ->placeholder(''),
                 TextColumn::make('driveIngestion.filename')->label('Filename')->searchable()->limit(40),
                 TextColumn::make('document_type')->label('Type')->badge(),
                 TextColumn::make('extracted_invoice_number')->label('Invoice #')->placeholder('-'),
