@@ -49,6 +49,35 @@ class DriveIngestionClassificationResource extends Resource
         return 'Drive Ingestion Review';
     }
 
+    /**
+     * At-a-glance count of rows genuinely needing a human's attention --
+     * without this, finding a handful of new documents among a hundred
+     * already-processed ones meant scrolling the whole list (it has no
+     * default sort, so new rows land wherever insertion order puts them).
+     * PendingReview is included alongside NeedsReview/DuplicateSuspected/
+     * PostingFailed since classify() can, in principle, leave a row there
+     * if it throws before finishing -- Valid and Posted are correctly
+     * excluded, since those don't need anyone to do anything.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getEloquentQuery()
+            ->whereIn('validation_status', [
+                DriveClassificationStatus::PendingReview,
+                DriveClassificationStatus::NeedsReview,
+                DriveClassificationStatus::DuplicateSuspected,
+                DriveClassificationStatus::PostingFailed,
+            ])
+            ->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->where('company_id', Auth::user()?->default_company_id);
@@ -245,8 +274,15 @@ class DriveIngestionClassificationResource extends Resource
                     ->wrap()
                     ->limit(80)
                     ->placeholder('-'),
-                TextColumn::make('created_at')->dateTime()->sortable(),
+                TextColumn::make('created_at')->label('Discovered At')->dateTime()->sortable(),
             ])
+            // Newest first -- with no default sort, a new row could land
+            // anywhere in the list (insertion order), meaning finding it
+            // among a hundred already-processed ones meant scrolling the
+            // whole table. Combined with the navigation badge above, a new
+            // arrival is now both counted in the sidebar and sitting right
+            // at the top when opened.
+            ->defaultSort('created_at', 'desc')
             ->filters([
                 SelectFilter::make('validation_status')->options(collect(DriveClassificationStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()])->all()),
                 SelectFilter::make('document_type')->options(collect(DriveDocumentType::cases())->mapWithKeys(fn ($case) => [$case->value => $case->getLabel()])->all()),
