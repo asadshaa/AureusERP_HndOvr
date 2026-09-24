@@ -54,6 +54,15 @@ class PdfInvoiceTextExtractor
             return $this->emptyCandidate(isMalformed: true);
         }
 
+        // dompdf renders the Rs/PKR currency glyph as raw byte 0xA0 (not
+        // valid standalone UTF-8 -- it's a leftover single-byte non-breaking
+        // space from the PDF's internal encoding), sitting directly between
+        // the currency code and the digits (e.g. "PKR\xA05,000.00").
+        // Confirmed live against the actual extracted bytes: this silently
+        // broke every amount-extraction regex below, since none of them
+        // tolerate a non-digit, non-whitespace byte in that position.
+        $text = str_replace("\xA0", '', $text);
+
         $cleanText = trim($text);
         if ($cleanText === '') {
             return $this->emptyCandidate(isScanned: true);
@@ -295,8 +304,17 @@ class PdfInvoiceTextExtractor
     private function extractPartnerName(array $lines): ?string
     {
         foreach ($lines as $i => $line) {
-            // Ignore lines that are document titles/numbers (e.g. "Customer Invoice #...", "Vendor Bill #...")
-            if (preg_match('/(?:Invoice|Bill|Refund|Credit\s*Note)\s*#/i', $line)) {
+            // Ignore lines that are document titles/numbers (e.g. "Customer
+            // Invoice #...", "Vendor Bill #...", "Vendor Bill ID #..."). This
+            // app's own bill template's title line starts with the bare word
+            // "Vendor" ("Vendor Bill ID #BILL/..."), which the label check
+            // just below used to mistake for a "Vendor: <name>" field --
+            // confirmed live: it always extracted the next field's label
+            // ("Date") as the partner name instead of the real vendor name
+            // found further down the document. [^\n#]* (not just \s*)
+            // between the keyword and # catches title lines with extra
+            // words in between, like "... ID #...".
+            if (preg_match('/(?:Invoice|Bill|Refund|Credit\s*Note|Vendor|Customer)[^\n#]*#/i', $line)) {
                 continue;
             }
 
