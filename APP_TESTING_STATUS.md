@@ -98,5 +98,5 @@ Every retest deliberately went beyond re-reading the original fix summary:
 ## Remaining for next session
 
 - Live browser click-through for the fixes with a UI surface (DEF-002, DEF-003, DEF-004), since this retest — like the original fix pass — was still server-side only (see ENV-001).
-- `RefundResourceTest.php`'s fixtures need the same `accounting_post_journal` permission grant DEF-009 already added to `InvoiceResourceTest`/`BillResourceTest` (newly tracked as ENV-008, found while verifying the ENV-007 fix — 5 of its lifecycle-action tests currently fail correctly, same root cause as the tests DEF-009 already updated).
+- ~~`RefundResourceTest.php`'s fixtures need the same `accounting_post_journal` permission grant DEF-009 already added.~~ **Fixed** (ENV-008): 3/8 → 7/8 passing. Surfaced a distinct, deeper issue (ENV-009): `PayAction`'s default-computed amount doesn't mark an `IN_REFUND` move `PAID` the way the identical pattern does for `OUT_INVOICE` — a likely real `PaymentRegister` bug, needs dedicated accounting-focused investigation, not fixed this pass.
 - The unrelated `InventoryManager::getRule()` null-`Location` fixture gap in `SaleHelper` (surfaced once ENV-007 stopped masking it) still blocks the rest of `OrderResourceTest.php`/`PurchaseOrderResourceTest.php`.
