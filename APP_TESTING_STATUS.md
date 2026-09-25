@@ -34,7 +34,8 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 - Commissioned/ran a full code audit across accounting, accounts, employees, time-off, timesheets, support, recruitments, sales, purchases and partners for `getEloquentQuery()` company scoping and unscoped Select/relationship pickers.
 - Confirmed correctly-scoped: BankStatement, BankTransactionMapping, Document, InboundTransmission, JournalEntry, JournalItem, ManualAdjustment, Account (Chart of Accounts), BankMappingRule, BusinessRule, DriveIngestionClassification, ExchangeRate, FsTag, ImportProfile, ImportRun, PartyClassification, Peer, Invoice, Bill, Payment, CreditNote, Refund, Employee, Department, AttendanceRecord, EmployeeRequestType, PerformanceCycle/Review, EmployeeSkill, EmployeeRequest, Allocation, TimeOff, Timesheet, ApprovalRequest, ApprovalWorkflow, Applicant/Candidate/JobByPosition/Stage.
 - Found and fixed real leaks: Journal, Tax, TaxGroup, Sales Quotations/Orders, Purchase RFQs/Orders/Agreements (DEF-005, DEF-006), and the Payment/Invoice/Bill journal-picker defaults (DEF-007).
-- Left open (documented, not fixed): a long tail of individual account/company Select pickers across Journal, Tax, and order-form company fields (DEF-008); whether Partners/Customers/Vendors are intentionally global (DEF-011, needs a business decision, not a bug fix).
+- Left open (documented, not fixed): a long tail of individual account/company Select pickers across Journal, Tax, and order-form company fields (DEF-008).
+- DEF-011 resolved: client decision obtained (Truck It In only, no global sharing). Fixed, verified, and the 5 leftover non-Truck-It-In companies (all already soft-deleted demo/seed data) were permanently removed as a companion cleanup, along with their 4 unused demo journals — nothing else in the whole app referenced them (checked every `restrictOnDelete`/`cascadeOnDelete` company foreign key before deleting).
 
 ### Server-side authorization
 - Commissioned/ran a full audit for Filament actions relying only on client-side `->visible()`/`->hidden()` without a matching server-side `->authorize()` or service-level re-check.
@@ -44,7 +45,7 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 
 ### Data integrity
 - Found 2 users (`Demo Accountant`, `Demo Approver`) whose `default_company_id` pointed at a soft-deleted company. Reassigned both to the real active company (DEF-010, fixed).
-- Company count grew from 1 to 6 over the course of this session's earlier work (demo/seed data), with 5 now soft-deleted — noted as environment context, not a defect in itself.
+- Company count had grown from 1 to 6 over the course of this session's earlier work (demo/seed data), with 5 soft-deleted. Per client instruction (this deployment is solely for Truck It In), those 5 were permanently removed — see DEF-011. Company count is back to 1.
 
 ### Automated test suite
 - Pre-fix baseline (per-plugin `php artisan test`, run before any fixes): `accounting` plugin **fatally aborted the entire run** (DEF-012); `accounts` 116 failed/400 passed; `sales` 46 failed/63 passed; `purchases` 54 failed/110 passed; `time-off` 8 failed/14 passed; `employees` 7 failed/135 passed; `inventories` 732 failed (0 assertions — systemic, unrelated to any change made this session); `manufacturing` 33 failed; `partners`/`products`/`projects`/`recruitments`/`support` all fully green.
@@ -79,10 +80,10 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 | DEF-008 | Remaining unscoped account/company pickers | Medium | Open — documented, not fixed this pass |
 | DEF-009 | No per-operation permission on invoice/bill actions | Medium | **RETEST: PASS** (client decision obtained, fixed and verified) |
 | DEF-010 | Users defaulted to a deleted company | Low | **RETEST: PASS** (data fix) |
-| DEF-011 | Partners shared across companies | Needs decision | Open — business decision required |
+| DEF-011 | Partners shared across companies | Needs decision | **RETEST: PASS** (client decision obtained, fixed and verified) |
 | DEF-012 | Full test suite fatal error | High (for CI) | **RETEST: PASS** |
 
-**10 of 12 documented defects fixed and independently retested — all PASS. 2 left open, each with an explicit reason (scope/time tradeoff for DEF-008, a genuine business decision still needed for DEF-011) rather than a rushed or incomplete fix.**
+**11 of 12 documented defects fixed and independently retested — all PASS. Only DEF-008 remains open, deferred for scope/time reasons rather than a rushed or incomplete fix.**
 
 ## Retest methodology (this pass)
 
@@ -98,4 +99,3 @@ Every retest deliberately went beyond re-reading the original fix summary:
 
 - Live browser click-through for the fixes with a UI surface (DEF-002, DEF-003, DEF-004), since this retest — like the original fix pass — was still server-side only (see ENV-001).
 - A follow-up pass on DEF-008's remaining picker list.
-- A decision from the client/product owner on DEF-011 (should Partners be company-scoped or intentionally shared?).

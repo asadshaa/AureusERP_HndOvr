@@ -144,7 +144,14 @@ Application defects and environment blockers are listed separately. "Code-verifi
 ### DEF-011 · Partners, customers and vendors are shared across companies (needs a decision)
 - **Module:** Partners, and every Customer/Vendor resource that extends it
 - **Severity:** Medium if unintended, none if intentional
-- **Status:** **Needs business decision.** `PartnerResource::getEloquentQuery()` only adds eager loads, even though `Partner` has `company_id`. Many ERPs share contacts across companies deliberately.
+- **Status:** **FIXED — RETEST: PASS.**
+- **Actual (before fix):** `PartnerResource::getEloquentQuery()` only added eager loads, even though `Partner` has `company_id`. Many ERPs share contacts across companies deliberately, so this needed a decision rather than an assumption.
+- **Client decision:** this deployment is solely for Truck It In — Partners should be scoped like everything else, not shared. No NULL-company exception the way `TaxGroup` gets.
+- **Data cleanup (companion to this fix, explicitly requested):** the 5 leftover non-Truck-It-In companies in the database (`Truck It In (Demo)`, `Rider Demo`, and 3 auto-generated seed companies — all already soft-deleted, none of them real) were permanently removed, along with the 4 unused demo journals under one of them (confirmed zero real posted moves referenced any of them). Before deleting, every table with a `restrictOnDelete`/`cascadeOnDelete` foreign key to `companies` across the whole app was checked for rows tied to these 5 companies — the only match was those 4 journals. Only Truck It In (Pvt) Ltd remains. The ~15 real partner records that had belonged to those companies correctly fell back to `company_id = NULL` via the existing `nullOnDelete` foreign key (not deleted themselves).
+- **Fix:** Added `->where('company_id', Auth::user()?->default_company_id)` to the base `PartnerResource::getEloquentQuery()`. Every Customer/Vendor resource across accounts, accounting, sales, purchases and invoices extends this base and calls `parent::getEloquentQuery()` first, so all of them inherit it automatically.
+- **Verified live:** confirmed all 60 real, actually-used Truck It In partners remain visible (every genuinely-referenced business partner already had `company_id = 1`); confirmed zero real posted moves reference any of the ~93 now-hidden `NULL`-company rows (leftover demo placeholders — "John Doe", "Jane Smith" duplicated across old seed runs — not real contacts). Ledger re-verified balanced after the company deletion (debit = credit = 255,400.00, unchanged).
+- **Tests:** `plugins/webkul/partners` full suite: 1 failed/63 passed, confirmed pre-existing via `git stash` (a REST API test that queries the `Partner` model directly, never through this Filament resource, so it's unaffected by and unrelated to this fix).
+- **Files:** `plugins/webkul/partners/src/Filament/Resources/PartnerResource.php`
 
 ### DEF-012 · Full test suite aborts with a fatal error (Drive test double out of date)
 - **Module:** Automated tests: Accounting → Documents / Drive
