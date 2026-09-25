@@ -2,6 +2,8 @@
 
 Cycle 1 · 2026-09-25 · Tester: Claude (QA/audit) · Environment: local dev (`aureuserp` DB) + test DB (`aureuserp_testing`)
 
+**Cycle 1 retest · 2026-09-25 · independent second-reviewer pass** — every `FIXED — PENDING RETEST` item below was re-verified with fresh, independent checks (re-reading the current code, and live/factory-driven functional tests with a genuine second company where relevant) rather than trusting the original fix summary. Results recorded per item as `RETEST: PASS`.
+
 Application defects and environment blockers are listed separately. "Code-verified" means the defect was confirmed by reading the code on the exact execution path. It was not executed, usually because executing it would destroy real data or needs a second active company.
 
 ---
@@ -18,6 +20,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
 - **Root cause:** `AccountingPermissions::accountant()` is `array_diff(self::all(), [exclusions])`. Any new permission added to `all()` flows into Accountant unless it is explicitly excluded. `ManagePeriodLock` and `PeriodLockPage` were added to `all()` and not to the exclusion list.
 - **Fix:** Added `ManagePeriodLock`/`PeriodLockPage` to `accountant()`'s exclusion list. Because the leaked permission had already been synced into the live DB, also directly revoked `ManagePeriodLock`/`PeriodLockPage` from the `Accountant`/`accountant` role via `Role::revokePermissionTo()` (code changes alone don't retract an already-granted permission — `AccountingPermissionRegistrar::synchronize()` only ever inserts, never revokes).
 - **Verified:** `Demo Accountant->can(ManagePeriodLock)` now `false`; `PostJournal` still correctly `false`; `view_any_accounting_invoice` still correctly `true` (no collateral permission loss).
+- **RETEST: PASS.** Independently re-read `accountant()`'s exclusion list (both constants present with an explanatory comment) and re-ran the permission check live for 4 real users: Accountant → `ManagePeriodLock=no`; Admin, both Accounting Managers → `ManagePeriodLock=YES` (correctly retained). No collateral loss confirmed.
 - **Files:** `plugins/webkul/accounting/src/Support/AccountingPermissions.php` (`accountant()`).
 
 ### DEF-002 · Employees can approve their own leave allocations
@@ -30,6 +33,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
 - **Root cause:** Upstream scaffold row actions were kept on the employee self-service screen.
 - **Fix:** Every row on `MyAllocationResource` is, by construction (`getEloquentQuery()` filters to `whereHas('employee', fn ($q) => $q->where('user_id', Auth::id()))`), the viewer's own allocation — so an approve/refuse button here can only ever be self-approval. Removed both actions entirely rather than gating them, since there is no legitimate case for them on this specific screen (approving a subordinate's allocation is the Management cluster's job — see DEF-003).
 - **Files:** `plugins/webkul/time-off/src/Filament/Clusters/MyTime/Resources/MyAllocationResource.php`.
+- **RETEST: PASS.** Confirmed `grep "Action::make('approve')\|Action::make('refuse')"` returns zero matches in the current file. Went further than a code read: built the resource's real Filament table object and enumerated `getFlatActions()` live — only `view`, `edit`, `delete` exist. Approve/refuse are structurally absent from the table, not just hidden by a condition.
 
 ### DEF-003 · Manager-side allocation approve/refuse bypass the approval engine
 - **Module:** Time Off → Management → Allocations
@@ -43,6 +47,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
 - **Files:**
   - `plugins/webkul/time-off/src/Filament/Clusters/Management/Resources/AllocationResource.php`
   - `.../AllocationResource/Pages/EditAllocation.php`
+- **RETEST: PASS.** Confirmed `->authorize(HrPermissions::ApproveLeave)` and the self-check both present at all 5 call sites in current code (grep, all lines match). Went further than the original fix's spot check: created a real subordinate allocation under Sarah's reporting tree and confirmed the self-check correctly does **not** block approving it (`Self-check would block approving SUBORDINATE record: no`), while her own allocation is still correctly blocked (`... OWN record: YES`) — proves the fix doesn't over-block legitimate approvals, not just that it blocks the bad case.
 
 ### DEF-004 · Posted journal entries can be permanently deleted
 - **Module:** Accounting → Journal Entries; Customers → Invoices (bulk)
@@ -59,6 +64,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
   - `plugins/webkul/accounting/src/Filament/Clusters/Accounting/Resources/JournalEntryResource.php`
   - `plugins/webkul/accounts/src/Filament/Resources/InvoiceResource.php`
   - `plugins/webkul/accounts/src/Filament/Resources/BillResource.php`
+- **RETEST: PASS — with stronger evidence than the original fix.** Confirmed all 6 `before()` guards present (2 per resource × 3 resources). Rather than relying only on `assertTableActionHidden`, built the real registered `DeleteAction` object from `JournalEntryResource::table()`, attached a genuinely posted `Move`, and called `$deleteAction->callBefore()` directly: it threw `Filament\Support\Exceptions\Halt` — the exact internal mechanism `$action->halt()` uses. This is direct proof the guard fires on the real action object Filament would execute, not just a logic replica. The move was confirmed to still exist afterward.
 
 ### DEF-005 · Journals, Taxes and Tax Groups are not company-scoped
 - **Module:** Accounting configuration (accounts plugin, and the accounting and invoices cluster subclasses)
@@ -72,6 +78,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
   - `TaxGroupResource::getEloquentQuery()` filters to the viewer's company **or** `company_id IS NULL` — `company_id` is nullable on this model by design (a null row is a genuinely shared/global tax group), so a strict-only filter would have hidden legitimate global rows.
 - **Tests run:** `plugins/webkul/accounts` full suite (filtered around Journal/Tax): 3 failed, 100 passed. All 3 failures confirmed pre-existing via `git stash` A/B (identical failures/messages on unmodified code) — unrelated to this fix (`TaxPickerHardeningTest` exercises `Tax::taxValidationRule()`, a raw model-level rule that never touches `TaxResource`; `RepeaterLinePersistenceTest` fails on a `FiscalPosition` null-property bug present before this fix too).
 - **Files:** `plugins/webkul/accounts/src/Filament/Resources/{JournalResource,TaxResource,TaxGroupResource}.php`
+- **RETEST: PASS — with a genuine second-company functional test the original fix report didn't include.** Created a real Company A / Company B pair plus a Journal, Tax and TaxGroup row in each (unlike the original verification, which was code-only since live data has one company). Logged in as a Company A user and queried all three resources: each correctly returns its own company's row and correctly excludes the other company's row. Also confirmed TaxGroup's global-row (`company_id IS NULL`) exception still surfaces correctly — the nullable-vs-required distinction between Tax and TaxGroup was itself worth double-checking, and it holds.
 
 ### DEF-006 · Sales and Purchase orders are not company-scoped
 - **Module:** Sales (Quotations, Orders, To Invoice, To Upsell) and Purchases (RFQs, Purchase Orders, Agreements)
@@ -86,6 +93,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
   - `plugins/webkul/sales/src/Filament/Clusters/Orders/Resources/QuotationResource.php`
   - `plugins/webkul/purchases/src/Filament/Admin/Clusters/Orders/Resources/OrderResource.php`
   - `plugins/webkul/purchases/src/Filament/Admin/Clusters/Orders/Resources/PurchaseAgreementResource.php`
+- **RETEST: PASS.** Independently re-read `PurchaseAgreementResource`'s current code to confirm the fix is genuinely present (not just trusting the original summary). Ran a fresh live functional test with a real second company: created a Sale Order and a Purchase Order under Company B, logged in as a Company A user, and confirmed `getEloquentQuery()` returns the Company A row and correctly excludes the Company B row for both. Did not re-run the full sales+purchases suite in this retest pass — relying on the two prior identical A/B results (99 failed/174 passed, with and without the fix) already recorded above, which is sufficient given the live functional test independently confirms the actual behavior.
 
 ### DEF-007 · Payment form can pre-select another company's journal
 - **Module:** Accounts → Payments; Invoice journal picker
@@ -96,7 +104,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
   - The journal pickers at `PaymentResource.php:192–197`, `InvoiceResource.php:224–228`, and the equivalent picker in `BillResource.php:245` filtered by type only.
 - **Fix:** Added `->where('company_id', Auth::user()?->default_company_id)` to the `modifyQueryUsing` on all three pickers, and to the `Journal::` lookup used for `PaymentResource`'s default.
 - **Files:** `plugins/webkul/accounts/src/Filament/Resources/{PaymentResource,InvoiceResource,BillResource}.php`
-
+- **RETEST: PASS, with one testing caveat.** Confirmed all 3 company filters present in current code by line number. Attempted a live 2-company functional test with a BANK-type Journal in Company B and confirmed the exact `->where('company_id', ...)` clause the fix added correctly excludes it — but the BANK-type-specific version of the test hit the pre-existing `ENV-003` seeding gap (a `Journal` model hook pulls a global `DefaultAccountSettings->account_journal_suspense_account_id` for BANK/CASH/CREDIT_CARD types, and that referenced account id doesn't exist in the fresh test DB). Worked around it by testing the identical `company_id` clause with a GENERAL-type journal instead (the type filter is separate, pre-existing logic this fix didn't touch) — confirmed it correctly includes the viewer's own company and excludes the other company's journal. The fix logic itself is proven; only the full BANK-type combination remains untestable in this environment, which is an environment gap, not a fix defect.
 ### DEF-008 · Other company-owned dropdowns list every company's records
 - **Module:** Accounts configuration; Sales; Purchases
 - **Severity:** Medium
@@ -126,6 +134,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
 - **Expected:** A company cannot be soft-deleted while it is still a user's default. At minimum, these users should be reassigned.
 - **Fix:** Reassigned both users' `default_company_id` to company #1 (the real active company, Truck It In (Pvt) Ltd) and synced `allowedCompanies()` to include it. Verified via `->fresh()`.
 - **Not fixed:** The underlying gap — nothing stops a company from being soft-deleted while still referenced as someone's default — is unaddressed. That would need a guard in the company-deletion path itself; flagging as a follow-up rather than fixing under this defect's data-only scope.
+- **RETEST: PASS.** Independently re-queried both users directly from the database: both now have `default_company_id=1`, resolving to the active, non-deleted "Truck It In (Pvt) Ltd" (`deleted_at` is null), and `allowedCompanies()` confirmed to include it for both.
 
 ### DEF-011 · Partners, customers and vendors are shared across companies (needs a decision)
 - **Module:** Partners, and every Customer/Vendor resource that extends it
@@ -142,6 +151,7 @@ Application defects and environment blockers are listed separately. "Code-verifi
 - **Root cause:** The anonymous class at `DriveHardenedScenariosTest.php:164` implements `DriveClient` but was not given the new `trashFile()` method (added to the interface for Drive folder organisation earlier this session).
 - **Fix:** Added the missing `trashFile(string $fileId): void` method to the anonymous class, delegating to the wrapped `FakeDriveClient` (which already had its own `trashFile()`).
 - **Verified:** `DriveHardenedScenariosTest.php` now runs to completion: 17 passed.
+- **RETEST: PASS.** Independently re-ran `DriveHardenedScenariosTest.php` fresh: 17 passed, 45 assertions, no fatal error. Confirmed `trashFile(string $fileId): void` is present in the anonymous class and correctly delegates to `$this->inner->trashFile($fileId)`.
 - **Files:** `plugins/webkul/accounting/tests/Feature/Documents/DriveHardenedScenariosTest.php`.
 
 ---

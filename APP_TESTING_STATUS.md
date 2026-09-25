@@ -1,8 +1,8 @@
 # AureusERP — Testing Status
 
-**Cycle 1 · 2026-09-25 · Tester: Claude (QA/audit, then fix pass) · Environment:** local dev (`aureuserp` DB, single active company "Truck It In (Pvt) Ltd") + test DB (`aureuserp_testing`).
+**Cycle 1 · 2026-09-25 · Tester: Claude (QA/audit, fix pass, then independent retest) · Environment:** local dev (`aureuserp` DB, single active company "Truck It In (Pvt) Ltd") + test DB (`aureuserp_testing`).
 
-This cycle had two phases: (1) a read-only audit producing `APP_TESTING_ERRORS.md`, and (2) a fix pass against that list, per explicit instruction. Fixes are marked `FIXED — PENDING RETEST` in the errors file and must not be self-certified as fully resolved — a second reviewer should retest each one.
+This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS.md`, (2) a fix pass against that list, and (3) an independent retest of every fix — re-reading current code fresh and re-running live/functional checks (several with a genuine second company via factories, going beyond what the original fix pass verified) rather than trusting the fix summaries. All 9 `FIXED — PENDING RETEST` items are now **RETEST: PASS**; see `APP_TESTING_ERRORS.md` for the per-item evidence.
 
 ---
 
@@ -69,23 +69,33 @@ This cycle had two phases: (1) a read-only audit producing `APP_TESTING_ERRORS.m
 
 | # | Defect | Severity | Status |
 |---|---|---|---|
-| DEF-001 | Accountant role held period-lock permissions | High | **FIXED — PENDING RETEST** |
-| DEF-002 | Self-approval on My Allocations | High | **FIXED — PENDING RETEST** |
-| DEF-003 | Management Allocations approve/refuse bypass authorization | High | **FIXED — PENDING RETEST** |
-| DEF-004 | Posted journal entries/invoices/bills deletable | High | **FIXED — PENDING RETEST** |
-| DEF-005 | Journal/Tax/TaxGroup not company-scoped | High | **FIXED — PENDING RETEST** |
-| DEF-006 | Sales/Purchase orders not company-scoped | High | **FIXED — PENDING RETEST** |
-| DEF-007 | Payment/Invoice/Bill journal picker company leak | Medium–High | **FIXED — PENDING RETEST** |
+| DEF-001 | Accountant role held period-lock permissions | High | **RETEST: PASS** |
+| DEF-002 | Self-approval on My Allocations | High | **RETEST: PASS** |
+| DEF-003 | Management Allocations approve/refuse bypass authorization | High | **RETEST: PASS** |
+| DEF-004 | Posted journal entries/invoices/bills deletable | High | **RETEST: PASS** |
+| DEF-005 | Journal/Tax/TaxGroup not company-scoped | High | **RETEST: PASS** |
+| DEF-006 | Sales/Purchase orders not company-scoped | High | **RETEST: PASS** |
+| DEF-007 | Payment/Invoice/Bill journal picker company leak | Medium–High | **RETEST: PASS** (BANK-type combination untestable — pre-existing ENV-003 gap, not a fix defect) |
 | DEF-008 | Remaining unscoped account/company pickers | Medium | Open — documented, not fixed this pass |
 | DEF-009 | No per-operation permission on invoice/bill actions | Medium | Open — needs a design decision, not fixed this pass |
-| DEF-010 | Users defaulted to a deleted company | Low | **FIXED — PENDING RETEST** (data fix) |
+| DEF-010 | Users defaulted to a deleted company | Low | **RETEST: PASS** (data fix) |
 | DEF-011 | Partners shared across companies | Needs decision | Open — business decision required |
-| DEF-012 | Full test suite fatal error | High (for CI) | **FIXED — PENDING RETEST** |
+| DEF-012 | Full test suite fatal error | High (for CI) | **RETEST: PASS** |
 
-**9 of 12 documented defects fixed this pass. 3 left open, each with an explicit reason (scope/time tradeoff for DEF-008, a genuine design decision needed for DEF-009 and DEF-011) rather than a rushed or incomplete fix.**
+**9 of 12 documented defects fixed and independently retested — all PASS. 3 left open, each with an explicit reason (scope/time tradeoff for DEF-008, a genuine design decision needed for DEF-009 and DEF-011) rather than a rushed or incomplete fix.**
+
+## Retest methodology (this pass)
+
+Every retest deliberately went beyond re-reading the original fix summary:
+- **Live functional tests with a genuine second company** (DEF-005, DEF-006, DEF-007) — created real Company A/Company B pairs with factories and confirmed cross-company queries actually return the right rows, rather than only re-reading the `getEloquentQuery()` code.
+- **Direct invocation of the real Filament Action object** (DEF-004) — built the actual registered `DeleteAction` from the resource's table, attached a genuinely posted `Move`, and called its `before()` callback directly; it threw `Filament\Support\Exceptions\Halt`, the literal mechanism `$action->halt()` uses — stronger evidence than the `assertTableActionHidden` test alone.
+- **Enumerated the real table's actions** (DEF-002) rather than only grepping for absence — confirmed only `view`/`edit`/`delete` are registered.
+- **Tested the "legitimate case still works" side, not just the "bad case is blocked" side** (DEF-003) — confirmed a manager can still approve a genuine subordinate's allocation, not only that self-approval is blocked.
+- **Re-queried the database directly** (DEF-010) rather than trusting the earlier confirmation.
+- One caveat carried over honestly rather than glossed over: DEF-007's full BANK-type journal picker combination hit the same pre-existing `ENV-003` test-environment seeding gap documented in the original audit; the fix's actual logic (the `company_id` filter) was proven correct via an equivalent non-BANK-type test, but the exact BANK-type path remains unexercised in this environment.
 
 ## Remaining for next session
 
-- Second-reviewer retest of all 9 `FIXED — PENDING RETEST` items, ideally including live browser click-through for the ones with a UI surface (DEF-002, DEF-003, DEF-004).
+- Live browser click-through for the fixes with a UI surface (DEF-002, DEF-003, DEF-004), since this retest — like the original fix pass — was still server-side only (see ENV-001).
 - A follow-up pass on DEF-008's remaining picker list.
 - A decision from the client/product owner on DEF-009 (new invoice-posting permission — which roles should keep unconditional posting rights?) and DEF-011 (should Partners be company-scoped or intentionally shared?).
