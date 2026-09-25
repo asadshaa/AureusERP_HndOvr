@@ -27,6 +27,9 @@ class CancelAction extends Action
         $this
             ->label(__('accounts::filament/resources/invoice/actions/cancel-action.title'))
             ->color('gray')
+            // See ConfirmAction's comment: same PostJournal-tier gate on every
+            // invoice/bill lifecycle action, not just posting itself.
+            ->authorize('accounting_post_journal')
             ->action(function (Move $record, Component $livewire): void {
                 try {
                     $record = AccountFacade::cancelMove($record);

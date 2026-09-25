@@ -45,6 +45,9 @@ class PayAction extends Action
         $this
             ->label(__('accounts::filament/resources/invoice/actions/pay-action.title'))
             ->color('success')
+            // See ConfirmAction's comment: same PostJournal-tier gate on every
+            // invoice/bill lifecycle action, not just posting itself.
+            ->authorize('accounting_post_journal')
             ->schema(function (Schema $schema) {
                 $paymentRegister = new PaymentRegister;
 

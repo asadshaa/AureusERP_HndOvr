@@ -28,6 +28,13 @@ class ConfirmAction extends Action
         $this
             ->label(__('accounts::filament/resources/invoice/actions/confirm-action.title'))
             ->color('primary')
+            // 'accounting_post_journal' is AccountingPermissions::PostJournal in the
+            // accounting plugin -- used as a literal string here rather than importing
+            // it, since accounting depends on accounts (not the other way around) and
+            // importing it would invert that. Client decision: only whoever can post a
+            // journal (Admin, Accounting Manager) may also post an invoice/bill --
+            // not HR, not a plain employee, even if they can edit one.
+            ->authorize('accounting_post_journal')
             ->action(function (Move $record, Component $livewire): void {
                 $record->checked = $record->journal->auto_check_on_post;
 

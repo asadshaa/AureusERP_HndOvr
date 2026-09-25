@@ -84,7 +84,10 @@ it('creates a draft bill with a number through the create form', function () {
 });
 
 it('posts a draft bill through the confirm action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bill = AccountHelper::invoice(MoveType::IN_INVOICE, null, null, ['invoice_date' => now()]);
     AccountHelper::productLine($bill, AccountHelper::account('expense'), qty: 2, priceUnit: 100);
@@ -99,7 +102,10 @@ it('posts a draft bill through the confirm action', function () {
 });
 
 it('cancels a draft bill through the cancel action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bill = AccountHelper::invoice(MoveType::IN_INVOICE, null, null, ['invoice_date' => now()]);
 
@@ -120,7 +126,10 @@ function postedBillRecord(): Move
 }
 
 it('reverses a posted bill into a refund through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bill = postedBillRecord();
 
@@ -141,7 +150,10 @@ it('reverses a posted bill into a refund through the action', function () {
 });
 
 it('resets a posted bill to draft through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bill = postedBillRecord();
 
@@ -153,7 +165,10 @@ it('resets a posted bill to draft through the action', function () {
 });
 
 it('marks a posted bill as checked through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bill = postedBillRecord();
 
@@ -165,7 +180,10 @@ it('marks a posted bill as checked through the action', function () {
 });
 
 it('registers a full payment and marks the bill paid through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bankJournal = AccountHelper::bankJournal();
     $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();
@@ -190,7 +208,10 @@ it('registers a full payment and marks the bill paid through the action', functi
 it('registers payment and sends paid bill email to vendor', function () {
     Mail::fake();
 
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bankJournal = AccountHelper::bankJournal();
     $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();
@@ -226,7 +247,10 @@ it('registers payment and sends paid bill email to vendor', function () {
 it('updates partner email when paying bill if partner previously had no email', function () {
     Mail::fake();
 
-    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill']);
+    // accounting_post_journal is required alongside update_account_bill
+    // since DEF-009: posting/paying/cancelling/reversing/resetting a bill
+    // is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_bill', 'update_account_bill', 'accounting_post_journal']);
 
     $bankJournal = AccountHelper::bankJournal();
     $paymentMethodLine = $bankJournal->outboundPaymentMethodLines->first();

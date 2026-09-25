@@ -22,6 +22,9 @@ class SetAsCheckedAction extends Action
             ->label(__('Set as checked'))
             ->label(__('accounts::filament/resources/invoice/actions/set-as-checked-action.title'))
             ->color('gray')
+            // See ConfirmAction's comment: same PostJournal-tier gate on every
+            // invoice/bill lifecycle action, not just posting itself.
+            ->authorize('accounting_post_journal')
             ->action(function (Move $record, $livewire): void {
                 $record = AccountFacade::setAsCheckedMove($record);
 

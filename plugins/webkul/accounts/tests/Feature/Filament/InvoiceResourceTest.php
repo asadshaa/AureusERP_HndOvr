@@ -58,7 +58,10 @@ it('renders the invoice create page', function () {
 });
 
 it('posts a draft invoice through the confirm action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     $invoice = AccountHelper::invoice(MoveType::OUT_INVOICE);
     AccountHelper::productLine($invoice, AccountHelper::account('income'), qty: 2, priceUnit: 100);
@@ -73,7 +76,10 @@ it('posts a draft invoice through the confirm action', function () {
 });
 
 it('cancels a draft invoice through the cancel action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     $invoice = AccountHelper::invoice(MoveType::OUT_INVOICE);
 
@@ -94,7 +100,10 @@ function postedInvoiceRecord(): Move
 }
 
 it('reverses a posted invoice into a credit note through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     $invoice = postedInvoiceRecord();
 
@@ -115,7 +124,10 @@ it('reverses a posted invoice into a credit note through the action', function (
 });
 
 it('resets a posted invoice to draft through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     $invoice = postedInvoiceRecord();
 
@@ -127,7 +139,10 @@ it('resets a posted invoice to draft through the action', function () {
 });
 
 it('marks a posted invoice as checked through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     $invoice = postedInvoiceRecord();
 
@@ -139,7 +154,10 @@ it('marks a posted invoice as checked through the action', function () {
 });
 
 it('registers a full payment and marks the invoice paid through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice']);
+    // accounting_post_journal is required alongside update_account_invoice
+    // since DEF-009: posting/paying/cancelling/reversing/resetting an
+    // invoice is no longer implied by edit access alone.
+    FilamentHelper::actingAs(['view_any_account_invoice', 'update_account_invoice', 'accounting_post_journal']);
 
     AccountHelper::bankJournal();
 

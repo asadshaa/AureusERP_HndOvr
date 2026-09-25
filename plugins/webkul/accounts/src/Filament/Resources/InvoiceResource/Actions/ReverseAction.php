@@ -56,6 +56,9 @@ class ReverseAction extends Action
             ->label(__('accounts::filament/resources/invoice/actions/reverse.title'))
             ->color('gray')
             ->visible(fn (Move $record) => $record->state == MoveState::POSTED)
+            // See ConfirmAction's comment: same PostJournal-tier gate on every
+            // invoice/bill lifecycle action, not just posting itself.
+            ->authorize('accounting_post_journal')
             ->icon('heroicon-o-receipt-refund')
             ->modalHeading(__('accounts::filament/resources/invoice/actions/reverse.modal.heading'));
 
