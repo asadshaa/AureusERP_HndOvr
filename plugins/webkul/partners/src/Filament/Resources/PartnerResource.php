@@ -7,6 +7,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Partner\Filament\Resources\PartnerResource\Schemas\PartnerForm;
 use Webkul\Partner\Filament\Resources\PartnerResource\Schemas\PartnerInfolist;
 use Webkul\Partner\Filament\Resources\PartnerResource\Support\PartnerSchemaRegistry;
@@ -56,7 +57,15 @@ class PartnerResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery();
+        // Company isolation, deliberately strict (no "or company_id IS NULL"
+        // fallback the way TaxGroup gets): client decision was to scope
+        // Partners to the active company only, not treat any partner as
+        // globally shared. Every Customer/Vendor resource across accounts,
+        // accounting, sales, purchases and invoices extends this base
+        // resource and calls parent::getEloquentQuery() first, so they all
+        // inherit this automatically.
+        $query = parent::getEloquentQuery()
+            ->where('company_id', Auth::user()?->default_company_id);
 
         if ($eagerLoads = PartnerSchemaRegistry::eagerLoads()) {
             $query->with($eagerLoads);
