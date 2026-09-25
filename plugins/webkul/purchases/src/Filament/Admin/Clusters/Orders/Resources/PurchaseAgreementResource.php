@@ -210,13 +210,7 @@ class PurchaseAgreementResource extends Resource
                                     ->placeholder(__('purchases::filament/admin/clusters/orders/resources/purchase-agreement.form.sections.general.fields.reference-placeholder')),
                                 Select::make('company_id')
                                     ->label(__('purchases::filament/admin/clusters/orders/resources/purchase-agreement.form.sections.general.fields.company'))
-                                    ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => $query->withTrashed())
-                                    ->getOptionLabelFromRecordUsing(function ($record): string {
-                                        return $record->name.($record->trashed() ? ' (Deleted)' : '');
-                                    })
-                                    ->disableOptionWhen(function ($label) {
-                                        return str_contains($label, ' (Deleted)');
-                                    })
+                                    ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []))
                                     ->searchable()
                                     ->required()
                                     ->preload()
@@ -487,6 +481,7 @@ class PurchaseAgreementResource extends Resource
                             ->selectable(
                                 IsRelatedToOperator::make()
                                     ->titleAttribute('name')
+                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []))
                                     ->searchable()
                                     ->multiple()
                                     ->preload(),

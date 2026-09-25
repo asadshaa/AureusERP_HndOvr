@@ -124,7 +124,11 @@ class JournalResource extends Resource
                                                                     ->hexColor(),
                                                                 Select::make('default_account_id')
                                                                     ->label(__('accounts::filament/resources/journal.form.tabs.journal-entries.field-set.accounting-information.fields.default-account'))
-                                                                    ->relationship('defaultAccount', 'name')
+                                                                    ->relationship(
+                                                                        'defaultAccount',
+                                                                        'name',
+                                                                        modifyQueryUsing: fn (Builder $query, Get $get) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', $get('company_id') ?? Auth::user()?->default_company_id))
+                                                                    )
                                                                     ->preload()
                                                                     ->searchable()
                                                                     ->required(),
@@ -134,7 +138,9 @@ class JournalResource extends Resource
                                                                     ->relationship(
                                                                         'profitAccount',
                                                                         'name',
-                                                                        modifyQueryUsing: fn ($query) => $query->where('deprecated', false)->whereIn('account_type', [AccountType::INCOME, AccountType::INCOME_OTHER])
+                                                                        modifyQueryUsing: fn ($query, Get $get) => $query->where('deprecated', false)
+                                                                            ->whereIn('account_type', [AccountType::INCOME, AccountType::INCOME_OTHER])
+                                                                            ->whereHas('companies', fn ($q) => $q->where('companies.id', $get('company_id') ?? Auth::user()?->default_company_id))
                                                                     )
                                                                     ->preload()
                                                                     ->searchable()
@@ -149,7 +155,9 @@ class JournalResource extends Resource
                                                                     ->relationship(
                                                                         'lossAccount',
                                                                         'name',
-                                                                        modifyQueryUsing: fn ($query) => $query->where('deprecated', false)->where('account_type', AccountType::EXPENSE)
+                                                                        modifyQueryUsing: fn ($query, Get $get) => $query->where('deprecated', false)
+                                                                            ->where('account_type', AccountType::EXPENSE)
+                                                                            ->whereHas('companies', fn ($q) => $q->where('companies.id', $get('company_id') ?? Auth::user()?->default_company_id))
                                                                     )
                                                                     ->preload()
                                                                     ->searchable()
@@ -161,7 +169,11 @@ class JournalResource extends Resource
 
                                                                 Select::make('suspense_account_id')
                                                                     ->label(__('accounts::filament/resources/journal.form.tabs.journal-entries.field-set.accounting-information.fields.suspense-account'))
-                                                                    ->relationship('suspenseAccount', 'name')
+                                                                    ->relationship(
+                                                                        'suspenseAccount',
+                                                                        'name',
+                                                                        modifyQueryUsing: fn (Builder $query, Get $get) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', $get('company_id') ?? Auth::user()?->default_company_id))
+                                                                    )
                                                                     ->preload()
                                                                     ->searchable()
                                                                     ->visible(fn (Get $get) => in_array($get('type'), [
@@ -249,7 +261,15 @@ class JournalResource extends Resource
 
                                                         Select::make('payment_account_id')
                                                             ->label(__('accounts::filament/resources/journal.form.tabs.incoming-payments.fields.account-number'))
-                                                            ->relationship('paymentAccount', 'name')
+                                                            ->relationship(
+                                                                'paymentAccount',
+                                                                'name',
+                                                                // Deliberately Auth::user()'s company, not a relative Get()
+                                                                // path -- this field is nested inside a Repeater, so a
+                                                                // relative "../../company_id" path is fragile against
+                                                                // the exact repeater/tab nesting depth here.
+                                                                modifyQueryUsing: fn ($query) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', Auth::user()?->default_company_id))
+                                                            )
                                                             ->searchable()
                                                             ->preload()
                                                             ->wrapOptionLabels(false),
@@ -309,7 +329,15 @@ class JournalResource extends Resource
 
                                                         Select::make('payment_account_id')
                                                             ->label(__('accounts::filament/resources/journal.form.tabs.outgoing-payments.fields.account-number'))
-                                                            ->relationship('paymentAccount', 'name')
+                                                            ->relationship(
+                                                                'paymentAccount',
+                                                                'name',
+                                                                // Deliberately Auth::user()'s company, not a relative Get()
+                                                                // path -- this field is nested inside a Repeater, so a
+                                                                // relative "../../company_id" path is fragile against
+                                                                // the exact repeater/tab nesting depth here.
+                                                                modifyQueryUsing: fn ($query) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', Auth::user()?->default_company_id))
+                                                            )
                                                             ->searchable()
                                                             ->preload()
                                                             ->wrapOptionLabels(false),
@@ -324,7 +352,11 @@ class JournalResource extends Resource
                                                         Group::make()
                                                             ->schema([
                                                                 Select::make('invoices_journal_accounts')
-                                                                    ->relationship('allowedAccounts', 'name')
+                                                                    ->relationship(
+                                                                        'allowedAccounts',
+                                                                        'name',
+                                                                        modifyQueryUsing: fn ($query, Get $get) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', $get('company_id') ?? Auth::user()?->default_company_id))
+                                                                    )
                                                                     ->multiple()
                                                                     ->preload()
                                                                     ->label(__('accounts::filament/resources/journal.form.tabs.advanced-settings.fields.allowed-accounts')),
@@ -376,7 +408,7 @@ class JournalResource extends Resource
                                                     ->label(__('accounts::filament/resources/journal.form.general.fields.company'))
                                                     ->disabled()
                                                     ->dehydrated()
-                                                    ->options(fn () => Company::pluck('name', 'id'))
+                                                    ->options(fn () => Company::whereKey(Auth::user()?->default_company_id)->pluck('name', 'id'))
                                                     ->default(Auth::user()->default_company_id)
                                                     ->required(),
                                             ]),

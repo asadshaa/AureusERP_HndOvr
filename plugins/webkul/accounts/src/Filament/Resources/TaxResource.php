@@ -31,9 +31,11 @@ use Filament\Tables;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Enums\AmountType;
 use Webkul\Account\Enums\RepartitionType;
 use Webkul\Account\Enums\TaxIncludeOverride;
@@ -59,12 +61,12 @@ class TaxResource extends Resource
 
     protected static ?SubNavigationPosition $subNavigationPosition = SubNavigationPosition::Start;
 
-    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    public static function getEloquentQuery(): Builder
     {
         // Company isolation, reusing the model's own scope (Tax::scopeForCompany)
         // rather than re-deriving the filter here.
         return parent::getEloquentQuery()
-            ->forCompany(\Illuminate\Support\Facades\Auth::user()?->default_company_id);
+            ->forCompany(Auth::user()?->default_company_id);
     }
 
     public static function form(Schema $schema): Schema
@@ -108,7 +110,15 @@ class TaxResource extends Resource
                                 TextInput::make('invoice_label')
                                     ->label(__('accounts::filament/resources/tax.form.sections.field-set.advanced-options.fields.invoice-label')),
                                 Select::make('tax_group_id')
-                                    ->relationship('taxGroup', 'name')
+                                    ->relationship(
+                                        'taxGroup',
+                                        'name',
+                                        // company_id IS NULL means a genuinely global tax group (same
+                                        // exception TaxGroupResource's own getEloquentQuery() applies) --
+                                        // this picker isn't routed through that resource's query, so the
+                                        // same rule has to be repeated here.
+                                        modifyQueryUsing: fn ($query) => $query->where(fn ($q) => $q->whereNull('company_id')->orWhere('company_id', Auth::user()?->default_company_id))
+                                    )
                                     ->required()
                                     ->native(false)
                                     ->createOptionForm(fn (Schema $schema): Schema => TaxGroupResource::form($schema))
@@ -180,7 +190,15 @@ class TaxResource extends Resource
 
                                                         Select::make('account_id')
                                                             ->label(__('accounts::filament/resources/tax.form.sections.repeater.fields.account'))
-                                                            ->relationship('account', 'name')
+                                                            ->relationship(
+                                                                'account',
+                                                                'name',
+                                                                // Auth::user()'s company, not a relative Get() path
+                                                                // -- this field is nested inside a Repeater, so a
+                                                                // relative "../../company_id" path is fragile
+                                                                // against the exact nesting depth here.
+                                                                modifyQueryUsing: fn ($query) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', Auth::user()?->default_company_id))
+                                                            )
                                                             ->required(fn (callable $get) => $get('repartition_type') !== 'base')
                                                             ->preload()
                                                             ->searchable()
@@ -239,7 +257,15 @@ class TaxResource extends Resource
 
                                                         Select::make('account_id')
                                                             ->label(__('accounts::filament/resources/tax.form.sections.repeater.fields.account'))
-                                                            ->relationship('account', 'name')
+                                                            ->relationship(
+                                                                'account',
+                                                                'name',
+                                                                // Auth::user()'s company, not a relative Get() path
+                                                                // -- this field is nested inside a Repeater, so a
+                                                                // relative "../../company_id" path is fragile
+                                                                // against the exact nesting depth here.
+                                                                modifyQueryUsing: fn ($query) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', Auth::user()?->default_company_id))
+                                                            )
                                                             ->required(fn (callable $get) => $get('repartition_type') !== 'base')
                                                             ->preload()
                                                             ->searchable()

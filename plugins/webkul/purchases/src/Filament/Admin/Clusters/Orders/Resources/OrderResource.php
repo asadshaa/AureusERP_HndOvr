@@ -295,12 +295,8 @@ class OrderResource extends Resource
                                             ->relationship(
                                                 'company',
                                                 'name',
-                                                modifyQueryUsing: fn (Builder $query) => $query->withTrashed(),
+                                                modifyQueryUsing: fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []),
                                             )
-                                            ->getOptionLabelFromRecordUsing(function ($record): string {
-                                                return $record->name.($record->trashed() ? ' (Deleted)' : '');
-                                            })
-                                            ->disableOptionWhen(fn ($label) => str_contains($label, ' (Deleted)'))
                                             ->searchable()
                                             ->preload()
                                             ->required()
@@ -487,6 +483,7 @@ class OrderResource extends Resource
                             ->selectable(
                                 IsRelatedToOperator::make()
                                     ->titleAttribute('name')
+                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []))
                                     ->searchable()
                                     ->multiple()
                                     ->preload(),

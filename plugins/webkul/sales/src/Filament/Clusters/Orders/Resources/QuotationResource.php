@@ -325,13 +325,7 @@ class QuotationResource extends Resource
                                     ->schema([
                                         Select::make('company_id')
                                             ->label(__('sales::filament/clusters/orders/resources/quotation.form.tabs.other-information.fieldset.additional-information.fields.company'))
-                                            ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => $query->withTrashed())
-                                            ->getOptionLabelFromRecordUsing(function ($record): string {
-                                                return $record->name.($record->trashed() ? ' (Deleted)' : '');
-                                            })
-                                            ->disableOptionWhen(function ($label) {
-                                                return str_contains($label, ' (Deleted)');
-                                            })
+                                            ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []))
                                             ->searchable()
                                             ->preload()
                                             ->live()
@@ -492,6 +486,7 @@ class QuotationResource extends Resource
                                 IsRelatedToOperator::make()
                                     ->titleAttribute('name')
                                     ->label(__('sales::filament/clusters/orders/resources/quotation.table.filters.company'))
+                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereIn('id', Auth::user()?->allowedCompanies()->pluck('companies.id') ?? []))
                                     ->searchable()
                                     ->multiple()
                                     ->preload(),
