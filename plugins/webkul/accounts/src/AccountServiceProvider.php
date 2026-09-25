@@ -108,6 +108,7 @@ class AccountServiceProvider extends PackageServiceProvider
                 '2026_09_24_123137_add_unique_constraint_to_accounts_account_moves_name',
                 '2026_09_24_123219_add_unique_constraint_to_accounts_journals_code',
                 '2026_09_24_123432_add_unique_constraint_to_accounts_taxes',
+                '2026_09_25_000001_create_accounts_period_locks_table',
             ])
             ->runsMigrations()
             ->hasSettings([

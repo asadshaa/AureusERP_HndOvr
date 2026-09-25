@@ -29,6 +29,7 @@ use Webkul\Account\Models\PartialReconcile;
 use Webkul\Account\Models\Partner;
 use Webkul\Account\Models\Payment;
 use Webkul\Account\Models\PaymentRegister;
+use Webkul\Account\Services\PeriodLockService;
 use Webkul\Account\Settings\DefaultAccountSettings;
 use Webkul\Support\Services\EmailService;
 
@@ -76,6 +77,11 @@ class AccountManager
     private function confirmMoveLocked(AccountMove $record): AccountMove
     {
         $this->isConfirmAllowedForMove($record);
+
+        app(PeriodLockService::class)->assertNotLocked(
+            (int) $record->company_id,
+            $record->date ?? $record->invoice_date,
+        );
 
         $wasPostedBefore = $record->posted_before;
 

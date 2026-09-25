@@ -8,6 +8,7 @@ use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Models\Journal;
 use Webkul\Account\Models\Move;
+use Webkul\Account\Services\PeriodLockService;
 use Webkul\Accounting\Enums\ManualAdjustmentStatus;
 use Webkul\Accounting\Models\ManualAdjustment;
 use Webkul\Security\Models\User;
@@ -132,6 +133,8 @@ class ManualAdjustmentService
             $move ??= $this->createDraft($adjustment);
 
             if ($move->state !== MoveState::POSTED) {
+                app(PeriodLockService::class)->assertNotLocked((int) $adjustment->company_id, $move->date);
+
                 $totals = DB::table('accounts_account_move_lines')->where('move_id', $move->id)
                     ->selectRaw('ROUND(SUM(debit), 2) debit, ROUND(SUM(credit), 2) credit')->first();
                 if (! $totals || abs((float) $totals->debit - (float) $totals->credit) > 0.005) {

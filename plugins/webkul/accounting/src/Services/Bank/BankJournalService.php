@@ -9,6 +9,7 @@ use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Facades\Account as AccountFacade;
 use Webkul\Account\Models\Move;
+use Webkul\Account\Services\PeriodLockService;
 use Webkul\Accounting\Enums\BankImportStatus;
 use Webkul\Accounting\Enums\BankPostingStatus;
 use Webkul\Accounting\Enums\BankReviewStatus;
@@ -151,6 +152,8 @@ class BankJournalService
             if ($accounts->some(fn ($acc) => $acc->is_group || $acc->deprecated)) {
                 throw new RuntimeException('Cannot post journal move referencing a group or deprecated account.');
             }
+
+            app(PeriodLockService::class)->assertNotLocked((int) $move->company_id, $move->date);
 
             $totals = DB::table('accounts_account_move_lines')
                 ->where('move_id', $move->id)

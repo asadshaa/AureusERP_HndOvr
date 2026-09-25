@@ -26,6 +26,11 @@ use Webkul\Support\Models\Company;
  *  - Idempotent: if a posted migration journal of a given kind already exists
  *    for the company, it is not created again (re-import adds no duplicates).
  *  - Only postable leaf accounts are used; group accounts are never posted to.
+ *  - Deliberately NOT subject to PeriodLockService: this tool's entire job is
+ *    writing historical opening/movement/adjustment balances, which by design
+ *    predate "today". A period lock protects normal day-to-day posting from
+ *    accidental backdating; it would only get in the way of a legitimate,
+ *    admin-run, one-time historical data load.
  */
 class MigrationJournalService
 {

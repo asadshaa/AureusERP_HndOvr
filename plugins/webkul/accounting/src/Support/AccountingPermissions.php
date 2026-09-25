@@ -62,6 +62,10 @@ final class AccountingPermissions
 
     public const FxRevaluationPage = 'page_accounting_fx_revaluation';
 
+    public const ManagePeriodLock = 'accounting_manage_period_lock';
+
+    public const PeriodLockPage = 'page_accounting_period_lock';
+
     public const ViewDocuments = 'accounting_view_documents';
 
     public const ManageDocuments = 'accounting_manage_documents';
@@ -147,6 +151,8 @@ final class AccountingPermissions
             self::ExchangeRatesPage,
             self::MissingRatesPage,
             self::FxRevaluationPage,
+            self::ManagePeriodLock,
+            self::PeriodLockPage,
             self::ViewDocuments,
             self::ManageDocuments,
             self::DownloadDocuments,
@@ -565,6 +571,8 @@ final class AccountingPermissions
             self::ApproveExchangeRates,
             self::RunFxRevaluation,
             self::FxRevaluationPage,
+            self::ManagePeriodLock,
+            self::PeriodLockPage,
             self::ReviewBankTransactions,
             self::ReleasePayment,
             'view_any_accounting_tax',
