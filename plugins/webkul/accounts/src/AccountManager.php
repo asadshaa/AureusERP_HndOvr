@@ -2070,6 +2070,15 @@ class AccountManager
             $reverseMove->state = MoveState::DRAFT;
             $reverseMove->posted_before = false;
             $reverseMove->name = null;
+            // replicate() copies accounting_source_type/accounting_source_id verbatim,
+            // but accounts_account_moves has a unique (company_id, accounting_source_type,
+            // accounting_source_id) constraint meant to guarantee one move per source (e.g.
+            // one move per bank transaction mapping). The original move still holds that
+            // slot, so saving the reversal with the same pair always throws a duplicate-key
+            // error. The reversal isn't itself "the move for" that source, so it shouldn't
+            // claim the slot.
+            $reverseMove->accounting_source_type = null;
+            $reverseMove->accounting_source_id = null;
             $reverseMove->save();
 
             foreach ($move->lines as $line) {

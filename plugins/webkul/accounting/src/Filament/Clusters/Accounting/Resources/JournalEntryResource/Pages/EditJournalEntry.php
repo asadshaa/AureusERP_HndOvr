@@ -59,7 +59,7 @@ class EditJournalEntry extends EditRecord
                 ->activityPlans($this->getRecord()->activityPlans()),
             BaseActions\ConfirmAction::make(),
             BaseActions\CancelAction::make(),
-            BaseActions\ReverseAction::make(),
+            BaseActions\ReverseAction::make()->setResource(JournalEntryResource::class),
             BaseActions\ResetToDraftAction::make(),
             DeleteAction::make(),
         ];
