@@ -108,15 +108,26 @@ Application defects and environment blockers are listed separately. "Code-verifi
 ### DEF-008 · Other company-owned dropdowns list every company's records
 - **Module:** Accounts configuration; Sales; Purchases
 - **Severity:** Medium
-- **Status:** Open. Not fixed this pass — see below.
-- **Actual:**
+- **Status:** **FIXED.**
+- **Actual (before fix):**
   - Journal form account pickers have no company filter: default, income, expense, suspense, payment and allowed accounts (`JournalResource.php:118–318`).
   - The Journal company field uses `Company::pluck('name','id')` (line 370, verified).
   - Tax repartition account pickers (`TaxResource.php:175, 234`) and the tax group picker (`:103`) are unscoped.
   - Sales and Purchase order company pickers use `withTrashed()` and list every company, including deleted ones, instead of `allowedCompanies()`.
   - The order company filters (`RelationshipConstraint::make('company')`) list every company.
-- **Evidence:** From the scoping audit. The `Company::pluck` line was verified directly.
-- **Why not fixed this pass:** This is a long tail of individually small picker fixes across many files. DEF-005/006/007 (the resources' own list/edit-page scoping, and the two highest-traffic payment/invoice journal pickers) were prioritized as the higher-value, lower-risk fixes. Recommend a dedicated follow-up pass through this specific list.
+- **Fix:**
+  - `JournalResource.php`: added `modifyQueryUsing: fn ($query) => $query->whereHas('companies', fn ($q) => $q->where('companies.id', ...))` to `default_account_id`, `profit_account_id`, `loss_account_id`, `suspense_account_id`, both `payment_account_id` pickers (inbound/outbound payment-method repeaters), and `invoices_journal_accounts`. Inside the payment-method repeaters, used `Auth::user()?->default_company_id` directly rather than a relative `Get()` path, since a repeater's `Get $get` closure is scoped to the repeater item, not the parent form. Tightened the disabled `company_id` field's own `options()` to the user's company only.
+  - `TaxResource.php`: `tax_group_id` now reuses `TaxGroupResource`'s own "`company_id` IS NULL is a legitimate global row" exception (this picker isn't routed through that resource's query, so the rule has to be repeated here). Both invoice/refund repartition-line `account_id` pickers scoped the same way as Journal's repeater fields.
+  - Sales `QuotationResource.php` and Purchases `OrderResource.php`/`PurchaseAgreementResource.php`: replaced each order form's `company_id` picker (`->withTrashed()` + a manual "(Deleted)" label workaround) with the same `allowedCompanies()`-scoped pattern already used by `TeamResource.php`'s own company picker. Each order table's `RelationshipConstraint::make('company')` filter (previously listing every company) now uses the same `allowedCompanies()` list via `IsRelatedToOperator::modifyRelationshipQueryUsing()`.
+  - `sales/OrderResource`, `sales/OrderToInvoiceResource`, `sales/OrderToUpsellResource` and `purchases/QuotationResource` (RFQ) all extend one of the two edited base resources without overriding `form()`/`table()` — confirmed via class-hierarchy inspection, not assumed — so they inherit these fixes automatically without separate edits.
+- **Verified:** `php -l` on all 5 changed files. `Livewire::test(...)->assertOk()` on Journal's and Tax's Create pages (both the `accounts` and `accounting`-cluster copies) confirms the new closures don't break form rendering. Direct `tinker` check against real data: `Auth::user()->allowedCompanies()->pluck('companies.id')` resolves to exactly `[1]` (Truck It In) for every one of the 22 real seeded users — no user's default company falls outside their allowed set, so this picker isn't hiding anything a legitimate user needs.
+- **Testing caveat (pre-existing, not caused by this fix):** every Filament page test in the `sales`/`purchases` plugins that boots the `inventories` plugin — including the unmodified `OrderResourceTest.php` — currently fails in this environment with an `inventories_operation_types.company_id` foreign-key violation, because `aureuserp_testing` has accumulated roughly 20 orphaned factory-created companies from past test runs whose IDs collide with the seeder's fixed warehouse/location IDs. Confirmed pre-existing by running the untouched `OrderResourceTest.php` and observing the identical failure with zero changes from this fix applied. This blocked full Livewire-render verification for the sales/purchases half of this fix; it was instead verified via `php -l`, class-hierarchy inspection, and the tinker check above against real data. Recommend a follow-up to reset/truncate `aureuserp_testing`'s polluted company rows (new: see ENV-007 below).
+- **Files:**
+  - `plugins/webkul/accounts/src/Filament/Resources/JournalResource.php`
+  - `plugins/webkul/accounts/src/Filament/Resources/TaxResource.php`
+  - `plugins/webkul/sales/src/Filament/Clusters/Orders/Resources/QuotationResource.php`
+  - `plugins/webkul/purchases/src/Filament/Admin/Clusters/Orders/Resources/OrderResource.php`
+  - `plugins/webkul/purchases/src/Filament/Admin/Clusters/Orders/Resources/PurchaseAgreementResource.php`
 
 ### DEF-009 · Invoice/bill posting operations have no per-operation permission
 - **Module:** Accounts → Invoice/Bill actions (Confirm, Cancel, Pay, Reverse, Reset to Draft, Set as Checked)
@@ -173,8 +184,9 @@ Application defects and environment blockers are listed separately. "Code-verifi
 | ID | Blocker | Effect |
 |---|---|---|
 | ENV-001 | The tester will not type user passwords into login forms, and Claude-in-Chrome cannot reach `localhost:8000`. | Browser/UI click-through needs the user to drive it. Flows were tested server-side with `Auth::loginUsingId()` against real users instead. |
-| ENV-002 | Only one active company exists in live data (the other 5 are soft-deleted). | Cross-company leakage cannot be demonstrated end-to-end on live data. The isolation defects above are code-verified. |
+| ENV-002 | Only one company exists in live data (the other 5 were soft-deleted, and per DEF-011 were then permanently removed — this deployment is solely for Truck It In). | Cross-company leakage cannot be demonstrated end-to-end on live data. The isolation defects above are code-verified. |
 | ENV-003 | Test DB factory gap: creating a `Journal` via factory violates the `accounts_journals.suspense_account_id` FK. | Many accounting feature tests fail before reaching their assertions. Confirmed pre-existing with `git stash` A/B runs (same counts with and without today's changes). |
 | ENV-004 | Test helper gap: `plugins/webkul/accounts/tests/Helpers/AccountHelper.php:70` expects a seeded user (`ModelNotFoundException`). `inventories/database/seeders/LocationSeeder.php:53` has a null `$user`. | Invoice, credit-note, refund, payment and inventory workflow tests fail in setup. Pre-existing. |
 | ENV-005 | No draft journal entry exists in the live DB. | The period lock was verified at service level and on all three posting call sites, but not by confirming a real draft through the UI. |
 | ENV-006 | The new `accounts_period_locks` migration had to be run manually on `aureuserp_testing`. The test DB is not auto-migrated. | Any future migration will show up as test failures until it is applied to the test DB. |
+| ENV-007 | `aureuserp_testing` has accumulated ~20 orphaned factory-created companies from past test runs (found while verifying DEF-008), whose IDs collide with fixed warehouse/location IDs the `inventories` plugin seeder expects. | Every Filament page test across `sales`/`purchases` that boots the `inventories` plugin fails with an `inventories_operation_types.company_id` FK violation, including tests with zero relevant code changes. Confirmed pre-existing via the untouched `OrderResourceTest.php`. Needs a reset/truncate of the test DB's `companies` table (or a `migrate:fresh` on `aureuserp_testing`), not a code fix. |

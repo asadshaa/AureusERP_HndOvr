@@ -34,7 +34,7 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 - Commissioned/ran a full code audit across accounting, accounts, employees, time-off, timesheets, support, recruitments, sales, purchases and partners for `getEloquentQuery()` company scoping and unscoped Select/relationship pickers.
 - Confirmed correctly-scoped: BankStatement, BankTransactionMapping, Document, InboundTransmission, JournalEntry, JournalItem, ManualAdjustment, Account (Chart of Accounts), BankMappingRule, BusinessRule, DriveIngestionClassification, ExchangeRate, FsTag, ImportProfile, ImportRun, PartyClassification, Peer, Invoice, Bill, Payment, CreditNote, Refund, Employee, Department, AttendanceRecord, EmployeeRequestType, PerformanceCycle/Review, EmployeeSkill, EmployeeRequest, Allocation, TimeOff, Timesheet, ApprovalRequest, ApprovalWorkflow, Applicant/Candidate/JobByPosition/Stage.
 - Found and fixed real leaks: Journal, Tax, TaxGroup, Sales Quotations/Orders, Purchase RFQs/Orders/Agreements (DEF-005, DEF-006), and the Payment/Invoice/Bill journal-picker defaults (DEF-007).
-- Left open (documented, not fixed): a long tail of individual account/company Select pickers across Journal, Tax, and order-form company fields (DEF-008).
+- DEF-008 resolved: the remaining long tail of individual account/company Select pickers across Journal, Tax, and Sales/Purchase order-form company fields (plus their table filters) are now company-scoped — see `APP_TESTING_ERRORS.md` for the full per-file breakdown.
 - DEF-011 resolved: client decision obtained (Truck It In only, no global sharing). Fixed, verified, and the 5 leftover non-Truck-It-In companies (all already soft-deleted demo/seed data) were permanently removed as a companion cleanup, along with their 4 unused demo journals — nothing else in the whole app referenced them (checked every `restrictOnDelete`/`cascadeOnDelete` company foreign key before deleting).
 
 ### Server-side authorization
@@ -77,13 +77,13 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 | DEF-005 | Journal/Tax/TaxGroup not company-scoped | High | **RETEST: PASS** |
 | DEF-006 | Sales/Purchase orders not company-scoped | High | **RETEST: PASS** |
 | DEF-007 | Payment/Invoice/Bill journal picker company leak | Medium–High | **RETEST: PASS** (BANK-type combination untestable — pre-existing ENV-003 gap, not a fix defect) |
-| DEF-008 | Remaining unscoped account/company pickers | Medium | Open — documented, not fixed this pass |
+| DEF-008 | Remaining unscoped account/company pickers | Medium | **FIXED** (sales/purchases half verified via `php -l`/hierarchy/tinker only — pre-existing ENV-007 test-DB pollution blocked live Livewire rendering there; accounts half fully Livewire-verified) |
 | DEF-009 | No per-operation permission on invoice/bill actions | Medium | **RETEST: PASS** (client decision obtained, fixed and verified) |
 | DEF-010 | Users defaulted to a deleted company | Low | **RETEST: PASS** (data fix) |
 | DEF-011 | Partners shared across companies | Needs decision | **RETEST: PASS** (client decision obtained, fixed and verified) |
 | DEF-012 | Full test suite fatal error | High (for CI) | **RETEST: PASS** |
 
-**11 of 12 documented defects fixed and independently retested — all PASS. Only DEF-008 remains open, deferred for scope/time reasons rather than a rushed or incomplete fix.**
+**All 12 documented defects are now fixed.** 11 were independently retested (all PASS); DEF-008 was fixed in a follow-up pass and verified via `php -l`, class-hierarchy inspection and a live/factory-driven Livewire render where the environment allowed it (accounts) — see `APP_TESTING_ERRORS.md` for the per-file breakdown and the one honest testing caveat (ENV-007, pre-existing test-DB pollution, not a fix defect).
 
 ## Retest methodology (this pass)
 
@@ -98,4 +98,4 @@ Every retest deliberately went beyond re-reading the original fix summary:
 ## Remaining for next session
 
 - Live browser click-through for the fixes with a UI surface (DEF-002, DEF-003, DEF-004), since this retest — like the original fix pass — was still server-side only (see ENV-001).
-- A follow-up pass on DEF-008's remaining picker list.
+- Reset/truncate `aureuserp_testing`'s polluted `companies` table (ENV-007) so the `sales`/`purchases` Filament test suites can run again — currently every test in those plugins that boots the `inventories` plugin fails on an unrelated FK violation, pre-existing and unrelated to any fix this session.
