@@ -121,10 +121,15 @@ Application defects and environment blockers are listed separately. "Code-verifi
 ### DEF-009 · Invoice/bill posting operations have no per-operation permission
 - **Module:** Accounts → Invoice/Bill actions (Confirm, Cancel, Pay, Reverse, Reset to Draft, Set as Checked)
 - **Severity:** Medium (design gap)
-- **Status:** Open. Not fixed this pass.
-- **Actual:** None of the action classes call `->authorize()`, and `AccountManager` performs no `can()`/Gate checks. Anyone who can edit an invoice can post, cancel, pay, reverse or reset it. There is no "post invoice" permission, unlike bank and manual-adjustment journals, which require `PostJournal`.
-- **Why not fixed this pass:** Introducing a new permission (e.g. `PostInvoice`) requires deciding which existing roles should retain unconditional invoice-posting rights, granting/backfilling it consistently across the finance role bundles, and re-syncing — a design decision, not a mechanical bug fix, and the instructions for this pass call for the smallest safe fix over inventing new permission plumbing under time pressure. Flagging for a deliberate follow-up with an explicit decision on the new permission's role assignments.
-- **Files:** `plugins/webkul/accounts/src/Filament/Resources/InvoiceResource/Actions/*.php`
+- **Status:** **FIXED — RETEST: PASS.**
+- **Actual (before fix):** None of the action classes call `->authorize()`, and `AccountManager` performs no `can()`/Gate checks. Anyone who can edit an invoice can post, cancel, pay, reverse or reset it. There is no "post invoice" permission, unlike bank and manual-adjustment journals, which require `PostJournal`.
+- **Client decision:** Only whoever can post a journal (Admin, Accounting Manager) may post/pay/cancel/reverse/reset/check an invoice or bill — not HR, not a plain employee, even if they can edit one.
+- **Fix:** Added `->authorize('accounting_post_journal')` to all 6 lifecycle actions — `ConfirmAction`, `CancelAction`, `PayAction`, `ReverseAction`, `ResetToDraftAction`, `SetAsCheckedAction`. Reused the existing `AccountingPermissions::PostJournal` permission (already exactly Admin + Accounting Manager, confirmed live) rather than inventing a new one, and added it as a literal permission string rather than importing the class, since `accounts` is a lower-level plugin that `accounting` depends on, not the reverse — importing it would have inverted that dependency. `BillResource` reuses these same action classes (confirmed via `BillResource/Pages/{Edit,View}Bill.php`), so this single change covers both Invoices and Bills.
+- **Verified live:** Instantiated each action and called `isAuthorized()` as 4 real users — Admin and Accounting Manager both `true` on Confirm/Pay/Reverse; HR Manager and Employee both `false`.
+- **Tests:** `InvoiceResourceTest`/`BillResourceTest`'s 14 lifecycle-action tests initially failed correctly (their fixtures only granted `view`/`update`, not `PostJournal` — exactly the gap this fix closes). Updated both test files' `FilamentHelper::actingAs(...)` calls for those specific tests to also grant `accounting_post_journal`, leaving non-lifecycle tests (list/create) untouched. Full suite after the fixture update: 2 failed/19 passed, identical to the pre-existing baseline (confirmed via `git stash`) — the 2 failures are an unrelated mail-sending assertion and a partner-email-autofill assertion. Broader `PaymentStateTest`/`CreditNoteTest`/`RefundTest`/`JournalEntryTest` (admin-tier fixtures): 76 passed.
+- **Files:**
+  - `plugins/webkul/accounts/src/Filament/Resources/InvoiceResource/Actions/{ConfirmAction,CancelAction,PayAction,ReverseAction,ResetToDraftAction,SetAsCheckedAction}.php`
+  - `plugins/webkul/accounts/tests/Feature/Filament/{InvoiceResourceTest,BillResourceTest}.php`
 
 ### DEF-010 · Users whose default company is a deleted company
 - **Module:** Users / Companies

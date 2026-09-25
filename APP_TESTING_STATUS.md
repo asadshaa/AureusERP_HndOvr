@@ -40,7 +40,7 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 - Commissioned/ran a full audit for Filament actions relying only on client-side `->visible()`/`->hidden()` without a matching server-side `->authorize()` or service-level re-check.
 - Confirmed protected: Approval Requests approve/reject (re-checked via `ApprovalEngine::decide()`/`canAct()`), Leave Request approve/reject (via `LeaveApprovalService`), Bank Transaction Mapping's review/generate/post actions, FX Revaluation, Bank Statement import.
 - Found and fixed: My Allocations and Management Allocations approve/refuse (DEF-002, DEF-003), posted-record deletion on Journal Entries/Invoices/Bills (DEF-004).
-- Found and documented, not fixed: Invoice/Bill lifecycle actions (Confirm/Cancel/Pay/Reverse/Reset to Draft) have no dedicated per-operation permission — anyone who can edit can perform any of them (DEF-009, flagged as a design decision).
+- Invoice/Bill lifecycle actions (Confirm/Cancel/Pay/Reverse/Reset to Draft/Set as Checked) had no dedicated per-operation permission — anyone who can edit could perform any of them. Client decision obtained: only Admin/Accounting Manager tier (the same as `PostJournal`), not HR/Employee. Fixed and verified live across 4 real users (DEF-009).
 
 ### Data integrity
 - Found 2 users (`Demo Accountant`, `Demo Approver`) whose `default_company_id` pointed at a soft-deleted company. Reassigned both to the real active company (DEF-010, fixed).
@@ -77,12 +77,12 @@ This cycle had three phases: (1) a read-only audit producing `APP_TESTING_ERRORS
 | DEF-006 | Sales/Purchase orders not company-scoped | High | **RETEST: PASS** |
 | DEF-007 | Payment/Invoice/Bill journal picker company leak | Medium–High | **RETEST: PASS** (BANK-type combination untestable — pre-existing ENV-003 gap, not a fix defect) |
 | DEF-008 | Remaining unscoped account/company pickers | Medium | Open — documented, not fixed this pass |
-| DEF-009 | No per-operation permission on invoice/bill actions | Medium | Open — needs a design decision, not fixed this pass |
+| DEF-009 | No per-operation permission on invoice/bill actions | Medium | **RETEST: PASS** (client decision obtained, fixed and verified) |
 | DEF-010 | Users defaulted to a deleted company | Low | **RETEST: PASS** (data fix) |
 | DEF-011 | Partners shared across companies | Needs decision | Open — business decision required |
 | DEF-012 | Full test suite fatal error | High (for CI) | **RETEST: PASS** |
 
-**9 of 12 documented defects fixed and independently retested — all PASS. 3 left open, each with an explicit reason (scope/time tradeoff for DEF-008, a genuine design decision needed for DEF-009 and DEF-011) rather than a rushed or incomplete fix.**
+**10 of 12 documented defects fixed and independently retested — all PASS. 2 left open, each with an explicit reason (scope/time tradeoff for DEF-008, a genuine business decision still needed for DEF-011) rather than a rushed or incomplete fix.**
 
 ## Retest methodology (this pass)
 
@@ -98,4 +98,4 @@ Every retest deliberately went beyond re-reading the original fix summary:
 
 - Live browser click-through for the fixes with a UI surface (DEF-002, DEF-003, DEF-004), since this retest — like the original fix pass — was still server-side only (see ENV-001).
 - A follow-up pass on DEF-008's remaining picker list.
-- A decision from the client/product owner on DEF-009 (new invoice-posting permission — which roles should keep unconditional posting rights?) and DEF-011 (should Partners be company-scoped or intentionally shared?).
+- A decision from the client/product owner on DEF-011 (should Partners be company-scoped or intentionally shared?).
