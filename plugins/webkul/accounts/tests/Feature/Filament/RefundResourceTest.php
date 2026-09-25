@@ -57,7 +57,9 @@ it('renders the refund create page', function () {
 });
 
 it('posts a draft refund through the confirm action', function () {
-    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund']);
+    // accounting_post_journal is required alongside update_account_refund
+    // for the Confirm/Cancel/Pay/Reverse/ResetToDraft/SetAsChecked actions (DEF-009).
+    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund', 'accounting_post_journal']);
 
     $refund = AccountHelper::invoice(MoveType::IN_REFUND, null, null, ['invoice_date' => now()]);
     AccountHelper::productLine($refund, AccountHelper::account('expense'), qty: 2, priceUnit: 100);
@@ -72,7 +74,8 @@ it('posts a draft refund through the confirm action', function () {
 });
 
 it('cancels a draft refund through the cancel action', function () {
-    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund']);
+    // accounting_post_journal is required alongside update_account_refund (DEF-009).
+    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund', 'accounting_post_journal']);
 
     $refund = AccountHelper::invoice(MoveType::IN_REFUND, null, null, ['invoice_date' => now()]);
 
@@ -93,7 +96,8 @@ function postedRefundRecord(): Move
 }
 
 it('resets a posted refund to draft through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund']);
+    // accounting_post_journal is required alongside update_account_refund (DEF-009).
+    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund', 'accounting_post_journal']);
 
     $refund = postedRefundRecord();
 
@@ -105,7 +109,8 @@ it('resets a posted refund to draft through the action', function () {
 });
 
 it('marks a posted refund as checked through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund']);
+    // accounting_post_journal is required alongside update_account_refund (DEF-009).
+    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund', 'accounting_post_journal']);
 
     $refund = postedRefundRecord();
 
@@ -117,7 +122,8 @@ it('marks a posted refund as checked through the action', function () {
 });
 
 it('registers a full payment and marks the refund paid through the action', function () {
-    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund']);
+    // accounting_post_journal is required alongside update_account_refund (DEF-009).
+    FilamentHelper::actingAs(['view_any_account_refund', 'update_account_refund', 'accounting_post_journal']);
 
     AccountHelper::bankJournal();
 
@@ -125,8 +131,8 @@ it('registers a full payment and marks the refund paid through the action', func
 
     Livewire::test(EditRefund::class, ['record' => $refund->id])
         ->assertOk()
-        ->callAction(PayAction::class);
+        ->callAction(PayAction::class)
+        ->assertHasNoActionErrors();
 
     expect($refund->refresh()->payment_state)->toBe(PaymentState::PAID);
 });
-
