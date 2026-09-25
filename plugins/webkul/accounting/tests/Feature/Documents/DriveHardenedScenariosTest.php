@@ -213,6 +213,11 @@ it('isolates per-file failures in discover() so remaining batch files succeed', 
 
             return $this->inner->downloadFileContent($fileId);
         }
+
+        public function trashFile(string $fileId): void
+        {
+            $this->inner->trashFile($fileId);
+        }
     };
     app()->instance(DriveClient::class, $client);
 

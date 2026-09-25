@@ -48,6 +48,7 @@ use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint\Oper
 use Filament\Tables\Filters\QueryBuilder\Constraints\TextConstraint;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
@@ -225,7 +226,9 @@ class InvoiceResource extends Resource
                                                     ->relationship(
                                                         'journal',
                                                         'name',
-                                                        modifyQueryUsing: fn (Builder $query) => $query->where('type', JournalType::SALE),
+                                                        modifyQueryUsing: fn (Builder $query) => $query
+                                                            ->where('company_id', Auth::user()?->default_company_id)
+                                                            ->where('type', JournalType::SALE),
                                                     )
                                                     ->searchable()
                                                     ->preload()
@@ -734,6 +737,16 @@ class InvoiceResource extends Resource
                     EditAction::make(),
                     DeleteAction::make()
                         ->hidden(fn (Model $record): bool => $record->state == MoveState::POSTED)
+                        // hidden() only hides the button; before() is the server-side
+                        // check that actually blocks a posted invoice from being
+                        // deleted. Correcting a posted invoice must go through
+                        // Reverse, not deletion.
+                        ->before(function (Model $record, DeleteAction $action): void {
+                            if ($record->state == MoveState::POSTED) {
+                                Notification::make()->danger()->title('Posted invoices cannot be deleted.')->body('Use Reverse to create a correcting entry instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -745,6 +758,12 @@ class InvoiceResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action): void {
+                            if ($records->contains(fn (Model $record): bool => $record->state == MoveState::POSTED)) {
+                                Notification::make()->danger()->title('Posted invoices cannot be deleted.')->body('Deselect any posted invoices, or use Reverse on them instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()

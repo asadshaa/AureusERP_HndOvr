@@ -194,10 +194,14 @@ class PaymentResource extends Resource
                                             ->relationship(
                                                 'journal',
                                                 'name',
-                                                modifyQueryUsing: fn (Builder $query) => $query->whereIn('type', [JournalType::BANK, JournalType::CASH, JournalType::CREDIT_CARD]),
+                                                modifyQueryUsing: fn (Builder $query) => $query
+                                                    ->where('company_id', Auth::user()?->default_company_id)
+                                                    ->whereIn('type', [JournalType::BANK, JournalType::CASH, JournalType::CREDIT_CARD]),
                                             )
                                             ->default(function () {
-                                                $journal = Journal::whereIn('type', [JournalType::BANK, JournalType::CASH, JournalType::CREDIT_CARD])->first();
+                                                $journal = Journal::where('company_id', Auth::user()?->default_company_id)
+                                                    ->whereIn('type', [JournalType::BANK, JournalType::CASH, JournalType::CREDIT_CARD])
+                                                    ->first();
 
                                                 return $journal?->id;
                                             })

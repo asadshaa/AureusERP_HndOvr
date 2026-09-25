@@ -48,6 +48,7 @@ use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint\Oper
 use Filament\Tables\Filters\QueryBuilder\Constraints\TextConstraint;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
@@ -241,7 +242,9 @@ class BillResource extends Resource
                                                     ->relationship(
                                                         'journal',
                                                         'name',
-                                                        modifyQueryUsing: fn (Builder $query) => $query->where('type', JournalType::PURCHASE),
+                                                        modifyQueryUsing: fn (Builder $query) => $query
+                                                            ->where('company_id', Auth::user()?->default_company_id)
+                                                            ->where('type', JournalType::PURCHASE),
                                                     )
                                                     ->searchable()
                                                     ->preload()
@@ -678,6 +681,12 @@ class BillResource extends Resource
                     EditAction::make(),
                     DeleteAction::make()
                         ->hidden(fn (Model $record): bool => $record->state == MoveState::POSTED)
+                        ->before(function (Model $record, DeleteAction $action): void {
+                            if ($record->state == MoveState::POSTED) {
+                                Notification::make()->danger()->title('Posted bills cannot be deleted.')->body('Use Reverse to create a correcting entry instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -689,6 +698,12 @@ class BillResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action): void {
+                            if ($records->contains(fn (Model $record): bool => $record->state == MoveState::POSTED)) {
+                                Notification::make()->danger()->title('Posted bills cannot be deleted.')->body('Deselect any posted bills, or use Reverse on them instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()

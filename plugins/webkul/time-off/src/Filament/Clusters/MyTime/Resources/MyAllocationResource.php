@@ -189,44 +189,12 @@ class MyAllocationResource extends Resource
                                 ->title(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.delete.notification.title'))
                                 ->body(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.delete.notification.body'))
                         ),
-                    Action::make('approve')
-                        ->icon('heroicon-o-check-circle')
-                        ->color('success')
-                        ->hidden(fn ($record) => $record->state === State::VALIDATE_TWO->value)
-                        ->action(function ($record) {
-                            if ($record->state === State::VALIDATE_ONE->value) {
-                                $record->update(['state' => State::VALIDATE_TWO->value]);
-                            } else {
-                                $record->update(['state' => State::VALIDATE_TWO->value]);
-                            }
-
-                            Notification::make()
-                                ->success()
-                                ->title(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.approve.notification.title'))
-                                ->body(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.approve.notification.body'))
-                                ->send();
-                        })
-                        ->label(function ($record) {
-                            if ($record->state === State::VALIDATE_ONE->value) {
-                                return __('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.approve.title.validate');
-                            } else {
-                                return __('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.approve.title.approve');
-                            }
-                        }),
-                    Action::make('refuse')
-                        ->icon('heroicon-o-x-circle')
-                        ->hidden(fn ($record) => $record->state === State::REFUSE->value)
-                        ->color('danger')
-                        ->action(function ($record) {
-                            $record->update(['state' => State::REFUSE->value]);
-
-                            Notification::make()
-                                ->success()
-                                ->title(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.refused.notification.title'))
-                                ->body(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.refused.notification.body'))
-                                ->send();
-                        })
-                        ->label(__('time-off::filament/clusters/my-time/resources/my-allocation.table.actions.refused.title')),
+                    // No Approve/Refuse actions here, deliberately: this resource's
+                    // getEloquentQuery() (below) scopes every row to the viewer's OWN
+                    // allocations, so an approve/refuse button on this screen could
+                    // only ever be self-approval. Approving someone's allocation is
+                    // the Management cluster's AllocationResource's job, which is
+                    // gated to whoever actually has the manager/HR permission.
                 ]),
             ])
             ->toolbarActions([

@@ -271,6 +271,12 @@ final class AccountingPermissions
             self::FxRevaluationPage,
             self::DeleteDocuments,
             self::ReleasePayment,
+            // Closing/reopening an accounting period is a Controller/Accounting
+            // Manager/Admin responsibility -- an Accountant can't even post a
+            // journal (PostJournal is excluded above), so they must not be able
+            // to lock or unlock the periods that posting checks against either.
+            self::ManagePeriodLock,
+            self::PeriodLockPage,
             // Pairing a peer creates a trust relationship with an outside
             // organisation -- an administrative act, not bookkeeping. Sending
             // and reviewing inbound invoices ARE bookkeeping, so those stay.

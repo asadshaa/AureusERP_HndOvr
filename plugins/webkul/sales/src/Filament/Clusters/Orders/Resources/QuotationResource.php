@@ -2164,7 +2164,11 @@ class QuotationResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        // Company isolation: without this, every company's quotations/orders
+        // show up in the list, and a user can open/edit another company's
+        // sale order directly by URL.
         return parent::getEloquentQuery()
+            ->where('company_id', Auth::user()?->default_company_id)
             ->orderByDesc('id');
     }
 }

@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Employee\Support\HrPermissions;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
 use Webkul\TimeOff\Enums\AllocationType;
@@ -261,8 +262,21 @@ class AllocationResource extends Resource
                     Action::make('approve')
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
+                        ->authorize(HrPermissions::ApproveLeave)
                         ->hidden(fn ($record) => $record->state === State::VALIDATE_TWO->value)
                         ->action(function ($record) {
+                            // getEloquentQuery() includes the viewer's own employee id
+                            // (HrHierarchyService::visibleEmployeeIds() always seeds the
+                            // tree with the caller themselves), so ->authorize() alone
+                            // isn't enough here -- a manager holding ApproveLeave would
+                            // still see their own row and could approve it. Block that
+                            // explicitly rather than relying on nobody clicking it.
+                            if ((int) $record->employee?->user_id === (int) Auth::id()) {
+                                Notification::make()->danger()->title('You cannot approve your own leave allocation.')->send();
+
+                                return;
+                            }
+
                             if ($record->state === State::VALIDATE_ONE->value) {
                                 $record->update(['state' => State::VALIDATE_TWO->value]);
                             } else {
@@ -286,7 +300,14 @@ class AllocationResource extends Resource
                         ->icon('heroicon-o-x-circle')
                         ->hidden(fn ($record) => $record->state === State::REFUSE->value)
                         ->color('danger')
+                        ->authorize(HrPermissions::ApproveLeave)
                         ->action(function ($record) {
+                            if ((int) $record->employee?->user_id === (int) Auth::id()) {
+                                Notification::make()->danger()->title('You cannot refuse your own leave allocation.')->send();
+
+                                return;
+                            }
+
                             $record->update(['state' => State::REFUSE->value]);
 
                             Notification::make()

@@ -1734,7 +1734,10 @@ class OrderResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        // Company isolation: without this, every company's purchase
+        // orders/RFQs show up in the list and are directly editable by URL.
         return parent::getEloquentQuery()
+            ->where('company_id', Auth::user()?->default_company_id)
             ->orderByDesc('id');
     }
 }

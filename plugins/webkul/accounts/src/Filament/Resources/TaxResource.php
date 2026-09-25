@@ -59,6 +59,14 @@ class TaxResource extends Resource
 
     protected static ?SubNavigationPosition $subNavigationPosition = SubNavigationPosition::Start;
 
+    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        // Company isolation, reusing the model's own scope (Tax::scopeForCompany)
+        // rather than re-deriving the filter here.
+        return parent::getEloquentQuery()
+            ->forCompany(\Illuminate\Support\Facades\Auth::user()?->default_company_id);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema

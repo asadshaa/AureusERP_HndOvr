@@ -61,6 +61,15 @@ class JournalResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    public static function getEloquentQuery(): Builder
+    {
+        // Company isolation: without this, one company's journals (and their
+        // suspense/default/payment accounts) show up in every other
+        // company's list and pickers.
+        return parent::getEloquentQuery()
+            ->where('company_id', Auth::user()?->default_company_id);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema

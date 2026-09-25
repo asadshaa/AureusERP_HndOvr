@@ -29,6 +29,17 @@ use Webkul\Account\Models\TaxGroup;
 
 class TaxGroupResource extends Resource
 {
+    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        // company_id is nullable on this model -- a null row is a genuinely
+        // global/shared tax group by design, so it stays visible everywhere.
+        // A row with a company_id must match the viewer's own company.
+        $companyId = \Illuminate\Support\Facades\Auth::user()?->default_company_id;
+
+        return parent::getEloquentQuery()
+            ->where(fn ($query) => $query->whereNull('company_id')->orWhere('company_id', $companyId));
+    }
+
     protected static ?string $model = TaxGroup::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-group';

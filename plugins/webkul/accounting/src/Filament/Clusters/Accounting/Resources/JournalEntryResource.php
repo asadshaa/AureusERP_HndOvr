@@ -418,6 +418,17 @@ class JournalEntryResource extends Resource
                             return static::getUrl('edit', ['record' => $record]);
                         }),
                     DeleteAction::make()
+                        // Never delete posted accounting history -- correcting a
+                        // posted move must go through Reverse, not deletion.
+                        // Hidden() alone only hides the button; before() is the
+                        // server-side check that actually blocks it.
+                        ->hidden(fn (Model $record): bool => $record->state === MoveState::POSTED)
+                        ->before(function (Model $record, \Filament\Actions\DeleteAction $action): void {
+                            if ($record->state === MoveState::POSTED) {
+                                Notification::make()->danger()->title('Posted journal entries cannot be deleted.')->body('Use Reverse to create a correcting entry instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -429,6 +440,12 @@ class JournalEntryResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->before(function (\Illuminate\Database\Eloquent\Collection $records, \Filament\Actions\DeleteBulkAction $action): void {
+                            if ($records->contains(fn (Model $record): bool => $record->state === MoveState::POSTED)) {
+                                Notification::make()->danger()->title('Posted journal entries cannot be deleted.')->body('Deselect any posted entries, or use Reverse on them instead.')->send();
+                                $action->halt();
+                            }
+                        })
                         ->successNotification(
                             Notification::make()
                                 ->success()
