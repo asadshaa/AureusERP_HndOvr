@@ -174,6 +174,7 @@ class DriveClassificationService
         }
 
         $duplicate = null;
+        $duplicateClassification = null;
         if ($extracted['document_type']->isInvoiceLike() && $partner && $extracted['amount'] !== null) {
             $duplicate = $this->detectDuplicate(
                 $ingestion->company_id,
@@ -183,10 +184,36 @@ class DriveClassificationService
                 $extracted['amount'],
                 $extracted['currency_code'],
             );
+
+            if (! $duplicate) {
+                // detectDuplicate() above only catches a duplicate once ONE of the
+                // two copies has already posted. Two copies of the same document
+                // (e.g. the same invoice scanned twice under different filenames)
+                // can otherwise both sit in the review queue at once, each looking
+                // individually clean, and both get approved -- a real duplicate
+                // posting neither classify() call alone would ever have caught.
+                $duplicateClassification = $this->detectDuplicatePendingClassification(
+                    $classification,
+                    $ingestion->company_id,
+                    $extracted['invoice_number'],
+                    $partner->id,
+                    $extracted['amount'],
+                    $extracted['currency_code'],
+                );
+            }
         }
 
         if ($duplicate) {
             $issues[] = "Possible duplicate of existing move #{$duplicate->id} (\"{$duplicate->name}\") -- same company, partner, amount and currency.";
+            $classification->validation_status = DriveClassificationStatus::DuplicateSuspected;
+            $classification->validation_issues = $issues;
+            $classification->save();
+
+            return $classification;
+        }
+
+        if ($duplicateClassification) {
+            $issues[] = "Possible duplicate of another pending document, classification #{$duplicateClassification->id} (\"{$duplicateClassification->driveIngestion?->filename}\") -- same partner, invoice number and amount, and it hasn't been posted yet either. Review both before approving.";
             $classification->validation_status = DriveClassificationStatus::DuplicateSuspected;
             $classification->validation_issues = $issues;
             $classification->save();
@@ -501,6 +528,40 @@ class DriveClassificationService
                 bcsub($amount, '0.01', 4),
                 bcadd($amount, '0.01', 4),
             ])
+            ->first();
+    }
+
+    /**
+     * Catches the case detectDuplicate() above structurally cannot: two
+     * different Drive files describing the same real document (e.g. scanned
+     * twice under different filenames), both still sitting unresolved in
+     * this review queue with neither posted yet. Matches on the same
+     * signal detectDuplicate() uses -- partner, invoice number, amount,
+     * currency -- against sibling classifications instead of posted moves.
+     */
+    private function detectDuplicatePendingClassification(
+        DriveIngestionClassification $classification,
+        int $companyId,
+        ?string $invoiceNumber,
+        int $partnerId,
+        string $amount,
+        ?string $currencyCode,
+    ): ?DriveIngestionClassification {
+        if ($invoiceNumber === null) {
+            return null;
+        }
+
+        return DriveIngestionClassification::query()
+            ->where('company_id', $companyId)
+            ->where('resolved_partner_id', $partnerId)
+            ->where('extracted_invoice_number', $invoiceNumber)
+            ->when($currencyCode, fn ($query) => $query->where('extracted_currency_code', $currencyCode))
+            ->whereBetween('extracted_amount', [
+                bcsub($amount, '0.01', 4),
+                bcadd($amount, '0.01', 4),
+            ])
+            ->whereNot('validation_status', DriveClassificationStatus::Rejected)
+            ->when($classification->exists, fn ($query) => $query->whereKeyNot($classification->id))
             ->first();
     }
 
