@@ -175,6 +175,7 @@ class ViewDriveIngestionClassification extends ViewRecord
                                 'context' => $context,
                             ]);
                             $record->update(['approval_request_id' => $existing->id]);
+                            $approvalRequest = $existing;
                         } else {
                             $request = $approvals->submit(
                                 $record,
@@ -184,13 +185,16 @@ class ViewDriveIngestionClassification extends ViewRecord
                                 $context,
                             );
                             $record->update(['approval_request_id' => $request->id]);
+                            $approvalRequest = $request;
                         }
                     }
 
                     Notification::make()
                         ->success()
                         ->title('Classification Resolved')
-                        ->body('The document has been mapped to GL account and submitted for approval.')
+                        ->body(isset($approvalRequest)
+                            ? 'The document has been mapped to GL account and submitted for approval. '.$approvals->describeCurrentApprover($approvalRequest)
+                            : 'The document has been mapped to GL account and submitted for approval.')
                         ->send();
 
                     $this->refreshFormData(['validation_status', 'resolved_fs_tag_id', 'resolved_partner_id', 'resolved_account_id']);

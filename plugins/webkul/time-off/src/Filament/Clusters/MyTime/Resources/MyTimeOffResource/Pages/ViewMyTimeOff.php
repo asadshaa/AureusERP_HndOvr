@@ -9,6 +9,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Chatter\Filament\Actions\ChatterAction;
+use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
@@ -51,11 +52,12 @@ class ViewMyTimeOff extends ViewRecord
                 ->action(function (): void {
                     /** @var Leave $record */
                     $record = $this->getRecord();
-                    app(LeaveApprovalService::class)->submit($record, Auth::user());
+                    $request = app(LeaveApprovalService::class)->submit($record, Auth::user());
 
                     Notification::make()
                         ->success()
                         ->title('Leave submitted for approval')
+                        ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
                         ->send();
 
                     $this->getRecord()->refresh();

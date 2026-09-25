@@ -86,6 +86,7 @@ use Webkul\Security\Models\User;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Models\Calendar;
 use Webkul\Support\Models\Country;
+use Webkul\Support\Services\ApprovalEngine;
 
 class EmployeeResource extends Resource
 {
@@ -1422,8 +1423,11 @@ class EmployeeResource extends Resource
                         Select::make('salary_currency_id')->relationship('salaryCurrency', 'name')->searchable()->preload(),
                     ])
                     ->action(function (Employee $record, array $data): void {
-                        app(EmployeeSensitiveChangeService::class)->submit($record, Auth::user(), $data);
-                        Notification::make()->success()->title('Sensitive change submitted for approval')->send();
+                        $request = app(EmployeeSensitiveChangeService::class)->submit($record, Auth::user(), $data);
+                        Notification::make()->success()
+                            ->title('Sensitive change submitted for approval')
+                            ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                            ->send();
                     }),
                 ViewAction::make()
                     ->outlined(),

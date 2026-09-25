@@ -18,7 +18,9 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
+use Throwable;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Models\Account;
 use Webkul\Accounting\Enums\BankPostingStatus;
@@ -36,6 +38,7 @@ use Webkul\Accounting\Services\FsTagService;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
+use Webkul\Support\Services\ApprovalEngine;
 
 class BankTransactionMappingResource extends Resource
 {
@@ -322,7 +325,7 @@ class BankTransactionMappingResource extends Resource
                     ->color(fn (BankTransactionMapping $record): ?string => $record->fs_tag_id === null && $record->fs_tag_raw_code !== null ? 'danger' : null)
                     ->tooltip(fn (BankTransactionMapping $record): ?string => $record->fs_tag_issue),
                 TextColumn::make('tax_treatment')->placeholder('—')->toggleable(),
-                TextColumn::make('company.name')->label('Entity')->toggleable(),
+                TextColumn::make('company.name')->label('Entity')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('review_status')->badge(),
                 TextColumn::make('transferMatch.match_reference')->label('Transfer Match ID')->placeholder('—'),
                 TextColumn::make('posting_status')->badge(),
@@ -356,8 +359,15 @@ class BankTransactionMappingResource extends Resource
                         && $record->review_status !== BankReviewStatus::Approved
                         && app(BankMappingService::class)->requiresConfiguredApproval($record))
                     ->action(function (BankTransactionMapping $record): void {
-                        $request = app(BankMappingService::class)->submit($record, Auth::user());
-                        Notification::make()->success()->title("Approval request APR-{$request->id} is in the shared approval queue.")->send();
+                        try {
+                            $request = app(BankMappingService::class)->submit($record, Auth::user());
+                            Notification::make()->success()
+                                ->title("Approval request APR-{$request->id} is in the shared approval queue.")
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                                ->send();
+                        } catch (Throwable $e) {
+                            static::notifyFailure('Could not submit for approval', $e);
+                        }
                     }),
                 Action::make('approve')
                     ->authorize(AccountingPermissions::ReviewBankTransactions)
@@ -365,8 +375,12 @@ class BankTransactionMappingResource extends Resource
                     ->color('success')
                     ->visible(fn (BankTransactionMapping $record) => $record->transfer_match_id === null && $record->review_status !== BankReviewStatus::Posted)
                     ->action(function (BankTransactionMapping $record): void {
-                        app(BankMappingService::class)->approve($record, Auth::user());
-                        Notification::make()->success()->title('Mapping approved; learned rule updated.')->send();
+                        try {
+                            app(BankMappingService::class)->approve($record, Auth::user());
+                            Notification::make()->success()->title('Mapping approved; learned rule updated.')->send();
+                        } catch (Throwable $e) {
+                            static::notifyFailure('Could not approve this mapping', $e);
+                        }
                     }),
                 Action::make('approveTransfer')
                     ->authorize(AccountingPermissions::ReviewBankTransactions)
@@ -375,8 +389,12 @@ class BankTransactionMappingResource extends Resource
                     ->visible(fn (BankTransactionMapping $record) => $record->transferMatch?->status === 'suggested'
                         && $record->transferMatch?->outgoing_statement_line_id === $record->statement_line_id)
                     ->action(function (BankTransactionMapping $record): void {
-                        app(BankTransferMatchingService::class)->approve($record->transferMatch, Auth::user());
-                        Notification::make()->success()->title('Transfer pair approved.')->send();
+                        try {
+                            app(BankTransferMatchingService::class)->approve($record->transferMatch, Auth::user());
+                            Notification::make()->success()->title('Transfer pair approved.')->send();
+                        } catch (Throwable $e) {
+                            static::notifyFailure('Could not approve this transfer', $e);
+                        }
                     }),
                 Action::make('draft')
                     ->authorize(AccountingPermissions::GenerateJournal)
@@ -385,8 +403,12 @@ class BankTransactionMappingResource extends Resource
                     ->visible(fn (BankTransactionMapping $record) => $record->move_id === null
                         && ($record->review_status === BankReviewStatus::Approved || $record->transferMatch?->status === 'approved'))
                     ->action(function (BankTransactionMapping $record): void {
-                        app(BankJournalService::class)->createDraft($record);
-                        Notification::make()->success()->title('Balanced draft journal created.')->send();
+                        try {
+                            app(BankJournalService::class)->createDraft($record);
+                            Notification::make()->success()->title('Balanced draft journal created.')->send();
+                        } catch (Throwable $e) {
+                            static::notifyFailure('Could not generate the draft journal', $e);
+                        }
                     }),
                 Action::make('post')
                     ->authorize(AccountingPermissions::PostJournal)
@@ -395,8 +417,12 @@ class BankTransactionMappingResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn (BankTransactionMapping $record) => $record->posting_status === BankPostingStatus::Draft)
                     ->action(function (BankTransactionMapping $record): void {
-                        app(BankJournalService::class)->post($record, Auth::user());
-                        Notification::make()->success()->title('Journal posted to the ledger.')->send();
+                        try {
+                            app(BankJournalService::class)->post($record, Auth::user());
+                            Notification::make()->success()->title('Journal posted to the ledger.')->send();
+                        } catch (Throwable $e) {
+                            static::notifyFailure('Could not post this journal entry', $e);
+                        }
                     }),
                 Action::make('doNotPost')
                     ->authorize(AccountingPermissions::ReviewBankTransactions)
@@ -431,6 +457,24 @@ class BankTransactionMappingResource extends Resource
                 'FIELD(review_status, ?, ?, ?) DESC',
                 [BankReviewStatus::Unmapped->value, BankReviewStatus::Suggested->value, BankReviewStatus::NeedsReview->value]
             )->orderBy('statement_line_id'));
+    }
+
+    /**
+     * Shared failure notification for the review/approve/draft/post actions above.
+     * A QueryException means the database itself rejected the operation (e.g. a unique
+     * or foreign-key constraint) -- that message is raw SQL and unreadable to an
+     * accountant, so it's replaced with a plain explanation. Anything else (almost
+     * always a RuntimeException the underlying service already wrote a human sentence
+     * for, e.g. "Only reconciled, validated statements can generate journal entries.")
+     * is shown as-is, since it's already meant to be read.
+     */
+    private static function notifyFailure(string $title, Throwable $e): void
+    {
+        $body = $e instanceof QueryException
+            ? 'The database rejected this action -- this usually means the record was already processed, or a related record changed underneath it. Refresh the page, check this row\'s current status, and try again; if it keeps happening, contact support.'
+            : $e->getMessage();
+
+        Notification::make()->danger()->title($title)->body($body)->send();
     }
 
     public static function canCreate(): bool

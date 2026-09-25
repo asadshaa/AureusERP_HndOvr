@@ -275,8 +275,11 @@ class EmployeeRequestResource extends Resource
                     ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true))
                     ->action(function (EmployeeRequest $record): void {
                         try {
-                            app(EmployeeRequestService::class)->submit($record, Auth::user());
-                            Notification::make()->success()->title('Employee request submitted for approval')->send();
+                            $request = app(EmployeeRequestService::class)->submit($record, Auth::user());
+                            Notification::make()->success()
+                                ->title('Employee request submitted for approval')
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                                ->send();
                         } catch (RuntimeException $e) {
                             Notification::make()->danger()->title('Could not submit')->body($e->getMessage())->send();
                         }
@@ -436,8 +439,11 @@ class EmployeeRequestResource extends Resource
                     ->action(function (array $data): void {
                         $record = EmployeeRequest::query()->create($data);
                         try {
-                            app(EmployeeRequestService::class)->submit($record, Auth::user());
-                            Notification::make()->success()->title('Request submitted for approval')->send();
+                            $request = app(EmployeeRequestService::class)->submit($record, Auth::user());
+                            Notification::make()->success()
+                                ->title('Request submitted for approval')
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                                ->send();
                         } catch (RuntimeException $e) {
                             Notification::make()->danger()->title('Saved as draft -- could not submit')->body($e->getMessage())->send();
                         }

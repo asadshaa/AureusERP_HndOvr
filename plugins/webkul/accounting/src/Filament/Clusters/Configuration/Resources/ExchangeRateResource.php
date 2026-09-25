@@ -29,6 +29,7 @@ use Webkul\Accounting\Models\ExchangeRate;
 use Webkul\Accounting\Services\Currency\ExchangeRateApprovalService;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Support\Models\Currency;
+use Webkul\Support\Services\ApprovalEngine;
 
 class ExchangeRateResource extends Resource
 {
@@ -110,7 +111,10 @@ class ExchangeRateResource extends Resource
                     ->action(function (ExchangeRate $record): void {
                         try {
                             $request = app(ExchangeRateApprovalService::class)->submit($record, Auth::user());
-                            Notification::make()->success()->title("Approval request APR-{$request->id} is in the shared approval queue.")->send();
+                            Notification::make()->success()
+                                ->title("Approval request APR-{$request->id} is in the shared approval queue.")
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                                ->send();
                         } catch (Throwable $e) {
                             Notification::make()->danger()->title('Could not submit for approval')->body($e->getMessage())->send();
                         }

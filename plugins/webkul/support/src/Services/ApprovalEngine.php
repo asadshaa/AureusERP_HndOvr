@@ -136,6 +136,58 @@ final class ApprovalEngine
     }
 
     /**
+     * A short, human-readable "who is this waiting on right now" sentence for the
+     * request's current step, for notifications shown right after submission (e.g.
+     * "Forwarded to Accounting Manager.") instead of a vague "pending" status.
+     */
+    public function describeCurrentApprover(ApprovalRequest $request): string
+    {
+        $request->loadMissing([
+            'workflow.steps.approverUser',
+            'workflow.steps.approverRole',
+            'requester.employee.parent.user',
+            'requester.employee.department.manager.user',
+            'requester.employee.team.manager.user',
+            'subject',
+        ]);
+
+        $step = $request->currentStep();
+        if (! $step) {
+            return 'Forwarded for approval.';
+        }
+
+        if ($step->approver_user_id) {
+            return $step->approverUser?->name
+                ? "Forwarded to {$step->approverUser->name}."
+                : 'Forwarded for approval.';
+        }
+
+        if ($step->approver_role_id) {
+            return $step->approverRole?->name
+                ? "Forwarded to {$step->approverRole->name}."
+                : 'Forwarded for approval.';
+        }
+
+        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+        $manager = match ($step->hierarchy_route) {
+            'requester_manager'  => $subjectEmployee?->parent?->user,
+            'department_manager' => $subjectEmployee?->department?->manager?->user,
+            'team_manager'       => $subjectEmployee?->team?->manager?->user,
+            default              => null,
+        };
+        if ($manager?->name) {
+            return "Forwarded to {$manager->name}.";
+        }
+
+        return match ($step->hierarchy_route) {
+            'requester_manager'  => 'Forwarded to your manager.',
+            'department_manager' => 'Forwarded to the department manager.',
+            'team_manager'       => 'Forwarded to the team manager.',
+            default              => 'Forwarded for approval.',
+        };
+    }
+
+    /**
      * The subject of an approval request is often the employee-relevant
      * record itself (e.g. HR's EmployeeRequest has its own `employee`
      * relation); fall back to the requester's own employee record for

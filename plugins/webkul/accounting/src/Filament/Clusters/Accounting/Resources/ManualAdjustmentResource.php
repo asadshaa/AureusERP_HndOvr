@@ -27,6 +27,7 @@ use Webkul\Accounting\Filament\Clusters\Accounting\Resources\ManualAdjustmentRes
 use Webkul\Accounting\Models\ManualAdjustment;
 use Webkul\Accounting\Services\ManualAdjustmentService;
 use Webkul\Accounting\Support\AccountingPermissions;
+use Webkul\Support\Services\ApprovalEngine;
 
 class ManualAdjustmentResource extends Resource
 {
@@ -80,7 +81,7 @@ class ManualAdjustmentResource extends Resource
                     ->options(fn (): array => $accountSearch(''))->getSearchResultsUsing($accountSearch)->getOptionLabelUsing($accountLabel)->required(),
                 Select::make('credit_account_id')->label('Credit account')->searchable()
                     ->options(fn (): array => $accountSearch(''))->getSearchResultsUsing($accountSearch)->getOptionLabelUsing($accountLabel)->required(),
-                Textarea::make('description')->required()->columnSpanFull(),
+                Textarea::make('description')->columnSpanFull(),
                 TextInput::make('supporting_reference')->label('Supporting document/reference'),
                 TextInput::make('tax_treatment'),
                 Select::make('source_classification')->required()->options([
@@ -106,7 +107,7 @@ class ManualAdjustmentResource extends Resource
             TextColumn::make('creditAccount.code')->label('Credit GL'),
             TextColumn::make('amount')->numeric(2)->alignRight(),
             TextColumn::make('tax_treatment')->placeholder('—'),
-            TextColumn::make('company.name')->label('Entity'),
+            TextColumn::make('company.name')->label('Entity')->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('supporting_reference')->label('Supporting document')->placeholder('—'),
             TextColumn::make('approval_status')->badge(),
             TextColumn::make('source_classification')->label('Source classification')->badge(),
@@ -120,7 +121,10 @@ class ManualAdjustmentResource extends Resource
                     && app(ManualAdjustmentService::class)->requiresConfiguredApproval($record))
                 ->action(function (ManualAdjustment $record): void {
                     $request = app(ManualAdjustmentService::class)->submit($record, Auth::user());
-                    Notification::make()->success()->title("Approval request APR-{$request->id} is in the shared approval queue.")->send();
+                    Notification::make()->success()
+                        ->title("Approval request APR-{$request->id} is in the shared approval queue.")
+                        ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                        ->send();
                 }),
             Action::make('approve')->icon('heroicon-o-check')->color('success')
                 ->authorize(AccountingPermissions::ApproveJournal)

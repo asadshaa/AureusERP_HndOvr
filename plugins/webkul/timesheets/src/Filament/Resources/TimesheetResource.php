@@ -260,8 +260,11 @@ class TimesheetResource extends Resource
                     ->visible(fn (Timesheet $record): bool => in_array($record->workflow_status, ['draft', 'rejected'], true)
                         && ((int) $record->user_id === (int) Auth::id() || (Auth::user()?->can('hr_approve_timesheets') ?? false)))
                     ->action(function (Timesheet $record): void {
-                        app(TimesheetWorkflowService::class)->submit($record, Auth::user());
-                        Notification::make()->success()->title('Timesheet submitted for approval')->send();
+                        $request = app(TimesheetWorkflowService::class)->submit($record, Auth::user());
+                        Notification::make()->success()
+                            ->title('Timesheet submitted for approval')
+                            ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                            ->send();
                     }),
                 Action::make('approve')
                     ->icon('heroicon-o-check')->color('success')

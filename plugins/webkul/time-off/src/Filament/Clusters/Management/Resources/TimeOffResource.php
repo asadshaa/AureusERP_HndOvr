@@ -172,11 +172,12 @@ class TimeOffResource extends Resource
                                 && $approvalStatus !== 'pending';
                         })
                         ->action(function (Leave $record): void {
-                            app(LeaveApprovalService::class)->submit($record, Auth::user());
+                            $request = app(LeaveApprovalService::class)->submit($record, Auth::user());
 
                             Notification::make()
                                 ->success()
                                 ->title('Leave submitted for approval')
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
                                 ->send();
                         }),
                     Action::make('approve')
