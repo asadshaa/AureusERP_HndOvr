@@ -259,10 +259,20 @@ class PaymentRegister extends Model
 
     public function computeAvailableJournalIds()
     {
+        // Journals aren't returned in any currency-aware order, so a journal
+        // in a different currency than this register could otherwise become
+        // the default (index 0) ahead of a same-currency one purely by
+        // incidental DB ordering -- silently forcing the strict exchange-rate
+        // check in AccountManager/PayAction to fail for what should have
+        // been an ordinary same-currency payment. Every returned journal
+        // remains selectable; this only prefers a currency match for the
+        // default.
         $this->available_journal_ids = collect($this->batches)
             ->flatMap(fn ($batch) => $this->getBatchAvailableJournals($batch))
+            ->unique('id')
+            ->sortByDesc(fn ($journal) => $journal->currency_id === $this->currency_id)
             ->pluck('id')
-            ->unique()
+            ->values()
             ->toArray();
     }
 
