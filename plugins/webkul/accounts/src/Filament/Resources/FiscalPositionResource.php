@@ -26,6 +26,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\CreateFiscalPosition;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\EditFiscalPosition;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\ListFiscalPositions;
@@ -82,7 +83,10 @@ class FiscalPositionResource extends Resource
                                     ->searchable()
                                     ->preload()
                                     ->label(__('accounts::filament/resources/fiscal-position.form.fields.company'))
-                                    ->required(),
+                                    ->required()
+                                    ->default(fn () => Auth::user()?->default_company_id)
+                                    ->disabled()
+                                    ->dehydrated(),
 
                                 Toggle::make('auto_reply')
                                     ->inline(false)

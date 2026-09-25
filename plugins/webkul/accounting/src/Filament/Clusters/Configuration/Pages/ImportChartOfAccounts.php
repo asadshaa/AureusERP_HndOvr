@@ -104,7 +104,9 @@ class ImportChartOfAccounts extends Page implements HasForms
                         ->label('Company')
                         ->options(fn () => Company::query()->pluck('name', 'id'))
                         ->default(Auth::user()?->default_company_id)
-                        ->required(),
+                        ->required()
+                        ->disabled()
+                        ->dehydrated(),
                     Select::make('currency_id')
                         ->label('Currency')
                         ->options(fn () => Currency::query()->pluck('name', 'id'))

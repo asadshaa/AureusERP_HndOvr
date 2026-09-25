@@ -28,6 +28,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Filament\Resources\AccountResource\Pages\ManageAccounts;
@@ -160,7 +161,15 @@ class AccountResource extends Resource
                                     ->multiple()
                                     ->preload()
                                     ->searchable()
-                                    ->required(),
+                                    ->required()
+                                    // Only one company exists in this deployment, so there's
+                                    // nothing to actually choose -- pre-fill it instead of
+                                    // making the accountant pick from a list of one. Stays a
+                                    // real (disabled) field rather than hidden, so the
+                                    // required-and-dehydrated value still submits correctly.
+                                    ->default(fn () => array_filter([Auth::user()?->default_company_id]))
+                                    ->disabled()
+                                    ->dehydrated(),
                                 Toggle::make('deprecated')
                                     ->inline(false)
                                     ->label(__('accounts::filament/resources/account.form.sections.fields.deprecated')),
