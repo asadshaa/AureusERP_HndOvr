@@ -1,5 +1,16 @@
 <x-filament-panels::page>
+    {{--
+        wire:key forces Livewire to fully tear down and remount this element
+        (and its Alpine x-data component) on every page visit, instead of
+        trying to morph/reuse whatever DOM node was left over from a
+        previous wire:navigate transition. Without it, navigating to this
+        page via SPA-style link clicks (rather than a full reload) could
+        leave a stale, detached copy of this tree floating unstyled outside
+        the normal page layout, since Alpine's mounted instance and
+        Livewire's morph target could get out of sync across navigations.
+    --}}
     <div
+        wire:key="account-code-tree"
         x-data="{
             search: '',
             selected: @js($selectedCodePrefix),
