@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Widgets\PendingActionsOverview;
 use App\Http\Middleware\ApplyBrandSettings;
 use App\Http\Middleware\SetLocale;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -10,6 +11,7 @@ use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -60,6 +62,12 @@ class AdminPanelProvider extends PanelProvider
                     ->url(fn (): string => Profile::getUrl()),
             ])
             ->navigationGroups(NavigationGroup::class)
+            ->pages([
+                Dashboard::class,
+            ])
+            ->widgets([
+                PendingActionsOverview::class,
+            ])
             ->plugins([
                 ManufacturingPlugin::make(),
                 FilamentShieldPlugin::make()
