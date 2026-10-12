@@ -70,9 +70,9 @@
                         class="h-full flex flex-col justify-between transition-all duration-150 hover:shadow-md"
                     >
                         <x-slot name="heading">
-                            <span class="text-sm font-semibold text-gray-950 dark:text-white">
+                            <a href="{{ $item['url'] }}" class="text-sm font-semibold text-gray-950 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                                 {{ $item['title'] }}
-                            </span>
+                            </a>
                         </x-slot>
 
                         <x-slot name="afterHeader">

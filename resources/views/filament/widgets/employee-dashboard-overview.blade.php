@@ -154,7 +154,10 @@
         {{-- 4 Symmetrical Dashboard Stat Cards --}}
         <div class="erp-leaves-grid">
             {{-- Card 1: Total Leave Balance --}}
-            <div class="erp-leave-card erp-card-total">
+            <a
+                href="{{ $urls['my_leaves'] ?? url('/admin/time-off/dashboard/my-time-offs') }}"
+                class="erp-leave-card erp-card-total group block text-inherit no-underline cursor-pointer"
+            >
                 <div>
                     <div class="flex items-center justify-between gap-2">
                         <div class="flex items-center gap-2">
@@ -162,7 +165,7 @@
                                 <x-filament::icon icon="heroicon-o-check-badge" class="h-4 w-4" />
                             </span>
                             <div>
-                                <span class="block text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100">
+                                <span class="block text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
                                     Total Balance
                                 </span>
                                 <span class="block text-3xs text-gray-400 dark:text-gray-500">
@@ -192,13 +195,16 @@
 
                 <div class="mt-3.5 flex items-center justify-between border-t border-gray-100 dark:border-white/5 pt-2 text-2xs text-gray-500 dark:text-gray-400">
                     <span>Used: <strong class="text-gray-800 dark:text-gray-200">{{ number_format($totalTaken, 1) }}</strong></span>
-                    @if ($totalPending > 0)
-                        <span class="font-medium text-amber-600 dark:text-amber-400">Pending: {{ number_format($totalPending, 1) }}</span>
-                    @else
-                        <span class="font-medium text-emerald-600 dark:text-emerald-400">Active</span>
-                    @endif
+                    <div class="flex items-center gap-1.5">
+                        @if ($totalPending > 0)
+                            <span class="font-medium text-amber-600 dark:text-amber-400">Pending: {{ number_format($totalPending, 1) }}</span>
+                        @else
+                            <span class="font-medium text-emerald-600 dark:text-emerald-400">Active</span>
+                        @endif
+                        <x-filament::icon icon="heroicon-m-arrow-right" class="h-3.5 w-3.5 text-primary-500 opacity-0 transition-opacity group-hover:opacity-100" />
+                    </div>
                 </div>
-            </div>
+            </a>
 
             {{-- Cards 2, 3, 4: Annual (12), Casual (8), Sick (5) --}}
             @foreach ($cards as $card)
@@ -240,7 +246,10 @@
                     };
                 @endphp
 
-                <div class="erp-leave-card erp-card-{{ $themeKey }}">
+                <a
+                    href="{{ $urls['my_leaves'] ?? url('/admin/time-off/dashboard/my-time-offs') }}"
+                    class="erp-leave-card erp-card-{{ $themeKey }} group block text-inherit no-underline cursor-pointer"
+                >
                     <div>
                         <div class="flex items-center justify-between gap-2">
                             <div class="flex items-center gap-2">
@@ -248,7 +257,7 @@
                                     <x-filament::icon :icon="$iconComponent" class="h-4 w-4" />
                                 </span>
                                 <div>
-                                    <span class="block text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100">
+                                    <span class="block text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
                                         {{ $card['name'] }}
                                     </span>
                                     <span class="block text-3xs text-gray-400 dark:text-gray-500">
@@ -278,13 +287,16 @@
 
                     <div class="mt-3.5 flex items-center justify-between border-t border-gray-100 dark:border-white/5 pt-2 text-2xs text-gray-500 dark:text-gray-400">
                         <span>Used: <strong class="text-gray-800 dark:text-gray-200">{{ number_format($card['taken'], 1) }}</strong></span>
-                        @if (($card['pending'] ?? 0) > 0)
-                            <span class="font-medium text-amber-600 dark:text-amber-400">Pending: {{ number_format($card['pending'], 1) }}</span>
-                        @else
-                            <span class="text-gray-400 dark:text-gray-500">{{ $card['percentage'] }}% Left</span>
-                        @endif
+                        <div class="flex items-center gap-1.5">
+                            @if (($card['pending'] ?? 0) > 0)
+                                <span class="font-medium text-amber-600 dark:text-amber-400">Pending: {{ number_format($card['pending'], 1) }}</span>
+                            @else
+                                <span class="text-gray-400 dark:text-gray-500">{{ $card['percentage'] }}% Left</span>
+                            @endif
+                            <x-filament::icon icon="heroicon-m-arrow-right" class="h-3.5 w-3.5 text-primary-500 opacity-0 transition-opacity group-hover:opacity-100" />
+                        </div>
                     </div>
-                </div>
+                </a>
             @endforeach
         </div>
 
@@ -306,13 +318,16 @@
                                 default   => 'gray',
                             };
                         @endphp
-                        <div class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                        <a
+                            href="{{ $urls['my_leaves'] ?? url('/admin/time-off/dashboard/my-time-offs') }}"
+                            class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                        >
                             <span class="font-medium text-gray-900 dark:text-white">{{ $r['type'] }}</span>
                             <span class="text-gray-400 dark:text-gray-500">({{ $r['days'] }}d, {{ $r['date_range'] }})</span>
                             <x-filament::badge :color="$rColor" size="xs">
                                 {{ $r['status_label'] }}
                             </x-filament::badge>
-                        </div>
+                        </a>
                     @endforeach
                 </div>
             </div>

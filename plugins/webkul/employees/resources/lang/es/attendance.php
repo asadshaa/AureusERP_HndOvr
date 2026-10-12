@@ -20,15 +20,16 @@ return [
         'open_shift_exists'      => 'Todavía tiene una entrada activa. Por favor, registre la salida primero.',
         'on_leave_or_holiday'    => 'Hoy está registrado como permiso o día festivo. Comuníquese con RR. HH. si esto es incorrecto.',
         'remote_exempt'          => 'Registrado (remoto).',
-        'overridden'             => 'Corregido por RR. HH.',
         'review_approved'        => 'Revisión aprobada.',
         'review_rejected'        => 'Revisión rechazada.',
+        'too_early_for_checkout' => 'La duración mínima de la jornada es de 1 hora. No puede registrar la salida todavía.',
     ],
 
     'with_time' => [
-        'already_checked_in'  => 'Ya registró su entrada hoy a las :time.',
-        'already_checked_out' => 'Ya registró su salida hoy a las :time.',
-        'open_shift_exists'   => 'Todavía tiene una entrada activa desde las :time. Por favor, registre la salida primero.',
+        'already_checked_in'     => 'Ya registró su entrada hoy a las :time.',
+        'already_checked_out'    => 'Ya registró su salida hoy a las :time.',
+        'open_shift_exists'      => 'Todavía tiene una entrada activa desde las :time. Por favor, registre la salida primero.',
+        'too_early_for_checkout' => 'La duración mínima de la jornada es de 1 hora. La salida estará disponible a las :time.',
     ],
 
     'done' => [

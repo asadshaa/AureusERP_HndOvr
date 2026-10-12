@@ -255,7 +255,7 @@
                                     :color="$checkedIn ? 'success' : ($checkedOut ? 'gray' : 'warning')"
                                     size="xs"
                                 >
-                                    {{ $checkedIn ? '● On Shift' : ($checkedOut ? 'Shift Done' : 'Not Clocked In') }}
+                                    {{ $checkedIn ? '● On Shift' : ($checkedOut ? 'Shift Done' : 'Not checked in') }}
                                 </x-filament::badge>
                             </div>
 
@@ -292,7 +292,7 @@
                                 @if ($remote)
                                     <div class="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 pt-1">
                                         <x-filament::icon icon="heroicon-m-globe-alt" class="h-3.5 w-3.5" />
-                                        <span>Remote Policy · Geofence Exempt</span>
+                                        <span>Remote Policy · Geofence Exempt (no location is needed)</span>
                                     </div>
                                 @elseif ($state['location'])
                                     <div class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 pt-1">
@@ -346,7 +346,11 @@
                                     <span x-show="phase === 'idle'" class="flex items-center justify-center gap-2">
                                         @if ($checkedIn)
                                             <x-filament::icon icon="heroicon-m-arrow-right-on-rectangle" class="h-4 w-4" />
-                                            <span>{{ $outcome && ! $outcome['ok'] ? 'Try again — ' : '' }}{{ $state['is_shift_complete'] ? '✓ Complete & Check Out' : 'Check Out' }}</span>
+                                            @if (($state['lockout_remaining_minutes'] ?? 0) > 0)
+                                                <span>Check Out (Unlocks in {{ $state['lockout_remaining_minutes'] }}m)</span>
+                                            @else
+                                                <span>{{ $outcome && ! $outcome['ok'] ? 'Try again — ' : '' }}{{ $state['is_shift_complete'] ? '✓ Complete & Check Out' : 'Check Out' }}</span>
+                                            @endif
                                         @else
                                             <x-filament::icon icon="heroicon-m-arrow-left-on-rectangle" class="h-4 w-4" />
                                             <span>{{ $outcome && ! $outcome['ok'] ? 'Try again — ' : '' }}Check In Now</span>

@@ -28,7 +28,10 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
+use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
+use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Partner\Models\BankAccount;
 use Webkul\Support\Filament\Clusters\Settings;
@@ -715,18 +718,99 @@ class Profile extends Page implements HasForms
         $user = $this->getUser();
         $employee = $user->employee ?? Employee::where('user_id', $user->id)->first();
         $leaveSummary = null;
+        $attendanceSummary = null;
 
         if ($employee) {
             $companyId = (int) ($employee->company_id ?? $user->default_company_id ?? 1);
             $endOfYear = Carbon::now()->endOfYear();
 
             $leaveSummary = EmployeeDashboardOverviewWidget::calculateCanonicalLeaves($employee, $companyId, $endOfYear);
+
+            // Attendance & time-ins analysis for employee profile
+            $timezone = app(AttendanceScheduleResolver::class)->timezoneFor($employee);
+            $today = Carbon::today($timezone);
+
+            $todayState = null;
+            try {
+                $todayState = app(GeofencedAttendanceService::class)->todayState($user);
+            } catch (\Throwable) {
+                // Ignore if service cannot resolve shift state
+            }
+
+            $todayRecord = AttendanceRecord::query()
+                ->where('employee_id', $employee->id)
+                ->whereDate('attendance_date', $today->toDateString())
+                ->first();
+
+            $recentRecords = AttendanceRecord::query()
+                ->where('employee_id', $employee->id)
+                ->orderByDesc('attendance_date')
+                ->take(7)
+                ->get()
+                ->map(function (AttendanceRecord $r) use ($timezone): array {
+                    $dateStr = $r->attendance_date ? Carbon::parse($r->attendance_date)->format('D, d M') : '—';
+                    $checkInStr = $r->check_in ? Carbon::parse($r->check_in)->timezone($timezone)->format('h:i A') : '—';
+                    $checkOutStr = $r->check_out ? Carbon::parse($r->check_out)->timezone($timezone)->format('h:i A') : '—';
+                    $workedHours = $r->worked_hours !== null ? number_format((float) $r->worked_hours, 1).'h' : '—';
+
+                    $statusValue = (string) ($r->status ?? 'present');
+                    $statusLabel = match ($statusValue) {
+                        'present'  => 'Present',
+                        'half_day' => 'Half Day',
+                        'late'     => 'Late',
+                        'absent'   => 'Absent',
+                        'leave'    => 'On Leave',
+                        'holiday'  => 'Holiday',
+                        'remote'   => 'Remote',
+                        default    => ucfirst(str_replace('_', ' ', $statusValue)),
+                    };
+
+                    $statusColor = match ($statusValue) {
+                        'present', 'remote' => 'success',
+                        'half_day', 'late'  => 'warning',
+                        'absent'            => 'danger',
+                        'leave', 'holiday'  => 'info',
+                        default             => 'gray',
+                    };
+
+                    return [
+                        'id'           => $r->id,
+                        'date'         => $dateStr,
+                        'check_in'     => $checkInStr,
+                        'check_out'    => $checkOutStr,
+                        'worked_hours' => $workedHours,
+                        'status_label' => $statusLabel,
+                        'status_color' => $statusColor,
+                        'late_minutes' => (int) ($r->late_minutes ?? 0),
+                    ];
+                })
+                ->all();
+
+            $monthStart = $today->copy()->startOfMonth();
+            $monthRecords = AttendanceRecord::query()
+                ->where('employee_id', $employee->id)
+                ->whereDate('attendance_date', '>=', $monthStart->toDateString())
+                ->whereDate('attendance_date', '<=', $today->toDateString())
+                ->get();
+
+            $daysPresent = $monthRecords->whereIn('status', ['present', 'half_day', 'remote'])->count();
+            $totalHours = (float) $monthRecords->sum('worked_hours');
+
+            $attendanceSummary = [
+                'today_state'    => $todayState,
+                'today_record'   => $todayRecord,
+                'recent_records' => $recentRecords,
+                'days_present'   => $daysPresent,
+                'total_hours'    => round($totalHours, 1),
+                'checkin_url'    => url('/admin/employees/my-attendance'),
+            ];
         }
 
         return [
-            'user'         => $user,
-            'employee'     => $employee,
-            'leaveSummary' => $leaveSummary,
+            'user'              => $user,
+            'employee'          => $employee,
+            'leaveSummary'      => $leaveSummary,
+            'attendanceSummary' => $attendanceSummary,
         ];
     }
 

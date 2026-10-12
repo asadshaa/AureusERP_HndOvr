@@ -244,12 +244,20 @@ class EmployeeDashboardOverviewWidget extends Widget
             $profileUrl = url('/admin/settings/profile');
         }
 
+        $myTimeOffListUrl = null;
+        try {
+            $myTimeOffListUrl = MyTimeOffResource::getUrl('index');
+        } catch (\Throwable) {
+            $myTimeOffListUrl = url('/admin/time-off/dashboard/my-time-offs');
+        }
+
         return [
             'employee'     => $employeeData,
             'leaveSummary' => $leaveData,
             'recentLeaves' => $recentLeaves,
             'urls'         => [
                 'request_leave' => $requestLeaveUrl,
+                'my_leaves'     => $myTimeOffListUrl,
                 'profile'       => $profileUrl,
             ],
         ];

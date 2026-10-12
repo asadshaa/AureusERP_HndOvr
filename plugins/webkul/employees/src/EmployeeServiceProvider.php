@@ -3,6 +3,7 @@
 namespace Webkul\Employee;
 
 use Filament\Panel;
+use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
 use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
@@ -21,6 +22,9 @@ class EmployeeServiceProvider extends PackageServiceProvider
         $package->name(static::$name)
             ->hasViews()
             ->hasTranslations()
+            ->hasCommands([
+                AutoCompleteShiftsCommand::class,
+            ])
             ->hasMigrations([
                 '2024_12_11_045350_create_employees_work_locations_table',
                 '2024_12_11_051916_create_employees_departments_table',

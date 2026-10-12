@@ -21,15 +21,16 @@ return [
         'open_shift_exists'      => 'You are still checked in. Please check out first.',
         'on_leave_or_holiday'    => 'Today is recorded as leave or holiday. Contact HR if this is wrong.',
         'remote_exempt'          => 'Recorded (remote).',
-        'overridden'             => 'Corrected by HR.',
         'review_approved'        => 'Review approved.',
         'review_rejected'        => 'Review rejected.',
+        'too_early_for_checkout' => 'Minimum shift duration is 1 hour. You cannot check out yet.',
     ],
 
     'with_time' => [
-        'already_checked_in'  => 'You already checked in today at :time.',
-        'already_checked_out' => 'You already checked out today at :time.',
-        'open_shift_exists'   => 'You are still checked in since :time. Please check out first.',
+        'already_checked_in'     => 'You already checked in today at :time.',
+        'already_checked_out'    => 'You already checked out today at :time.',
+        'open_shift_exists'      => 'You are still checked in since :time. Please check out first.',
+        'too_early_for_checkout' => 'Minimum shift duration is 1 hour. Check-out will be available at :time.',
     ],
 
     'done' => [

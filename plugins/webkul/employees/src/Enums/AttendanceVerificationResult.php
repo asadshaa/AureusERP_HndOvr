@@ -49,6 +49,8 @@ enum AttendanceVerificationResult: string implements HasColor, HasLabel
 
     case ReviewRejected = 'review_rejected';
 
+    case TooEarlyForCheckOut = 'too_early_for_checkout';
+
     /** Employee-safe wording: never exposes distance, coordinates or thresholds. */
     public function getLabel(): string
     {

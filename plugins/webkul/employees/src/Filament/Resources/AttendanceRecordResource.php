@@ -90,7 +90,7 @@ class AttendanceRecordResource extends Resource
                 ->validationMessages(['after' => 'The check-out must be after the check-in.']),
             TextInput::make('overtime_hours')->numeric()->minValue(0)->default(0),
             Select::make('status')->options([
-                'present' => 'Present', 'absent' => 'Absent', 'leave' => 'Leave',
+                'present' => 'Present', 'half_day' => 'Half Day', 'absent' => 'Absent', 'leave' => 'Leave',
                 'holiday' => 'Holiday', 'remote' => 'Remote',
             ])->default('present')->required(),
             // GPS / self-service rows are backed by verification evidence. They can
@@ -251,8 +251,19 @@ class AttendanceRecordResource extends Resource
                 ->formatStateUsing(fn (?string $state): ?string => AttendanceVerificationStatus::tryFrom((string) $state)?->getLabel())
                 ->color(fn (?string $state): ?string => AttendanceVerificationStatus::tryFrom((string) $state)?->getColor()),
         ])->filters([
+            SelectFilter::make('employee_id')
+                ->label('Employee')
+                ->relationship('employee', 'name', modifyQueryUsing: function (Builder $query): Builder {
+                    $user = Auth::user();
+                    $companyId = (int) $user?->default_company_id;
+                    $visible = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
+
+                    return $query->where('company_id', $companyId)->whereIn('id', $visible);
+                })
+                ->searchable()
+                ->preload(),
             SelectFilter::make('status')->options([
-                'present' => 'Present', 'absent' => 'Absent', 'leave' => 'Leave',
+                'present' => 'Present', 'half_day' => 'Half Day', 'absent' => 'Absent', 'leave' => 'Leave',
                 'holiday' => 'Holiday', 'remote' => 'Remote',
             ]),
             SelectFilter::make('verification_status')

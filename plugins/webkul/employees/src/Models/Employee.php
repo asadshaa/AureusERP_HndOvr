@@ -23,6 +23,8 @@ use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Country;
 use Webkul\Support\Models\Currency;
 use Webkul\Support\Models\State;
+use Webkul\TimeOff\Models\Leave;
+use Webkul\TimeOff\Models\LeaveAllocation;
 
 class Employee extends Model
 {
@@ -259,6 +261,16 @@ class Employee extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
+    }
+
+    public function leaves(): HasMany
+    {
+        return $this->hasMany(Leave::class);
+    }
+
+    public function leaveAllocations(): HasMany
+    {
+        return $this->hasMany(LeaveAllocation::class);
     }
 
     public function performanceReviews(): HasMany

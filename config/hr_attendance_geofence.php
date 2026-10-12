@@ -49,6 +49,13 @@ return [
     'max_candidate_locations' => 20,
     'rate_limit_per_minute'   => 10,
 
+    // Minimum duration before an employee is permitted to check out after checking in (in minutes).
+    'min_checkout_interval_minutes' => (int) env('HR_ATTENDANCE_MIN_CHECKOUT_MINUTES', 60),
+
+    // Thresholds for auto-marking attendance status based on worked hours
+    'full_day_min_hours' => (float) env('HR_ATTENDANCE_FULL_DAY_MIN_HOURS', 7.5),
+    'half_day_min_hours' => (float) env('HR_ATTENDANCE_HALF_DAY_MIN_HOURS', 4.0),
+
     // Precise evidence (coordinates, IP, user agent) is nulled after this many days.
     'evidence_retention_days' => 365,
 ];

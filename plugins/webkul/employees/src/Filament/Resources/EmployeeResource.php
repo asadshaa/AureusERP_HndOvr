@@ -74,8 +74,10 @@ use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ListEmployees;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageResume;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageSkill;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ViewEmployee;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\AttendanceRecordsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ResumeRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\SkillsRelationManager;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\TimeOffRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\WorkLocationAssignmentsRelationManager;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
@@ -1994,6 +1996,14 @@ class EmployeeResource extends Resource
                 WorkLocationAssignmentsRelationManager::class,
             ])
                 ->icon('heroicon-o-map-pin'),
+            RelationGroup::make('Attendance Records', [
+                AttendanceRecordsRelationManager::class,
+            ])
+                ->icon('heroicon-o-clock'),
+            RelationGroup::make('Time Off & Leaves', [
+                TimeOffRelationManager::class,
+            ])
+                ->icon('heroicon-o-calendar-days'),
         ];
 
         return $relations;

@@ -410,6 +410,17 @@ class GeofencedAttendanceService
             return $this->reject($employee, $user, $request, Action::CheckOut, Result::NotCheckedIn, $requestId, $timezone, null, $open, $mode);
         }
 
+        $minMinutes = (int) config('hr_attendance_geofence.min_checkout_interval_minutes', 60);
+        if ($minMinutes > 0 && $open->check_in) {
+            $elapsedMinutes = $open->check_in->diffInMinutes($checkOutAt);
+            if ($elapsedMinutes < $minMinutes) {
+                $availableAt = $open->check_in->copy()->addMinutes($minMinutes);
+                $availableAtLocal = $this->localTime($availableAt, $timezone);
+
+                return $this->reject($employee, $user, $request, Action::CheckOut, Result::TooEarlyForCheckOut, $requestId, $timezone, $availableAtLocal, $open, $mode);
+            }
+        }
+
         if ($mode === 'none') {
             // Losing a check-out to a configuration gap corrupts worked hours more than flagging it does.
             $decision = config('hr_attendance_geofence.checkout_without_location') === 'review'
@@ -433,9 +444,25 @@ class GeofencedAttendanceService
             ? Status::NeedsReview->value
             : ($current ?? $newStatus->value);
 
-        $this->withAuditSuppressed(function () use ($open, $checkOutAt, $verification, $finalStatus) {
+        $fullDayHours = (float) config('hr_attendance_geofence.full_day_min_hours', 7.5);
+        $halfDayHours = (float) config('hr_attendance_geofence.half_day_min_hours', 4.0);
+        $workedHours = max(0, $open->check_in ? $open->check_in->diffInMinutes($checkOutAt) / 60 : 0);
+
+        $attendanceStatus = $open->status;
+        if (! in_array($attendanceStatus, ['leave', 'holiday', 'absent'], true)) {
+            if ($workedHours >= $fullDayHours) {
+                $attendanceStatus = $mode === 'remote' ? 'remote' : 'present';
+            } elseif ($workedHours >= $halfDayHours) {
+                $attendanceStatus = 'half_day';
+            } else {
+                $attendanceStatus = $mode === 'remote' ? 'remote' : 'present';
+            }
+        }
+
+        $this->withAuditSuppressed(function () use ($open, $checkOutAt, $verification, $finalStatus, $attendanceStatus) {
             $open->fill([
                 'check_out'                 => $checkOutAt,
+                'status'                    => $attendanceStatus,
                 'check_out_verification_id' => $verification->id,
                 'verification_status'       => $finalStatus,
             ]);
@@ -686,6 +713,87 @@ class GeofencedAttendanceService
     }
 
     /**
+     * Automatically completes open shifts that have reached their scheduled end time
+     * or completed their full scheduled hours (e.g. 8 hours) without check-out.
+     * Safely closes the shift with check_out = scheduled_end (or check_in + 8h),
+     * computes full worked hours, and sets status to 'present'.
+     *
+     * @return int Number of shifts auto-completed.
+     */
+    public function autoCompleteCompletedShifts(?CarbonImmutable $nowUtc = null): int
+    {
+        $nowUtc ??= CarbonImmutable::now('UTC');
+        $completed = 0;
+
+        AttendanceRecord::query()
+            ->whereNotNull('check_in')
+            ->whereNull('check_out')
+            ->whereIn('source', AttendanceSource::evidenceBacked())
+            ->with(['employee', 'company'])
+            ->chunkById(200, function ($records) use (&$completed, $nowUtc): void {
+                foreach ($records as $record) {
+                    $employee = $record->employee;
+                    if (! $employee) {
+                        continue;
+                    }
+
+                    $timezone = $this->schedule->timezoneFor($employee);
+                    $nowLocal = $nowUtc->setTimezone($timezone);
+
+                    // Check if shift hours or scheduled end are complete
+                    $shouldComplete = false;
+                    $targetCheckOut = null;
+
+                    if ($record->scheduled_end) {
+                        $scheduledEnd = Carbon::parse($record->scheduled_end, $timezone);
+                        if ($nowLocal->greaterThanOrEqualTo($scheduledEnd)) {
+                            $shouldComplete = true;
+                            $targetCheckOut = $scheduledEnd->setTimezone(config('app.timezone'));
+                        }
+                    } elseif ($record->check_in) {
+                        $elapsedMinutes = $record->check_in->diffInMinutes($nowUtc);
+                        if ($elapsedMinutes >= 480) {
+                            $shouldComplete = true;
+                            $targetCheckOut = $record->check_in->copy()->addMinutes(480)->setTimezone(config('app.timezone'));
+                        }
+                    }
+
+                    if (! $shouldComplete || ! $targetCheckOut) {
+                        continue;
+                    }
+
+                    DB::transaction(function () use ($record, $targetCheckOut): void {
+                        $verification = AttendanceVerification::query()->create([
+                            'company_id'           => $record->company_id,
+                            'employee_id'          => $record->employee_id,
+                            'attendance_record_id' => $record->id,
+                            'action'               => Action::CheckOut,
+                            'method'               => Method::Manual,
+                            'result'               => Result::Verified,
+                            'accepted'             => true,
+                            'flags'                => ['auto_completed_full_shift'],
+                            'metadata'             => ['reason' => 'Automatically completed upon shift hours completion'],
+                            'review_status'        => null,
+                            'server_recorded_at'   => now(),
+                        ]);
+
+                        $this->withAuditSuppressed(function () use ($record, $targetCheckOut, $verification): void {
+                            $record->check_out = $targetCheckOut;
+                            $record->status = 'present';
+                            $record->check_out_verification_id = $verification->id;
+                            $record->verification_status = Status::Verified->value;
+                            $record->save();
+                        });
+                    });
+
+                    $completed++;
+                }
+            });
+
+        return $completed;
+    }
+
+    /**
      * Tells the employee's line manager (a database notification in the panel
      * bell) that an attendance day needs a look. Sent synchronously so it does
      * not depend on a queue worker. A notification failure never affects the
@@ -817,24 +925,32 @@ class GeofencedAttendanceService
             $isPastStart = $nowUtc > $schedStartUtc;
         }
 
+        $minIntervalMinutes = (int) config('hr_attendance_geofence.min_checkout_interval_minutes', 60);
+        $lockoutRemainingMinutes = 0;
+        if ($open && $open->check_in) {
+            $elapsedMin = (int) ($elapsedSeconds / 60);
+            $lockoutRemainingMinutes = max(0, $minIntervalMinutes - $elapsedMin);
+        }
+
         return [
-            'state'              => $state,
-            'mode'               => $mode,
-            'check_in'           => $record?->check_in ? $this->localTime($record->check_in, $timezone) : null,
-            'check_out'          => $record?->check_out ? $this->localTime($record->check_out, $timezone) : null,
-            'worked'             => $worked,
-            'location'           => $candidates->first()?->name,
-            'timezone'           => $timezone,
-            'schedule_name'      => $scheduleName,
-            'scheduled_start'    => $schedStartLocal,
-            'scheduled_end'      => $schedEndLocal,
-            'scheduled_hours'    => $schedDurationHours,
-            'elapsed_seconds'    => $elapsedSeconds,
-            'elapsed_formatted'  => $elapsedFormatted,
-            'progress_percent'   => $progressPercent,
-            'is_shift_complete'  => $isShiftComplete,
-            'late_minutes'       => $record?->late_minutes ?? 0,
-            'is_past_start'      => $isPastStart,
+            'state'                      => $state,
+            'mode'                       => $mode,
+            'check_in'                   => $record?->check_in ? $this->localTime($record->check_in, $timezone) : null,
+            'check_out'                  => $record?->check_out ? $this->localTime($record->check_out, $timezone) : null,
+            'worked'                     => $worked,
+            'location'                   => $candidates->first()?->name,
+            'timezone'                   => $timezone,
+            'schedule_name'              => $scheduleName,
+            'scheduled_start'            => $schedStartLocal,
+            'scheduled_end'              => $schedEndLocal,
+            'scheduled_hours'            => $schedDurationHours,
+            'elapsed_seconds'            => $elapsedSeconds,
+            'elapsed_formatted'          => $elapsedFormatted,
+            'progress_percent'           => $progressPercent,
+            'is_shift_complete'          => $isShiftComplete,
+            'lockout_remaining_minutes'  => $lockoutRemainingMinutes,
+            'late_minutes'               => $record?->late_minutes ?? 0,
+            'is_past_start'              => $isPastStart,
         ];
     }
 
@@ -1027,7 +1143,7 @@ class GeofencedAttendanceService
 
     private function resultFromVerification(AttendanceVerification $verification, string $timezone): AttendanceAttemptResult
     {
-        $time = $verification->accepted || in_array($verification->result, [Result::AlreadyCheckedIn, Result::AlreadyCheckedOut, Result::OpenShiftExists], true)
+        $time = $verification->accepted || in_array($verification->result, [Result::AlreadyCheckedIn, Result::AlreadyCheckedOut, Result::OpenShiftExists, Result::TooEarlyForCheckOut], true)
             ? $this->localTime($verification->server_recorded_at, $timezone)
             : null;
 
@@ -1040,7 +1156,7 @@ class GeofencedAttendanceService
             return __('employees::attendance.done.'.$action->value.'.'.$result->value, ['time' => $time]);
         }
 
-        if ($time && in_array($result, [Result::AlreadyCheckedIn, Result::AlreadyCheckedOut, Result::OpenShiftExists], true)) {
+        if ($time && in_array($result, [Result::AlreadyCheckedIn, Result::AlreadyCheckedOut, Result::OpenShiftExists, Result::TooEarlyForCheckOut], true)) {
             return __('employees::attendance.with_time.'.$result->value, ['time' => $time]);
         }
 

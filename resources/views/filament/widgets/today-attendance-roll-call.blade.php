@@ -175,7 +175,7 @@
 
             {{-- On Leave --}}
             <a
-                href="{{ url('/admin/time-off/time-offs') }}"
+                href="{{ url('/admin/time-off/management/time-offs') }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -195,7 +195,7 @@
 
             {{-- Not Checked In --}}
             <a
-                href="{{ $attendanceUrl }}"
+                href="{{ $attendanceUrl }}?tableFilters[status][value]=absent"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
