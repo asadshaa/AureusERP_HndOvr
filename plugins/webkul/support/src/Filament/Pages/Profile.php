@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\AttendanceRecordsRelationManager;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
@@ -786,22 +787,21 @@ class Profile extends Page implements HasForms
                 })
                 ->all();
 
-            $monthStart = $today->copy()->startOfMonth();
-            $monthRecords = AttendanceRecord::query()
-                ->where('employee_id', $employee->id)
-                ->whereDate('attendance_date', '>=', $monthStart->toDateString())
-                ->whereDate('attendance_date', '<=', $today->toDateString())
-                ->get();
-
-            $daysPresent = $monthRecords->whereIn('status', ['present', 'half_day', 'remote'])->count();
-            $totalHours = (float) $monthRecords->sum('worked_hours');
+            $monthlyAtt = AttendanceRecordsRelationManager::getMonthlySummary($employee);
 
             $attendanceSummary = [
                 'today_state'    => $todayState,
                 'today_record'   => $todayRecord,
                 'recent_records' => $recentRecords,
-                'days_present'   => $daysPresent,
-                'total_hours'    => round($totalHours, 1),
+                'days_present'   => (int) ($monthlyAtt['present'] ?? 0),
+                'days_absent'    => (int) ($monthlyAtt['absent'] ?? 0),
+                'days_half_day'  => (int) ($monthlyAtt['half_day'] ?? 0),
+                'days_leave'     => (int) ($monthlyAtt['leave'] ?? 0),
+                'late_minutes'   => (int) ($monthlyAtt['late_minutes'] ?? 0),
+                'total_hours'    => round((float) ($monthlyAtt['worked_hours'] ?? 0), 1),
+                'overtime_hours' => round((float) ($monthlyAtt['overtime_hours'] ?? 0), 1),
+                'working_days'   => (int) ($monthlyAtt['working_days'] ?? 22),
+                'month_label'    => (string) ($monthlyAtt['month'] ?? $today->format('F Y')),
                 'checkin_url'    => url('/admin/employees/my-attendance'),
             ];
         }

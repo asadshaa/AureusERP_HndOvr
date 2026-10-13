@@ -40,23 +40,31 @@
         @if ($hasSideColumn)
             <div class="lg:col-span-1 flex flex-col gap-6">
                 @if ($hasAttendance)
-                    {{-- My Attendance & Time-ins --}}
-                    <div class="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs dark:border-white/10 dark:bg-gray-900">
-                        <div class="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+                    {{-- My Attendance & Monthly Performance --}}
+                    <x-filament::section>
+                        <x-slot name="heading">
                             <div class="flex items-center gap-2">
-                                <x-heroicon-o-clock class="h-5 w-5 text-primary-500" />
-                                <h3 class="text-sm font-bold text-gray-950 dark:text-white">
-                                    My Attendance & Time-ins
-                                </h3>
+                                <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-primary-500" />
+                                <span>My Attendance</span>
                             </div>
-                            <a
+                        </x-slot>
+
+                        <x-slot name="description">
+                            {{ $attendanceSummary['month_label'] ?? now()->format('F Y') }} Scorecard
+                        </x-slot>
+
+                        <x-slot name="headerEnd">
+                            <x-filament::button
+                                tag="a"
                                 href="{{ $attendanceSummary['checkin_url'] }}"
-                                class="inline-flex items-center gap-1 rounded-md bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 hover:bg-primary-100 transition-colors dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/60"
+                                size="xs"
+                                color="gray"
+                                outlined
+                                icon="heroicon-m-arrow-top-right-on-square"
                             >
-                                Check In / Out
-                                <x-heroicon-m-arrow-top-right-on-square class="h-3.5 w-3.5" />
-                            </a>
-                        </div>
+                                Check In
+                            </x-filament::button>
+                        </x-slot>
 
                         {{-- Today's Status Banner --}}
                         @php
@@ -65,46 +73,62 @@
                             $checkInTime = $todayState['check_in_time'] ?? null;
                             $workedSoFar = $todayState['worked_hours'] ?? 0;
                         @endphp
-                        <div class="mt-3 rounded-lg border border-gray-100 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-800/40">
-                            <div class="flex items-center justify-between text-xs">
-                                <span class="font-medium text-gray-500 dark:text-gray-400">Today's Status</span>
+                        <div class="rounded-lg p-3" style="border: 1px solid rgba(120, 120, 128, 0.16); background: rgba(120, 120, 128, 0.04);">
+                            <div class="flex items-center justify-between text-xs mb-3">
+                                <span class="font-medium text-gray-500 dark:text-gray-400">Today's Shift</span>
                                 @if ($stateCode === 'checked_in')
-                                    <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                        <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    <x-filament::badge color="success" size="xs">
                                         Checked In at {{ $checkInTime }}
-                                    </span>
+                                    </x-filament::badge>
                                 @elseif ($stateCode === 'checked_out')
-                                    <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                        Shift Completed ({{ number_format($workedSoFar, 1) }}h)
-                                    </span>
+                                    <x-filament::badge color="info" size="xs">
+                                        Shift Done ({{ number_format($workedSoFar, 1) }}h)
+                                    </x-filament::badge>
                                 @else
-                                    <span class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                        Not Checked In Today
-                                    </span>
+                                    <x-filament::badge color="gray" size="xs">
+                                        Not Checked In
+                                    </x-filament::badge>
                                 @endif
                             </div>
 
-                            <div class="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
-                                <div class="rounded-md bg-white p-2 border border-gray-100 dark:border-gray-700 dark:bg-gray-800/80">
-                                    <div class="text-3xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Days Present</div>
-                                    <div class="text-sm font-bold text-gray-900 dark:text-white mt-0.5">{{ $attendanceSummary['days_present'] }}</div>
+                            {{-- 4 Symmetrical Monthly Metrics --}}
+                            <div class="grid grid-cols-2 gap-2 text-center text-xs">
+                                <div class="rounded-lg p-2.5" style="border: 1px solid rgba(120, 120, 128, 0.14); background: rgba(120, 120, 128, 0.04);">
+                                    <div class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Present</div>
+                                    <div class="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                        {{ $attendanceSummary['days_present'] }} <span class="text-3xs font-normal text-gray-400">Days</span>
+                                    </div>
                                 </div>
-                                <div class="rounded-md bg-white p-2 border border-gray-100 dark:border-gray-700 dark:bg-gray-800/80">
-                                    <div class="text-3xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Worked Hours</div>
-                                    <div class="text-sm font-bold text-gray-900 dark:text-white mt-0.5">{{ $attendanceSummary['total_hours'] }}h</div>
+                                <div class="rounded-lg p-2.5" style="border: 1px solid rgba(120, 120, 128, 0.14); background: rgba(120, 120, 128, 0.04);">
+                                    <div class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Absent</div>
+                                    <div class="text-lg font-extrabold {{ $attendanceSummary['days_absent'] > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100' }} mt-0.5">
+                                        {{ $attendanceSummary['days_absent'] }} <span class="text-3xs font-normal text-gray-400">Days</span>
+                                    </div>
+                                </div>
+                                <div class="rounded-lg p-2.5" style="border: 1px solid rgba(120, 120, 128, 0.14); background: rgba(120, 120, 128, 0.04);">
+                                    <div class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Late</div>
+                                    <div class="text-lg font-extrabold {{ $attendanceSummary['late_minutes'] > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400' }} mt-0.5">
+                                        {{ $attendanceSummary['late_minutes'] }} <span class="text-3xs font-normal text-gray-400">mins</span>
+                                    </div>
+                                </div>
+                                <div class="rounded-lg p-2.5" style="border: 1px solid rgba(120, 120, 128, 0.14); background: rgba(120, 120, 128, 0.04);">
+                                    <div class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Worked</div>
+                                    <div class="text-lg font-extrabold text-sky-600 dark:text-sky-400 mt-0.5">
+                                        {{ $attendanceSummary['total_hours'] }} <span class="text-3xs font-normal text-gray-400">hrs</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         {{-- Recent Time-ins --}}
                         <div class="mt-4">
-                            <h4 class="text-xs font-bold text-gray-900 dark:text-white mb-2">Recent Time-ins</h4>
+                            <h4 class="text-xs font-bold text-gray-900 dark:text-white mb-2">Recent Logs</h4>
                             @if (empty($attendanceSummary['recent_records']))
                                 <p class="text-xs text-gray-500 dark:text-gray-400 py-2 text-center">No attendance records found yet.</p>
                             @else
-                                <div class="divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-800">
+                                <div class="overflow-hidden rounded-lg" style="border: 1px solid rgba(120, 120, 128, 0.16);">
                                     @foreach ($attendanceSummary['recent_records'] as $record)
-                                        <div class="flex items-center justify-between p-2.5 bg-white dark:bg-gray-900 text-xs">
+                                        <div class="flex items-center justify-between p-2.5 text-xs" style="border-bottom: 1px solid rgba(120, 120, 128, 0.12); background: rgba(120, 120, 128, 0.02);">
                                             <div>
                                                 <div class="font-semibold text-gray-900 dark:text-white">{{ $record['date'] }}</div>
                                                 <div class="text-3xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -112,16 +136,9 @@
                                                 </div>
                                             </div>
                                             <div class="text-right">
-                                                <span @class([
-                                                    'inline-flex items-center rounded px-1.5 py-0.5 text-3xs font-bold uppercase',
-                                                    'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' => $record['status_color'] === 'success',
-                                                    'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' => $record['status_color'] === 'warning',
-                                                    'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' => $record['status_color'] === 'danger',
-                                                    'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' => $record['status_color'] === 'info',
-                                                    'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' => $record['status_color'] === 'gray',
-                                                ])>
+                                                <x-filament::badge :color="$record['status_color']" size="xs">
                                                     {{ $record['status_label'] }}
-                                                </span>
+                                                </x-filament::badge>
                                                 <div class="text-3xs font-semibold text-gray-600 dark:text-gray-400 mt-0.5">
                                                     {{ $record['worked_hours'] }}
                                                 </div>
@@ -131,57 +148,71 @@
                                 </div>
                             @endif
                         </div>
-                    </div>
+                    </x-filament::section>
                 @endif
 
                 @if ($hasEmployeeLeaves)
-                    <div class="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs dark:border-white/10 dark:bg-gray-900">
-                        <div class="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+                    <x-filament::section>
+                        <x-slot name="heading">
                             <div class="flex items-center gap-2">
-                                <x-heroicon-o-chart-pie class="h-5 w-5 text-primary-500" />
-                                <h3 class="text-sm font-bold text-gray-950 dark:text-white">
-                                    My Leave Entitlements
-                                </h3>
+                                <x-filament::icon icon="heroicon-o-chart-pie" class="h-5 w-5 text-primary-500" />
+                                <span>My Leave Entitlements</span>
                             </div>
-                            <span class="inline-flex items-center rounded-md bg-primary-50 px-2 py-0.5 text-xs font-bold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
-                                {{ number_format($leaveSummary['total_left'] ?? 0, 1) }} / {{ number_format($leaveSummary['total_allocated'] ?? 0, 1) }} Days
-                            </span>
-                        </div>
+                        </x-slot>
 
-                        <div class="mt-4 space-y-3">
+                        <x-slot name="headerEnd">
+                            <x-filament::badge color="primary" size="sm">
+                                {{ number_format($leaveSummary['total_left'] ?? 0, 1) }} / {{ number_format($leaveSummary['total_allocated'] ?? 0, 1) }} Days
+                            </x-filament::badge>
+                        </x-slot>
+
+                        <div class="space-y-3">
                             @foreach ($leaveSummary['cards'] as $card)
                                 @php
                                     $pct = $card['allocated'] > 0 ? min(100, max(0, (int) round(($card['left'] / $card['allocated']) * 100))) : 0;
                                     $lower = strtolower($card['name']);
-                                    $badgeColor = str_contains($lower, 'sick') ? 'text-rose-600 dark:text-rose-400' : (str_contains($lower, 'casual') ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400');
-                                    $barColor = str_contains($lower, 'sick') ? 'bg-rose-500' : (str_contains($lower, 'casual') ? 'bg-amber-500' : 'bg-emerald-500');
+                                    $badgeColor = str_contains($lower, 'sick') ? 'danger' : (str_contains($lower, 'casual') ? 'info' : 'warning');
+                                    $barGradient = str_contains($lower, 'sick')
+                                        ? 'linear-gradient(90deg, #f43f5e, #e11d48)'
+                                        : (str_contains($lower, 'casual')
+                                            ? 'linear-gradient(90deg, #0284c7, #0369a1)'
+                                            : 'linear-gradient(90deg, #10b981, #059669)');
+                                    $stripeColor = str_contains($lower, 'sick') ? '#f43f5e' : (str_contains($lower, 'casual') ? '#0284c7' : '#10b981');
                                 @endphp
-                                <div class="rounded-lg border border-gray-100 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-800/40">
-                                    <div class="flex items-center justify-between text-xs font-semibold">
-                                        <span class="text-gray-900 dark:text-white">{{ $card['name'] }}</span>
-                                        <span class="{{ $badgeColor }} font-bold">{{ number_format($card['left'], 1) }} Left</span>
-                                    </div>
-                                    <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                                        <div class="h-full rounded-full {{ $barColor }}" style="width: {{ $pct }}%"></div>
-                                    </div>
-                                    <div class="mt-2 flex justify-between text-3xs text-gray-500 dark:text-gray-400">
-                                        <span>Allocated: {{ number_format($card['allocated'], 1) }}</span>
-                                        <span>Used: {{ number_format($card['taken'], 1) }}</span>
+                                <div class="rounded-lg p-3 dark:bg-white/[0.02]" style="border: 1px solid rgba(120, 120, 128, 0.16); position: relative; overflow: hidden; background: rgba(120, 120, 128, 0.04);">
+                                    <div style="position: absolute; top: 0; left: 0; bottom: 0; width: 3px; background: {{ $stripeColor }};"></div>
+                                    <div class="pl-1.5">
+                                        <div class="flex items-center justify-between text-xs font-semibold">
+                                            <span class="text-gray-950 dark:text-white font-bold">{{ $card['name'] }}</span>
+                                            <x-filament::badge :color="$badgeColor" size="xs">
+                                                {{ number_format($card['left'], 1) }} Left
+                                            </x-filament::badge>
+                                        </div>
+                                        <div style="margin-top: 0.5rem; height: 6px; width: 100%; border-radius: 9999px; background: rgba(120, 120, 128, 0.2); overflow: hidden;">
+                                            <div style="height: 100%; border-radius: 9999px; width: {{ $pct }}%; background: {{ $barGradient }}; transition: all 0.3s ease;"></div>
+                                        </div>
+                                        <div class="mt-2 flex justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                                            <span>Allocated: <strong class="text-gray-800 dark:text-gray-200 font-semibold">{{ number_format($card['allocated'], 1) }}</strong></span>
+                                            <span>Used: <strong class="text-gray-800 dark:text-gray-200 font-semibold">{{ number_format($card['taken'], 1) }}</strong></span>
+                                        </div>
                                     </div>
                                 </div>
                             @endforeach
                         </div>
 
-                        <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 text-center">
-                            <a
+                        <x-slot name="footer">
+                            <x-filament::button
+                                tag="a"
                                 href="{{ url('/admin/time-off/dashboard/my-time-offs/create') }}"
-                                class="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-50 px-3 py-2 text-xs font-semibold text-primary-700 hover:bg-primary-100 transition-colors dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/60"
+                                color="primary"
+                                size="sm"
+                                icon="heroicon-m-plus"
+                                class="w-full"
                             >
-                                <x-heroicon-m-plus class="h-3.5 w-3.5" />
                                 Request Time Off
-                            </a>
-                        </div>
-                    </div>
+                            </x-filament::button>
+                        </x-slot>
+                    </x-filament::section>
                 @endif
 
                 @if ($hasMultiFactorAuth)
