@@ -8,7 +8,9 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Webkul\Employee\Enums\AttendanceSource;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
 use Webkul\Employee\Models\AttendanceRecord;
@@ -92,6 +94,55 @@ class AttendanceRecordsRelationManager extends RelationManager
                             ->values(),
                         'timezone' => app(AttendanceScheduleResolver::class)->timezoneFor($record->employee),
                     ])),
+            ])
+            ->headerActions([
+                Action::make('export_csv')
+                    ->label('Export Attendance (CSV)')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->action(function ($livewire) {
+                        $employee = $livewire->getOwnerRecord();
+                        $records = $livewire->getFilteredTableQuery()->orderBy('attendance_date', 'desc')->get();
+                        $slug = Str::slug($employee?->name ?? 'employee');
+                        $filename = "attendance-{$slug}-".now()->format('Y-m-d').'.csv';
+
+                        return response()->streamDownload(function () use ($records, $employee) {
+                            $handle = fopen('php://output', 'w');
+                            fputcsv($handle, [
+                                'Date',
+                                'Employee Name',
+                                'Check In',
+                                'Check Out',
+                                'Worked Hours',
+                                'Late Minutes',
+                                'Early Minutes',
+                                'Overtime Hours',
+                                'Status',
+                                'Verification',
+                                'Source',
+                            ]);
+
+                            foreach ($records as $r) {
+                                fputcsv($handle, [
+                                    $r->attendance_date ? Carbon::parse($r->attendance_date)->format('Y-m-d') : '',
+                                    $employee?->name ?? '',
+                                    $r->check_in ? Carbon::parse($r->check_in)->format('Y-m-d H:i:s') : '',
+                                    $r->check_out ? Carbon::parse($r->check_out)->format('Y-m-d H:i:s') : '',
+                                    number_format((float) $r->worked_hours, 2),
+                                    (int) $r->late_minutes,
+                                    (int) $r->early_departure_minutes,
+                                    number_format((float) $r->overtime_hours, 2),
+                                    ucfirst((string) $r->status),
+                                    $r->verification_status,
+                                    $r->source,
+                                ]);
+                            }
+
+                            fclose($handle);
+                        }, $filename, [
+                            'Content-Type' => 'text/csv',
+                        ]);
+                    }),
             ]);
     }
 }

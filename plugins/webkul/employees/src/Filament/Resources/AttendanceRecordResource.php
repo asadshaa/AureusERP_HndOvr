@@ -401,6 +401,53 @@ class AttendanceRecordResource extends Resource
                             }
                         }
                     }),
+                Action::make('export_csv')
+                    ->label('Export Attendance (CSV)')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->action(function ($livewire) {
+                        $records = $livewire->getFilteredTableQuery()->with(['employee.department'])->orderBy('attendance_date', 'desc')->get();
+                        $filename = 'attendance-register-'.now()->format('Y-m-d').'.csv';
+
+                        return response()->streamDownload(function () use ($records) {
+                            $handle = fopen('php://output', 'w');
+                            fputcsv($handle, [
+                                'Date',
+                                'Employee Name',
+                                'Department',
+                                'Check In',
+                                'Check Out',
+                                'Worked Hours',
+                                'Late Minutes',
+                                'Early Minutes',
+                                'Overtime Hours',
+                                'Status',
+                                'Verification',
+                                'Source',
+                            ]);
+
+                            foreach ($records as $r) {
+                                fputcsv($handle, [
+                                    $r->attendance_date ? Carbon::parse($r->attendance_date)->format('Y-m-d') : '',
+                                    $r->employee?->name ?? '',
+                                    $r->employee?->department?->name ?? '',
+                                    $r->check_in ? Carbon::parse($r->check_in)->format('Y-m-d H:i:s') : '',
+                                    $r->check_out ? Carbon::parse($r->check_out)->format('Y-m-d H:i:s') : '',
+                                    number_format((float) $r->worked_hours, 2),
+                                    (int) $r->late_minutes,
+                                    (int) $r->early_departure_minutes,
+                                    number_format((float) $r->overtime_hours, 2),
+                                    ucfirst((string) $r->status),
+                                    $r->verification_status,
+                                    $r->source,
+                                ]);
+                            }
+
+                            fclose($handle);
+                        }, $filename, [
+                            'Content-Type' => 'text/csv',
+                        ]);
+                    }),
             ])
             ->bulkActions([
                 BulkActionGroup::make([
