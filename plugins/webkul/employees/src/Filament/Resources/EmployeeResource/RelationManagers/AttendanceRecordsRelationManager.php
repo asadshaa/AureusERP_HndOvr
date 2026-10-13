@@ -8,9 +8,11 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Webkul\Employee\Enums\AttendanceSource;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
@@ -45,9 +47,68 @@ class AttendanceRecordsRelationManager extends RelationManager
             || ($ownerRecord->user_id !== null && (int) $ownerRecord->user_id === (int) $user->id);
     }
 
+    public static function getMonthlySummary(Model $employee, ?string $yearMonth = null): array
+    {
+        $target = $yearMonth ? Carbon::createFromFormat('Y-m', $yearMonth) : now();
+        $startOfMonth = $target->copy()->startOfMonth()->toDateString();
+        $endOfMonth = $target->copy()->endOfMonth()->toDateString();
+        $monthLabel = $target->format('F Y');
+
+        $records = $employee->attendanceRecords()
+            ->whereBetween('attendance_date', [$startOfMonth, $endOfMonth])
+            ->get()
+            ->reject(fn ($r): bool => $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false);
+
+        $present = $records->where('status', 'present')->count();
+        $halfDay = $records->where('status', 'half_day')->count();
+        $absent = $records->where('status', 'absent')->count();
+        $leave = $records->where('status', 'leave')->count();
+        $lateMinutes = (int) $records->sum('late_minutes');
+        $earlyMinutes = (int) $records->sum('early_departure_minutes');
+        $workedHours = (float) $records->sum('worked_hours');
+        $overtimeHours = (float) $records->sum('overtime_hours');
+
+        // Total working days in this month (Monday - Friday)
+        $workingDays = 0;
+        $day = $target->copy()->startOfMonth();
+        $end = $target->copy()->endOfMonth();
+        while ($day->lte($end)) {
+            if (! $day->isWeekend()) {
+                $workingDays++;
+            }
+            $day->addDay();
+        }
+
+        return [
+            'month'          => $monthLabel,
+            'present'        => $present,
+            'half_day'       => $halfDay,
+            'absent'         => $absent,
+            'leave'          => $leave,
+            'late_minutes'   => $lateMinutes,
+            'early_minutes'  => $earlyMinutes,
+            'worked_hours'   => $workedHours,
+            'overtime_hours' => $overtimeHours,
+            'working_days'   => $workingDays,
+        ];
+    }
+
     public function table(Table $table): Table
     {
+        $employee = $this->getOwnerRecord();
+
         return $table
+            ->description(function ($livewire) use ($employee): HtmlString {
+                $filterMonth = $livewire->tableFilters['month']['value'] ?? null;
+                $summary = static::getMonthlySummary($employee, $filterMonth);
+
+                return new HtmlString(
+                    view('employees::filament.components.employee-monthly-attendance-summary', [
+                        'summary'  => $summary,
+                        'employee' => $employee,
+                    ])->render()
+                );
+            })
             ->defaultSort('attendance_date', 'desc')
             ->columns([
                 TextColumn::make('attendance_date')->date()->sortable(),
@@ -67,6 +128,25 @@ class AttendanceRecordsRelationManager extends RelationManager
                     ->color(fn (?string $state): ?string => AttendanceVerificationStatus::tryFrom((string) $state)?->getColor()),
             ])
             ->filters([
+                SelectFilter::make('month')
+                    ->label('Month')
+                    ->options(function () use ($employee): array {
+                        $dates = $employee->attendanceRecords()->pluck('attendance_date');
+                        $months = $dates->map(fn ($d): string => Carbon::parse($d)->format('Y-m'))->unique()->sortDesc();
+                        $current = now()->format('Y-m');
+                        if (! $months->contains($current)) {
+                            $months->prepend($current);
+                        }
+
+                        return $months->mapWithKeys(fn (string $ym): array => [$ym => Carbon::createFromFormat('Y-m', $ym)->format('F Y')])->all();
+                    })
+                    ->query(function (Builder $query, array $data): void {
+                        if (! empty($data['value'])) {
+                            $start = Carbon::createFromFormat('Y-m', $data['value'])->startOfMonth()->toDateString();
+                            $end = Carbon::createFromFormat('Y-m', $data['value'])->endOfMonth()->toDateString();
+                            $query->whereBetween('attendance_date', [$start, $end]);
+                        }
+                    }),
                 SelectFilter::make('status')->options([
                     'present'  => 'Present',
                     'half_day' => 'Half Day',
