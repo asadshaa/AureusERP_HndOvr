@@ -1,0 +1,12 @@
+HBL — Raw Bank Statement,,,,,,,,,,,,,
+Account title,Truck It In (Private) Limited,,,,Opening balance,"5,000,000",,,,,,,
+Account number,PK55HABB0022827200508103,,,,Total debits,"545,000",,,,,,,
+Statement period,01-Oct-2026 to 31-Oct-2026,,,,Total credits,"850,000",,,,,,,
+Currency,PKR,,,,Closing balance,"5,305,000",,,,,,,
+,,,,,,,,,,,,,
+Transaction Date,Value Date,Description,Reference,Debit (PKR),Credit (PKR),Balance (PKR),Transaction Type,Counterparty,Offset GL Code,FS Tag,Cash Flow Category
+02-Oct-2026,02-Oct-2026,IBFT CR - Daraz Pakistan settlement INV-DZ-261002,HBL261002001,,"650,000","5,650,000",Credit,,,Customer Collections,
+05-Oct-2026,05-Oct-2026,POS 7712 - Shell F-8 Islamabad Fuel,HBL261005002,"25,000",,"5,625,000",Debit,,,Vendor Payout,
+08-Oct-2026,08-Oct-2026,Online payment - PTCL corporate internet,HBL261008003,"45,000",,"5,580,000",Debit,,,Tech,
+10-Oct-2026,10-Oct-2026,Raast CR - Merchant advance settlement,HBL261010004,,"200,000","5,780,000",Credit,,,Recovery,
+11-Oct-2026,11-Oct-2026,Cheque 109921 - Pak Cargo Fleet Services,CHQ109921,"475,000",,"5,305,000",Debit,,,Vendor Payout,
