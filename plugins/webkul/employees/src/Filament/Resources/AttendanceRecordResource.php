@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
 use Webkul\Employee\Enums\AttendanceSource;
@@ -34,6 +35,7 @@ use Webkul\Employee\Enums\AttendanceVerificationStatus;
 use Webkul\Employee\Filament\Resources\AttendanceRecordResource\Pages\ManageAttendanceRecords;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\AttendanceVerification;
+use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\EmployeeRequestService;
@@ -405,14 +407,70 @@ class AttendanceRecordResource extends Resource
                     ->label('Export Attendance (CSV)')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('success')
-                    ->action(function ($livewire) {
-                        $records = $livewire->getFilteredTableQuery()->with(['employee.department'])->orderBy('attendance_date', 'desc')->get();
-                        $filename = 'attendance-register-'.now()->format('Y-m-d').'.csv';
+                    ->visible(fn (): bool => (bool) (Auth::user()?->can(HrPermissions::ManageAttendance) || Auth::user()?->can(HrPermissions::ViewAttendance)))
+                    ->modalHeading('Export Attendance Records')
+                    ->modalDescription('Download attendance records as CSV. Weekends (Saturday & Sunday) are automatically excluded.')
+                    ->modalSubmitActionLabel('Download CSV')
+                    ->schema([
+                        Select::make('employee_id')
+                            ->label('Employee')
+                            ->placeholder('All Employees (or select specific)')
+                            ->options(function () {
+                                $user = Auth::user();
+                                $companyId = (int) $user?->default_company_id;
+                                $visible = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
+
+                                return Employee::query()
+                                    ->where('company_id', $companyId)
+                                    ->whereIn('id', $visible)
+                                    ->orderBy('name')
+                                    ->pluck('name', 'id');
+                            })
+                            ->searchable()
+                            ->preload(),
+                        DatePicker::make('from_date')
+                            ->label('From Date')
+                            ->placeholder('Start date (optional)'),
+                        DatePicker::make('to_date')
+                            ->label('To Date')
+                            ->placeholder('End date (optional)'),
+                    ])
+                    ->action(function (array $data, $livewire) {
+                        $query = $livewire->getFilteredTableQuery()->with(['employee.department']);
+
+                        if (! empty($data['employee_id'])) {
+                            $query->where('employee_id', $data['employee_id']);
+                        }
+
+                        if (! empty($data['from_date'])) {
+                            $query->whereDate('attendance_date', '>=', $data['from_date']);
+                        }
+
+                        if (! empty($data['to_date'])) {
+                            $query->whereDate('attendance_date', '<=', $data['to_date']);
+                        }
+
+                        $records = $query->orderBy('attendance_date', 'desc')->get();
+
+                        // Weekends (Saturday & Sunday) are strictly excluded
+                        $records = $records->reject(function ($r): bool {
+                            return $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false;
+                        });
+
+                        $empName = ! empty($data['employee_id'])
+                            ? Employee::find($data['employee_id'])?->name
+                            : null;
+
+                        $prefix = $empName ? 'attendance-'.Str::slug($empName) : 'attendance-register';
+                        $fromPart = ! empty($data['from_date']) ? Carbon::parse($data['from_date'])->format('Ymd') : 'start';
+                        $toPart = ! empty($data['to_date']) ? Carbon::parse($data['to_date'])->format('Ymd') : now()->format('Ymd');
+                        $filename = "{$prefix}-{$fromPart}-to-{$toPart}.csv";
 
                         return response()->streamDownload(function () use ($records) {
                             $handle = fopen('php://output', 'w');
                             fputcsv($handle, [
                                 'Date',
+                                'Day',
                                 'Employee Name',
                                 'Department',
                                 'Check In',
@@ -427,8 +485,10 @@ class AttendanceRecordResource extends Resource
                             ]);
 
                             foreach ($records as $r) {
+                                $dt = $r->attendance_date ? Carbon::parse($r->attendance_date) : null;
                                 fputcsv($handle, [
-                                    $r->attendance_date ? Carbon::parse($r->attendance_date)->format('Y-m-d') : '',
+                                    $dt ? $dt->format('Y-m-d') : '',
+                                    $dt ? $dt->format('l') : '',
                                     $r->employee?->name ?? '',
                                     $r->employee?->department?->name ?? '',
                                     $r->check_in ? Carbon::parse($r->check_in)->format('Y-m-d H:i:s') : '',

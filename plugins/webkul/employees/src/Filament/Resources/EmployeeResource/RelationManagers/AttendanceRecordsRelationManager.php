@@ -3,6 +3,7 @@
 namespace Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers;
 
 use Filament\Actions\Action;
+use Filament\Forms\Components\DatePicker;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -100,16 +101,47 @@ class AttendanceRecordsRelationManager extends RelationManager
                     ->label('Export Attendance (CSV)')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('success')
-                    ->action(function ($livewire) {
+                    ->visible(fn (): bool => (bool) (Auth::user()?->can(HrPermissions::ManageAttendance) || Auth::user()?->can(HrPermissions::ViewAttendance)))
+                    ->modalHeading('Export Attendance Records')
+                    ->modalDescription('Download attendance records for this employee. Weekends (Saturday & Sunday) are automatically excluded.')
+                    ->modalSubmitActionLabel('Download CSV')
+                    ->schema([
+                        DatePicker::make('from_date')
+                            ->label('From Date')
+                            ->placeholder('Start date (optional)'),
+                        DatePicker::make('to_date')
+                            ->label('To Date')
+                            ->placeholder('End date (optional)'),
+                    ])
+                    ->action(function (array $data, $livewire) {
                         $employee = $livewire->getOwnerRecord();
-                        $records = $livewire->getFilteredTableQuery()->orderBy('attendance_date', 'desc')->get();
+                        $query = $livewire->getFilteredTableQuery();
+
+                        if (! empty($data['from_date'])) {
+                            $query->whereDate('attendance_date', '>=', $data['from_date']);
+                        }
+
+                        if (! empty($data['to_date'])) {
+                            $query->whereDate('attendance_date', '<=', $data['to_date']);
+                        }
+
+                        $records = $query->orderBy('attendance_date', 'desc')->get();
+
+                        // Weekends (Saturday & Sunday) are strictly excluded
+                        $records = $records->reject(function ($r): bool {
+                            return $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false;
+                        });
+
                         $slug = Str::slug($employee?->name ?? 'employee');
-                        $filename = "attendance-{$slug}-".now()->format('Y-m-d').'.csv';
+                        $fromPart = ! empty($data['from_date']) ? Carbon::parse($data['from_date'])->format('Ymd') : 'start';
+                        $toPart = ! empty($data['to_date']) ? Carbon::parse($data['to_date'])->format('Ymd') : now()->format('Ymd');
+                        $filename = "attendance-{$slug}-{$fromPart}-to-{$toPart}.csv";
 
                         return response()->streamDownload(function () use ($records, $employee) {
                             $handle = fopen('php://output', 'w');
                             fputcsv($handle, [
                                 'Date',
+                                'Day',
                                 'Employee Name',
                                 'Check In',
                                 'Check Out',
@@ -123,8 +155,10 @@ class AttendanceRecordsRelationManager extends RelationManager
                             ]);
 
                             foreach ($records as $r) {
+                                $dt = $r->attendance_date ? Carbon::parse($r->attendance_date) : null;
                                 fputcsv($handle, [
-                                    $r->attendance_date ? Carbon::parse($r->attendance_date)->format('Y-m-d') : '',
+                                    $dt ? $dt->format('Y-m-d') : '',
+                                    $dt ? $dt->format('l') : '',
                                     $employee?->name ?? '',
                                     $r->check_in ? Carbon::parse($r->check_in)->format('Y-m-d H:i:s') : '',
                                     $r->check_out ? Carbon::parse($r->check_out)->format('Y-m-d H:i:s') : '',
