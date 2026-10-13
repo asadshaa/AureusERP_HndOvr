@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Webkul\Employee\Enums\AttendanceSource;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
@@ -29,9 +28,18 @@ class AttendanceRecordsRelationManager extends RelationManager
 
     protected static string|\BackedEnum|null $icon = 'heroicon-o-clock';
 
+    protected string $view = 'employees::filament.resources.employee.relation-managers.attendance-records';
+
     public function isReadOnly(): bool
     {
         return true;
+    }
+
+    public function getMonthlySummaryForView(): array
+    {
+        $filterMonth = $this->tableFilters['month']['value'] ?? null;
+
+        return static::getMonthlySummary($this->getOwnerRecord(), $filterMonth);
     }
 
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
@@ -98,17 +106,6 @@ class AttendanceRecordsRelationManager extends RelationManager
         $employee = $this->getOwnerRecord();
 
         return $table
-            ->description(function ($livewire) use ($employee): HtmlString {
-                $filterMonth = $livewire->tableFilters['month']['value'] ?? null;
-                $summary = static::getMonthlySummary($employee, $filterMonth);
-
-                return new HtmlString(
-                    view('employees::filament.components.employee-monthly-attendance-summary', [
-                        'summary'  => $summary,
-                        'employee' => $employee,
-                    ])->render()
-                );
-            })
             ->defaultSort('attendance_date', 'desc')
             ->columns([
                 TextColumn::make('attendance_date')->date()->sortable(),
