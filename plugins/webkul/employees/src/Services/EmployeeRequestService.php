@@ -23,6 +23,7 @@ use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
+use Webkul\Support\Services\HierarchicalNotificationService;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 
@@ -70,7 +71,7 @@ class EmployeeRequestService
             'rejected_at'         => null,
         ]);
 
-        $this->notifyApprovers($request, $requester);
+        $this->notifyApprovers($request, $requester, $approval);
 
         return $approval;
     }
@@ -509,6 +510,16 @@ class EmployeeRequestService
                 'accounting_move_id'      => $move->id,
                 'posted_to_accounting_at' => now(),
             ]);
+
+            DB::afterCommit(function () use ($request, $move): void {
+                app(HierarchicalNotificationService::class)->notifyAccountingReady(
+                    $request,
+                    (int) $request->company_id,
+                    $request->reference ?: ('BILL-'.$move->id),
+                    $request->title ?? 'Reimbursement',
+                    (string) $request->amount,
+                );
+            });
         });
 
         return $request->fresh(['accountingMove.lines']);
@@ -601,9 +612,21 @@ class EmployeeRequestService
             : $request->title;
     }
 
-    private function notifyApprovers(EmployeeRequest $request, User $requester): void
+    private function notifyApprovers(EmployeeRequest $request, User $requester, ?ApprovalRequest $approval = null): void
     {
         try {
+            $approval = $approval ?? $request->approvalRequest;
+
+            if ($approval) {
+                app(HierarchicalNotificationService::class)->notifyRequestSubmitted(
+                    $approval,
+                    $request,
+                    $requester,
+                );
+
+                return;
+            }
+
             $employee = $request->employee;
             if (! $employee) {
                 return;
@@ -618,20 +641,7 @@ class EmployeeRequestService
                 $recipients = collect([$manager]);
                 $routingNote = '[Routed to Line Manager]';
             } else {
-                $recipients = User::query()
-                    ->where('default_company_id', $request->company_id)
-                    ->where('is_active', true)
-                    ->get()
-                    ->filter(fn (User $u): bool => (
-                        $u->hasRole([
-                            'Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager',
-                            'hr_ops_manager', 'hr ops manager', 'hr operations manager',
-                            'hr_administrator', 'hr administrator', 'human resources', 'human resources manager',
-                        ])
-                        || $u->can('hr_manage_attendance')
-                        || $u->can('hr_manage_employee_requests')
-                        || $u->can('hr_view_all_records')
-                    ) && (int) $u->id !== (int) $requester->id);
+                $recipients = $this->approvals->resolveHrApproversForCompany((int) $request->company_id, (int) $requester->id);
                 $routingNote = '[Forwarded to HR: no line manager assigned]';
             }
 
@@ -641,38 +651,10 @@ class EmployeeRequestService
 
             $who = $employee->name.((int) $employee->user_id !== (int) $requester->id ? " (by {$requester->name})" : '');
             $what = $request->requestType?->name ?? 'Employee Request';
-            $payload = (array) ($request->payload ?? []);
-
-            $dateStr = $payload['attendance_date'] ?? null;
-            if (! $dateStr && isset($payload['attendance_record_id'])) {
-                $dateStr = AttendanceRecord::find($payload['attendance_record_id'])?->attendance_date?->toDateString();
-            }
-
-            $dayAndDate = '';
-            if ($dateStr) {
-                $carbon = Carbon::parse($dateStr);
-                $dayAndDate = " | Day: {$carbon->format('l')}, Date: {$carbon->format('d M Y')}";
-            }
-
-            $timeDetails = '';
-            if (isset($payload['requested']['check_in'])) {
-                $reqIn = $payload['requested']['check_in'] ? Carbon::parse($payload['requested']['check_in'])->format('H:i') : '—';
-                $reqOut = ! empty($payload['requested']['check_out']) ? Carbon::parse($payload['requested']['check_out'])->format('H:i') : '—';
-                $origIn = ! empty($payload['original']['check_in']) ? Carbon::parse($payload['original']['check_in'])->format('H:i') : '—';
-                $origOut = ! empty($payload['original']['check_out']) ? Carbon::parse($payload['original']['check_out'])->format('H:i') : '—';
-                if (($payload['kind'] ?? '') === 'attendance_missing_day') {
-                    $timeDetails = " | Times: In {$reqIn}, Out {$reqOut}";
-                } else {
-                    $timeDetails = " | Times: In {$origIn}→{$reqIn}, Out {$origOut}→{$reqOut}";
-                }
-            }
-
-            $reason = $request->description ? " | Note: {$request->description}" : '';
-
             $title = ($what === 'Attendance Time Change')
                 ? "{$employee->name} requested attendance time change"
                 : "{$what} Request: {$employee->name}";
-            $body = "{$who} submitted {$what}{$dayAndDate}{$timeDetails}{$reason} {$routingNote}";
+            $body = "{$who} submitted {$what} {$routingNote}";
 
             $notification = FilamentNotification::make()
                 ->warning()
@@ -680,7 +662,12 @@ class EmployeeRequestService
                 ->body($body);
 
             foreach ($recipients as $recipient) {
-                $recipient->notifyNow($notification->toDatabase());
+                $idempotencyKey = "employee_request_submit_{$request->id}_{$recipient->id}";
+                app(HierarchicalNotificationService::class)->sendIdempotentNotification($recipient, $notification, $idempotencyKey, [
+                    'event'               => 'employee_request_submit',
+                    'employee_request_id' => $request->id,
+                    'company_id'          => $request->company_id,
+                ]);
             }
         } catch (\Throwable $e) {
             report($e);
@@ -759,8 +746,15 @@ class EmployeeRequestService
                 ->title($title)
                 ->body($body);
 
+            $approvalId = $request->approval_request_id ?: $request->id;
             foreach ($recipients as $recipient) {
-                $recipient->notifyNow($notification->toDatabase());
+                $idempotencyKey = "approval_decision_{$approvalId}_{$decision}_{$recipient->id}";
+                app(HierarchicalNotificationService::class)->sendIdempotentNotification($recipient, $notification, $idempotencyKey, [
+                    'event'               => 'employee_request_decision',
+                    'employee_request_id' => $request->id,
+                    'decision'            => $decision,
+                    'company_id'          => $request->company_id,
+                ]);
             }
         } catch (\Throwable $e) {
             report($e);

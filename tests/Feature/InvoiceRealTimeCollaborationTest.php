@@ -3,8 +3,8 @@
 namespace Tests\Feature;
 
 use App\Listeners\NotifyUsersOnMoveConfirmed;
-use Filament\Notifications\Models\DatabaseNotification;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Facades\Auth;
 use Tests\TestCase;
 use Webkul\Account\Enums\MoveState;

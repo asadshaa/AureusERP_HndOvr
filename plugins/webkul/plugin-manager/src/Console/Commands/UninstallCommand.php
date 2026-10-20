@@ -5,8 +5,8 @@ namespace Webkul\PluginManager\Console\Commands;
 use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Webkul\PluginManager\Package;
+use Webkul\PluginManager\Support\PathNormalizer;
 
 class UninstallCommand extends Command
 {
@@ -85,12 +85,13 @@ class UninstallCommand extends Command
         foreach ($migrations as $migration) {
             $fullPath = $this->package->basePath("../database/migrations/{$migration}.php");
 
-            $migrationPath = Str::after($fullPath, base_path().DIRECTORY_SEPARATOR);
+            $migrationPath = PathNormalizer::toRelativePath($fullPath);
+            $absolutePath = base_path($migrationPath);
 
-            if (file_exists($migrationPath)) {
-                require_once $migrationPath;
+            if (file_exists($absolutePath)) {
+                require_once $absolutePath;
 
-                $migrationInstance = require $migrationPath;
+                $migrationInstance = require $absolutePath;
 
                 if (is_object($migrationInstance) && method_exists($migrationInstance, 'down')) {
                     $this->info("🗑️ Rolling back migration: {$migration}");
@@ -105,12 +106,13 @@ class UninstallCommand extends Command
         foreach ($this->package->settingFileNames as $setting) {
             $fullPath = $this->package->basePath("../database/settings/{$setting}.php");
 
-            $migrationPath = Str::after($fullPath, base_path().DIRECTORY_SEPARATOR);
+            $migrationPath = PathNormalizer::toRelativePath($fullPath);
+            $absolutePath = base_path($migrationPath);
 
-            if (file_exists($migrationPath)) {
-                require_once $migrationPath;
+            if (file_exists($absolutePath)) {
+                require_once $absolutePath;
 
-                $migrationInstance = require $migrationPath;
+                $migrationInstance = require $absolutePath;
 
                 if (is_object($migrationInstance) && method_exists($migrationInstance, 'down')) {
                     $this->info("🗑️ Rolling back setting migration: {$setting}");

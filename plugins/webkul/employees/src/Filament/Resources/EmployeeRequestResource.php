@@ -947,7 +947,8 @@ class EmployeeRequestResource extends Resource
                             Notification::make()->danger()->title('Saved as draft -- could not submit')->body($e->getMessage())->send();
                         }
                     }),
-            ]);
+            ])
+            ->defaultSort('id', 'desc');
     }
 
     public static function getEloquentQuery(): Builder

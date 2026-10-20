@@ -481,7 +481,8 @@ class PaymentResource extends Resource
                     ->label(__('accounts::filament/resources/payment.table.toolbar-actions.export.label'))
                     ->icon('heroicon-o-arrow-up-tray')
                     ->exporter(PaymentExporter::class),
-            ]);
+            ])
+            ->defaultSort('id', 'desc');
     }
 
     public static function infolist(Schema $schema): Schema

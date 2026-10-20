@@ -826,6 +826,7 @@ class BillResource extends Resource
             ->checkIfRecordIsSelectableUsing(
                 fn (Model $record): bool => static::can('delete', $record) && $record->state !== MoveState::POSTED,
             )
+            ->defaultSort('id', 'desc')
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with('currency');
             });

@@ -4,6 +4,7 @@ namespace Webkul\Support\Services;
 
 use Brick\Math\BigDecimal;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Security\Models\User;
@@ -87,6 +88,103 @@ final class ApprovalEngine
                 'submitted_at'          => now(),
             ])->fresh(['workflow.steps', 'requester']);
         });
+    }
+
+    public function resolveAuthorizedApprovers(ApprovalRequest $request, ?ApprovalStep $step = null): Collection
+    {
+        $request->loadMissing([
+            'workflow.steps',
+            'requester.employee.parent.user',
+            'requester.employee.department.manager.user',
+            'requester.employee.team.manager.user',
+            'subject',
+        ]);
+
+        $step = $step ?? $request->currentStep();
+        if (! $step) {
+            return collect();
+        }
+
+        $companyId = (int) $request->company_id;
+
+        if ($step->approver_user_id) {
+            $user = User::query()->whereKey($step->approver_user_id)->where('is_active', true)->first();
+            if ($user && $this->userCanAccessCompany($user, $companyId)) {
+                return collect([$user]);
+            }
+
+            return collect();
+        }
+
+        if ($step->approver_role_id) {
+            return User::query()
+                ->where('is_active', true)
+                ->whereHas('roles', fn ($q) => $q->where('roles.id', $step->approver_role_id))
+                ->get()
+                ->filter(fn (User $u) => $this->userCanAccessCompany($u, $companyId) && $this->canAct($request, $u))
+                ->values();
+        }
+
+        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+
+        if ($step->hierarchy_route === 'requester_manager') {
+            $manager = $subjectEmployee?->parent?->user;
+            if ($manager && $manager->is_active && $this->userCanAccessCompany($manager, $companyId) && (int) $manager->id !== (int) $subjectEmployee?->user_id) {
+                return collect([$manager]);
+            }
+
+            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+        }
+
+        if ($step->hierarchy_route === 'department_manager') {
+            if ($request->request_type === 'claim_tech') {
+                $techHeadUserId = $this->resolveTechHeadUserId($request);
+                if ($techHeadUserId) {
+                    $techHeadUser = User::query()->whereKey($techHeadUserId)->where('is_active', true)->first();
+                    if ($techHeadUser && $this->userCanAccessCompany($techHeadUser, $companyId)) {
+                        return collect([$techHeadUser]);
+                    }
+                }
+            }
+
+            $deptManager = $subjectEmployee?->department?->manager?->user;
+            if ($deptManager && $deptManager->is_active && $this->userCanAccessCompany($deptManager, $companyId) && (int) $deptManager->id !== (int) $subjectEmployee?->user_id) {
+                return collect([$deptManager]);
+            }
+
+            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+        }
+
+        if ($step->hierarchy_route === 'team_manager') {
+            $teamManager = $subjectEmployee?->team?->manager?->user;
+            if ($teamManager && $teamManager->is_active && $this->userCanAccessCompany($teamManager, $companyId) && (int) $teamManager->id !== (int) $subjectEmployee?->user_id) {
+                return collect([$teamManager]);
+            }
+
+            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+        }
+
+        return collect();
+    }
+
+    public function resolveHrApproversForCompany(int $companyId, ?int $excludeUserId = null): Collection
+    {
+        return User::query()
+            ->where('is_active', true)
+            ->get()
+            ->filter(function (User $u) use ($companyId, $excludeUserId): bool {
+                if ($excludeUserId && (int) $u->id === (int) $excludeUserId) {
+                    return false;
+                }
+                if (! $this->userCanAccessCompany($u, $companyId)) {
+                    return false;
+                }
+
+                return $this->isHrApprover($u)
+                    || $u->can('hr_manage_employee_requests')
+                    || $u->can('hr_view_all_records');
+            })
+            ->values();
     }
 
     public function canAct(ApprovalRequest $request, User $actor): bool
@@ -404,6 +502,10 @@ final class ApprovalEngine
 
             if ($decision === 'rejected') {
                 $request->update(['status' => 'rejected', 'completed_at' => now()]);
+
+                DB::afterCommit(function () use ($request, $actor, $reason): void {
+                    app(HierarchicalNotificationService::class)->notifyRequestRejected($request, $actor, $reason ?? '');
+                });
             } else {
                 $approvalCount = $request->decisions()
                     ->where('step_id', $step->id)
@@ -425,6 +527,16 @@ final class ApprovalEngine
                         'current_step_sequence' => null,
                         'completed_at'          => now(),
                     ]);
+
+                    if ($nextStep) {
+                        DB::afterCommit(function () use ($request, $step, $nextStep, $actor): void {
+                            app(HierarchicalNotificationService::class)->notifyStepAdvanced($request, $step, $nextStep, $actor);
+                        });
+                    } else {
+                        DB::afterCommit(function () use ($request, $actor): void {
+                            app(HierarchicalNotificationService::class)->notifyRequestApproved($request, $actor);
+                        });
+                    }
                 }
             }
 
@@ -481,7 +593,7 @@ final class ApprovalEngine
         return true;
     }
 
-    private function userCanAccessCompany(User $user, int $companyId): bool
+    public function userCanAccessCompany(User $user, int $companyId): bool
     {
         return (int) $user->default_company_id === $companyId
             || $user->allowedCompanies()->whereKey($companyId)->exists();

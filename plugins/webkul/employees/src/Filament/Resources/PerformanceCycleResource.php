@@ -78,7 +78,9 @@ class PerformanceCycleResource extends Resource
                 }),
             EditAction::make(),
             DeleteAction::make()->visible(fn (PerformanceCycle $record): bool => $record->status === 'draft'),
-        ])->headerActions([CreateAction::make()]);
+        ])
+            ->defaultSort('created_at', 'desc')
+            ->headerActions([CreateAction::make()]);
     }
 
     public static function getEloquentQuery(): Builder

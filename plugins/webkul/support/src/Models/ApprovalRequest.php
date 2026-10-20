@@ -30,10 +30,11 @@ class ApprovalRequest extends Model
     protected function casts(): array
     {
         return [
-            'amount'       => 'decimal:4',
-            'context'      => 'array',
-            'submitted_at' => 'datetime',
-            'completed_at' => 'datetime',
+            'amount'                => 'decimal:4',
+            'context'               => 'array',
+            'current_step_sequence' => 'integer',
+            'submitted_at'          => 'datetime',
+            'completed_at'          => 'datetime',
         ];
     }
 
@@ -68,6 +69,8 @@ class ApprovalRequest extends Model
             return null;
         }
 
-        return $this->workflow->steps->firstWhere('sequence', $this->current_step_sequence);
+        return $this->workflow?->steps?->first(
+            fn (ApprovalStep $step): bool => (int) $step->sequence === (int) $this->current_step_sequence
+        );
     }
 }

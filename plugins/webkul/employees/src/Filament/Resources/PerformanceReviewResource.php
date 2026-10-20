@@ -126,7 +126,8 @@ class PerformanceReviewResource extends Resource
                     }
                 }),
             EditAction::make(),
-        ]);
+        ])
+            ->defaultSort('id', 'desc');
     }
 
     /**

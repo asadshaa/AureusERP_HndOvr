@@ -9,6 +9,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\PerformanceCycle;
 use Webkul\Employee\Models\PerformanceReview;
 use Webkul\Security\Models\User;
+use Webkul\Support\Services\HierarchicalNotificationService;
 
 class PerformanceService
 {
@@ -37,6 +38,10 @@ class PerformanceService
             });
             $cycle->update(['status' => 'active']);
 
+            DB::afterCommit(function () use ($cycle, $employees): void {
+                app(HierarchicalNotificationService::class)->notifyPerformanceCycleLaunched($cycle, $employees);
+            });
+
             return $reviews;
         });
     }
@@ -52,6 +57,8 @@ class PerformanceService
             'status'       => 'manager_review',
             'submitted_at' => now(),
         ]);
+
+        app(HierarchicalNotificationService::class)->notifyPerformanceSelfReviewSubmitted($review);
 
         return $review->fresh();
     }
@@ -76,6 +83,8 @@ class PerformanceService
             }
         }
         $review->update($updates);
+
+        app(HierarchicalNotificationService::class)->notifyPerformanceManagerReviewCompleted($review);
 
         return $review->fresh();
     }

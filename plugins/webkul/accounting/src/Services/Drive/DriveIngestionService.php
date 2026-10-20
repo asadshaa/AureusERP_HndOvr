@@ -41,6 +41,60 @@ class DriveIngestionService
         private readonly DocumentService $documents,
     ) {}
 
+    /** @var array<string, string> Map of drive_file_id => temporary file path on disk */
+    private array $stagedFiles = [];
+
+    private function getOrDownloadStagedFile(string $driveFileId): string
+    {
+        if (isset($this->stagedFiles[$driveFileId]) && file_exists($this->stagedFiles[$driveFileId])) {
+            return $this->stagedFiles[$driveFileId];
+        }
+
+        $tmpPath = tempnam(sys_get_temp_dir(), 'drive-stage-');
+        if ($tmpPath === false) {
+            throw new RuntimeException('Unable to create temporary file for Google Drive ingestion.');
+        }
+
+        try {
+            $content = $this->drive->downloadFileContent($driveFileId);
+            file_put_contents($tmpPath, $content);
+        } catch (Throwable $e) {
+            if (file_exists($tmpPath)) {
+                @unlink($tmpPath);
+            }
+
+            throw $e;
+        }
+
+        return $this->stagedFiles[$driveFileId] = $tmpPath;
+    }
+
+    private function cleanupStagedFile(string $driveFileId): void
+    {
+        if (isset($this->stagedFiles[$driveFileId])) {
+            $path = $this->stagedFiles[$driveFileId];
+            unset($this->stagedFiles[$driveFileId]);
+            if (file_exists($path)) {
+                @unlink($path);
+            }
+        }
+    }
+
+    private function cleanupAllStagedFiles(): void
+    {
+        foreach ($this->stagedFiles as $driveFileId => $path) {
+            if (file_exists($path)) {
+                @unlink($path);
+            }
+        }
+        $this->stagedFiles = [];
+    }
+
+    public function __destruct()
+    {
+        $this->cleanupAllStagedFiles();
+    }
+
     /**
      * Lists $company's inbound Drive folder (found-or-created, same as
      * export's resolveLeafFolder()) and, for every file found, either:
@@ -149,37 +203,43 @@ class DriveIngestionService
         $lock = Cache::lock("accounting-drive-ingestion:company:{$company->id}", 60);
 
         return $lock->block(15, function () use ($company): array {
-            $touched = $this->discover($company);
+            try {
+                $touched = $this->discover($company);
 
-            foreach ($touched as $ingestion) {
-                if ($ingestion->status !== DriveIngestionStatus::Discovered) {
-                    continue;
-                }
-
-                try {
-                    $this->download($ingestion);
-                    $ingestion->refresh();
-
-                    if ($ingestion->status === DriveIngestionStatus::Downloaded) {
-                        $this->register($ingestion);
-                        $ingestion->refresh();
+                foreach ($touched as $ingestion) {
+                    if ($ingestion->status !== DriveIngestionStatus::Discovered) {
+                        continue;
                     }
-                } catch (Throwable $e) {
-                    Log::error('accounting.drive_ingestion.sync_item_failed', [
-                        'ingestion_id' => $ingestion->id,
-                        'error'        => $e->getMessage(),
-                    ]);
 
-                    $diagnostic = DriveErrorFormatter::format('Download', $e);
-                    $ingestion->update([
-                        'status'         => DriveIngestionStatus::Failed,
-                        'failure_reason' => json_encode($diagnostic),
-                        'processed_at'   => now(),
-                    ]);
+                    try {
+                        $this->download($ingestion);
+                        $ingestion->refresh();
+
+                        if ($ingestion->status === DriveIngestionStatus::Downloaded) {
+                            $this->register($ingestion);
+                            $ingestion->refresh();
+                        }
+                    } catch (Throwable $e) {
+                        Log::error('accounting.drive_ingestion.sync_item_failed', [
+                            'ingestion_id' => $ingestion->id,
+                            'error'        => $e->getMessage(),
+                        ]);
+
+                        $diagnostic = DriveErrorFormatter::format('Download', $e);
+                        $ingestion->update([
+                            'status'         => DriveIngestionStatus::Failed,
+                            'failure_reason' => json_encode($diagnostic),
+                            'processed_at'   => now(),
+                        ]);
+                    } finally {
+                        $this->cleanupStagedFile($ingestion->drive_file_id);
+                    }
                 }
-            }
 
-            return $touched;
+                return $touched;
+            } finally {
+                $this->cleanupAllStagedFiles();
+            }
         });
     }
 
@@ -212,7 +272,8 @@ class DriveIngestionService
             );
         }
 
-        $checksum = hash('sha256', $this->drive->downloadFileContent($file['id']));
+        $tmpPath = $this->getOrDownloadStagedFile($file['id']);
+        $checksum = hash_file('sha256', $tmpPath);
 
         $existing = DriveIngestion::query()
             ->forCompany($company->id)
@@ -220,6 +281,8 @@ class DriveIngestionService
             ->first();
 
         if ($existing && $existing->checksum_sha256 === $checksum) {
+            $this->cleanupStagedFile($file['id']);
+
             // (b) Already discovered, unchanged -- nothing to do. Mark it
             // DuplicateSkipped only if it hadn't already moved further
             // along (Downloaded/Registered); re-discovering a file that's
@@ -244,6 +307,8 @@ class DriveIngestionService
             );
 
             if ($isPosted) {
+                $this->cleanupStagedFile($file['id']);
+
                 // Post-Posting Drive File Modification Safeguard:
                 // An invoice has already been confirmed/posted in Aureus GL for this file.
                 // Mutating posted accounting history or creating a duplicate invoice is forbidden.
@@ -321,9 +386,11 @@ class DriveIngestionService
         $ingestion->update(['status' => DriveIngestionStatus::Downloading]);
 
         try {
-            $contents = $this->drive->downloadFileContent($ingestion->drive_file_id);
+            $tmpPath = $this->getOrDownloadStagedFile($ingestion->drive_file_id);
 
-            if (hash('sha256', $contents) !== $ingestion->checksum_sha256) {
+            if (hash_file('sha256', $tmpPath) !== $ingestion->checksum_sha256) {
+                $this->cleanupStagedFile($ingestion->drive_file_id);
+
                 $ingestion->update([
                     'status'          => DriveIngestionStatus::Failed,
                     'failure_reason'  => 'Downloaded content does not match the checksum recorded at discovery -- the file may have changed again on Drive mid-download.',
@@ -338,6 +405,8 @@ class DriveIngestionService
                 'processed_at' => now(),
             ]);
         } catch (Throwable $e) {
+            $this->cleanupStagedFile($ingestion->drive_file_id);
+
             $ingestion->update([
                 'status'         => DriveIngestionStatus::Failed,
                 'failure_reason' => $e->getMessage(),
@@ -364,22 +433,21 @@ class DriveIngestionService
             throw new RuntimeException("Drive ingestion #{$ingestion->id} is not ready to be registered (status: {$ingestion->status->value}).");
         }
 
-        $contents = $this->drive->downloadFileContent($ingestion->drive_file_id);
-
-        if (hash('sha256', $contents) !== $ingestion->checksum_sha256) {
-            $ingestion->update([
-                'status'         => DriveIngestionStatus::Failed,
-                'failure_reason' => 'Checksum mismatch at registration time.',
-                'processed_at'   => now(),
-            ]);
-
-            return;
-        }
-
-        $tmpPath = tempnam(sys_get_temp_dir(), 'drive-ingest-');
-        file_put_contents($tmpPath, $contents);
-
         try {
+            $tmpPath = $this->getOrDownloadStagedFile($ingestion->drive_file_id);
+
+            if (hash_file('sha256', $tmpPath) !== $ingestion->checksum_sha256) {
+                $this->cleanupStagedFile($ingestion->drive_file_id);
+
+                $ingestion->update([
+                    'status'         => DriveIngestionStatus::Failed,
+                    'failure_reason' => 'Checksum mismatch at registration time.',
+                    'processed_at'   => now(),
+                ]);
+
+                return;
+            }
+
             $uploadedFile = new UploadedFile($tmpPath, $ingestion->filename, $ingestion->mime_type, null, true);
 
             $document = $this->documents->uploadFromPeer(
@@ -415,9 +483,7 @@ class DriveIngestionService
             // registration itself.
             ClassifyDriveIngestionJob::dispatch($ingestion->id);
         } finally {
-            if (file_exists($tmpPath)) {
-                @unlink($tmpPath);
-            }
+            $this->cleanupStagedFile($ingestion->drive_file_id);
         }
     }
 

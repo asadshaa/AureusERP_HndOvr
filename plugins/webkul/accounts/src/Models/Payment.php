@@ -273,9 +273,9 @@ class Payment extends Model
 
     public function computeName()
     {
-        $this->name = $this->move?->name;
+        $this->name = $this->move?->name ?? $this->name;
 
-        if (! $this->name) {
+        if (! $this->name && $this->journal) {
             $prefix = '';
 
             if (
@@ -289,11 +289,13 @@ class Payment extends Model
                 $prefix .= 'P';
             }
 
+            $year = $this->date ? $this->date->format('Y') : date('Y');
+
             $this->name = sprintf(
                 '%s%s/%s',
                 $prefix,
                 $this->journal->code,
-                $this->date->format('Y'),
+                $year,
             ).'/'.$this->id;
         }
     }
@@ -410,7 +412,7 @@ class Payment extends Model
 
     public function computePaymentMethodId()
     {
-        $this->payment_method_id = $this->paymentMethodLine->payment_method_id;
+        $this->payment_method_id = $this->paymentMethodLine?->payment_method_id;
     }
 
     public function computeOutstandingAccountId()
@@ -419,7 +421,7 @@ class Payment extends Model
             return;
         }
 
-        $this->outstanding_account_id = $this->paymentMethodLine->payment_account_id;
+        $this->outstanding_account_id = $this->paymentMethodLine?->payment_account_id;
 
         if (! $this->outstanding_account_id) {
             $this->outstanding_account_id = $this->getOutstandingAccount($this->payment_type)?->id;
@@ -460,13 +462,15 @@ class Payment extends Model
     {
         if ($this->move_id) {
             $this->amount_company_currency_signed = $this->seekForLines()[0]->sum('balance');
-        } else {
+        } elseif ($this->currency && $this->company?->currency) {
             $this->amount_company_currency_signed = $this->currency->convert(
-                fromAmount: $this->amount,
+                fromAmount: $this->amount ?? 0,
                 toCurrency: $this->company->currency,
                 company: $this->company,
                 date: $this->date
             );
+        } else {
+            $this->amount_company_currency_signed = $this->amount ?? 0;
         }
     }
 

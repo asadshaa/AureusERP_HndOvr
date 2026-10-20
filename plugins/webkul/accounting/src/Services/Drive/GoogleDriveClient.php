@@ -24,8 +24,14 @@ class GoogleDriveClient implements DriveClient
 {
     private DriveService $service;
 
-    public function __construct()
+    public function __construct(?DriveService $service = null)
     {
+        if ($service !== null) {
+            $this->service = $service;
+
+            return;
+        }
+
         $client = new Client;
         $client->setClientId(config('accounting_drive.client_id'));
         $client->setClientSecret(config('accounting_drive.client_secret'));
@@ -155,22 +161,55 @@ class GoogleDriveClient implements DriveClient
 
     public function listFiles(string $parentFolderId): array
     {
-        $result = $this->service->files->listFiles([
-            'q'                         => "'{$parentFolderId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false",
-            'spaces'                    => 'drive',
-            'fields'                    => 'files(id, name, mimeType, size, modifiedTime)',
-            'supportsAllDrives'         => true,
-            'includeItemsFromAllDrives' => true,
-            'pageSize'                  => 1000,
-        ]);
+        $allFiles = [];
+        $seenFileIds = [];
+        $seenPageTokens = [];
+        $pageToken = null;
 
-        return array_map(fn (DriveFile $file) => [
-            'id'           => $file->getId(),
-            'name'         => $file->getName(),
-            'mimeType'     => $file->getMimeType(),
-            'size'         => (int) $file->getSize(),
-            'modifiedTime' => $file->getModifiedTime(),
-        ], $result->getFiles());
+        do {
+            $params = [
+                'q'                         => "'{$parentFolderId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false",
+                'spaces'                    => 'drive',
+                'fields'                    => 'nextPageToken, files(id, name, mimeType, size, modifiedTime)',
+                'supportsAllDrives'         => true,
+                'includeItemsFromAllDrives' => true,
+                'pageSize'                  => 1000,
+            ];
+
+            if ($pageToken !== null && $pageToken !== '') {
+                $params['pageToken'] = $pageToken;
+                $seenPageTokens[$pageToken] = true;
+            }
+
+            $result = $this->service->files->listFiles($params);
+
+            foreach ($result->getFiles() ?? [] as $file) {
+                $id = $file->getId();
+                if ($id !== null && isset($seenFileIds[$id])) {
+                    continue;
+                }
+                if ($id !== null) {
+                    $seenFileIds[$id] = true;
+                }
+
+                $allFiles[] = [
+                    'id'           => $id,
+                    'name'         => $file->getName(),
+                    'mimeType'     => $file->getMimeType(),
+                    'size'         => (int) $file->getSize(),
+                    'modifiedTime' => $file->getModifiedTime(),
+                ];
+            }
+
+            $nextPageToken = $result->getNextPageToken();
+            if ($nextPageToken !== null && $nextPageToken !== '' && isset($seenPageTokens[$nextPageToken])) {
+                break;
+            }
+
+            $pageToken = $nextPageToken;
+        } while ($pageToken !== null && $pageToken !== '');
+
+        return $allFiles;
     }
 
     public function downloadFileContent(string $fileId): string

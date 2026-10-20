@@ -603,7 +603,8 @@ class AttendanceRecordResource extends Resource
                         })
                         ->visible(fn (): bool => (bool) (Auth::user()?->can(HrPermissions::ManageAttendance) || Auth::user()?->can(HrPermissions::ReviewAttendanceVerifications))),
                 ]),
-            ]);
+            ])
+            ->defaultSort('attendance_date', 'desc');
     }
 
     /**

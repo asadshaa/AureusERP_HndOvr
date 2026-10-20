@@ -99,11 +99,71 @@ class TransmissionMailer
 
             return false;
         } finally {
-            // Temp copies only -- never the stored original.
-            if ($attachmentPath && str_starts_with($attachmentPath, sys_get_temp_dir())) {
-                @unlink($attachmentPath);
+            static::cleanupTemporaryAttachment($attachmentPath);
+        }
+    }
+
+    /**
+     * Determine whether the given path safely resolves inside the temporary directory,
+     * accounting for symlinked temp directories (such as macOS /tmp -> /private/tmp),
+     * path boundaries, and platform-specific path separators.
+     */
+    public static function isTemporaryPath(?string $path, ?string $tempDir = null): bool
+    {
+        if ($path === null || trim($path) === '') {
+            return false;
+        }
+
+        $baseTemp = $tempDir ?? sys_get_temp_dir();
+        $realTemp = realpath($baseTemp);
+
+        $tempDirs = [];
+        if ($realTemp !== false) {
+            $tempDirs[] = rtrim(str_replace('\\', '/', $realTemp), '/').'/';
+        }
+        $tempDirs[] = rtrim(str_replace('\\', '/', $baseTemp), '/').'/';
+        $tempDirs = array_unique($tempDirs);
+
+        $candidates = [];
+        $candidates[] = str_replace('\\', '/', $path);
+
+        $realPath = realpath($path);
+        if ($realPath !== false) {
+            $candidates[] = str_replace('\\', '/', $realPath);
+        }
+        $candidates = array_unique($candidates);
+
+        $isWindows = PHP_OS_FAMILY === 'Windows';
+
+        foreach ($candidates as $candidate) {
+            foreach ($tempDirs as $temp) {
+                if ($isWindows) {
+                    if (str_starts_with(strtolower($candidate), strtolower($temp))) {
+                        return true;
+                    }
+                } else {
+                    if (str_starts_with($candidate, $temp)) {
+                        return true;
+                    }
+                }
             }
         }
+
+        return false;
+    }
+
+    /**
+     * Safely delete a temporary attachment if and only if it resides within the intended temporary directory.
+     */
+    public static function cleanupTemporaryAttachment(?string $path, ?string $tempDir = null): bool
+    {
+        if ($path && static::isTemporaryPath($path, $tempDir)) {
+            if (file_exists($path)) {
+                return @unlink($path);
+            }
+        }
+
+        return false;
     }
 
     /**

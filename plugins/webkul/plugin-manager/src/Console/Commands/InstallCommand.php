@@ -12,6 +12,7 @@ use Spatie\Permission\Models\Role;
 use Throwable;
 use Webkul\PluginManager\Models\Plugin;
 use Webkul\PluginManager\Package;
+use Webkul\PluginManager\Support\PathNormalizer;
 
 class InstallCommand extends Command
 {
@@ -292,7 +293,7 @@ class InstallCommand extends Command
 
             $fullPath = $this->package->basePath("../database/migrations/{$migration}.php");
 
-            $path = Str::after($fullPath, base_path().DIRECTORY_SEPARATOR);
+            $path = PathNormalizer::toRelativePath($fullPath);
 
             $migrationsToRun[] = $path;
         }
@@ -318,7 +319,7 @@ class InstallCommand extends Command
 
             $fullPath = $this->package->basePath("../database/settings/{$setting}.php");
 
-            $path = Str::after($fullPath, base_path().DIRECTORY_SEPARATOR);
+            $path = PathNormalizer::toRelativePath($fullPath);
 
             $settingsToRun[] = $path;
         }

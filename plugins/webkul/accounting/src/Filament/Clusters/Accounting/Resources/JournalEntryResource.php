@@ -499,6 +499,7 @@ class JournalEntryResource extends Resource
                     ->icon('heroicon-o-arrow-up-tray')
                     ->exporter(JournalEntryExporter::class),
             ])
+            ->defaultSort('id', 'desc')
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with('currency');
             });
