@@ -18,6 +18,7 @@ use Webkul\Recruitment\Enums\RecruitmentState;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource;
 use Webkul\Recruitment\Filament\Widgets\JobPositionStatsWidget;
+use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
@@ -144,7 +145,7 @@ class ListApplicants extends ListRecords
                     Group::make()
                         ->schema([
                             Select::make('candidate_id')
-                                ->relationship('candidate', 'name')
+                                ->relationship('candidate', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::ownCompany($query))
                                 ->required()
                                 ->searchable()
                                 ->preload()

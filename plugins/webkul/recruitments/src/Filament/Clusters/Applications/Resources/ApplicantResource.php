@@ -63,6 +63,7 @@ use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\Stage as RecruitmentStage;
 use Webkul\Recruitment\Services\CandidateConversionService;
+use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\Security\Filament\Resources\UserResource;
 
 class ApplicantResource extends Resource
@@ -226,7 +227,7 @@ class ApplicantResource extends Resource
                                 Group::make()
                                     ->schema([
                                         Select::make('candidate_id')
-                                            ->relationship('candidate', 'name')
+                                            ->relationship('candidate', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::ownCompany($query))
                                             ->required()
                                             ->preload()
                                             ->searchable()
@@ -255,7 +256,7 @@ class ApplicantResource extends Resource
                                             ->url()
                                             ->columnSpan(1),
                                         Select::make('job_id')
-                                            ->relationship('job', 'name')
+                                            ->relationship('job', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::ownCompany($query))
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.job-position'))
                                             ->preload()
                                             ->live()
@@ -303,14 +304,14 @@ class ApplicantResource extends Resource
                                             ->live()
                                             ->columnSpan(1),
                                         Select::make('recruiter')
-                                            ->relationship('recruiter', 'name')
+                                            ->relationship('recruiter', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::companyUsers($query))
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.recruiter'))
                                             ->preload()
                                             ->live()
                                             ->reactive()
                                             ->searchable(),
                                         Select::make('recruitments_applicant_interviewers')
-                                            ->relationship('interviewer', 'name')
+                                            ->relationship('interviewer', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::companyUsers($query))
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.interviewer'))
                                             ->preload()
                                             ->multiple()
@@ -360,7 +361,7 @@ class ApplicantResource extends Resource
                         Section::make(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.department.title'))
                             ->schema([
                                 Select::make('department_id')
-                                    ->relationship('department', 'name')
+                                    ->relationship('department', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::ownCompany($query))
                                     ->hiddenLabel()
                                     ->searchable()
                                     ->preload(),

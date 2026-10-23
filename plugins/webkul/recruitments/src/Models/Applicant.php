@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
+use InvalidArgumentException;
 use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
 use Webkul\Employee\Models\Department;
@@ -322,10 +323,51 @@ class Applicant extends Model
 
         static::creating(function ($applicant) {
             $applicant->handleApplicationCreation();
+            $applicant->assertRelatedRecordsBelongToCompany();
         });
 
         static::updating(function ($applicant) {
             $applicant->handleApplicationUpdation();
+            $applicant->assertRelatedRecordsBelongToCompany();
         });
+    }
+
+    /**
+     * Server-side company isolation: an application may only point at its own
+     * company's candidate, job and department. The form selects are scoped
+     * too, but a crafted request must not be able to link another company's
+     * records (and so read or expose them). Jobs with no company (legacy
+     * shared positions) are still accepted.
+     */
+    public function assertRelatedRecordsBelongToCompany(): void
+    {
+        if (! $this->company_id) {
+            return;
+        }
+
+        $companyId = (int) $this->company_id;
+        $checks = [
+            'candidate'  => [$this->candidate_id, Candidate::class, false],
+            'job'        => [$this->job_id, JobPosition::class, true],
+            'department' => [$this->department_id, Department::class, true],
+        ];
+
+        foreach ($checks as $label => [$id, $model, $allowShared]) {
+            // Only check links that are new or changed, so unrelated edits to an
+            // existing (possibly legacy) application are never blocked.
+            if (! $id || ($this->exists && ! $this->isDirty($label.'_id'))) {
+                continue;
+            }
+
+            $relatedCompany = $model::query()->withoutGlobalScopes()->whereKey($id)->value('company_id');
+
+            if ($relatedCompany === null && $allowShared) {
+                continue;
+            }
+
+            if ((int) $relatedCompany !== $companyId) {
+                throw new InvalidArgumentException("The selected {$label} belongs to a different company than this application.");
+            }
+        }
     }
 }

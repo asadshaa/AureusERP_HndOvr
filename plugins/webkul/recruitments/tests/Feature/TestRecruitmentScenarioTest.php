@@ -37,9 +37,12 @@
 
 use Database\Seeders\HrRoleSeeder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
+use Spatie\Permission\PermissionRegistrar;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Support\HrPermissions;
 use Webkul\Partner\Models\Partner;
 use Webkul\Recruitment\Database\Seeders\RecruitmentWorkflowSeeder;
 use Webkul\Recruitment\Enums\ApplicationStatus;
@@ -51,6 +54,7 @@ use Webkul\Recruitment\Models\RefuseReason;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Recruitment\Services\CandidateConversionService;
 use Webkul\Security\Enums\PermissionType;
+use Webkul\Security\Models\Permission;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
@@ -63,7 +67,11 @@ function recruitmentScenarioFixture(): array
     // instance across tests in this file, so a prior test's rolled-back
     // actingAs() user would otherwise leak forward as a dangling Auth::id().
     $systemUser = User::factory()->create(['is_active' => true]);
-    Auth::login($systemUser);
+    // Converting a candidate into an employee is a hiring-manager right
+    // (CandidateConversionService enforces it), so the acting user holds it.
+    $systemUser->givePermissionTo(Permission::query()->firstOrCreate(['name' => HrPermissions::ConvertCandidates, 'guard_name' => 'web']));
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    Auth::login($systemUser->refresh());
 
     $company = Company::factory()->create(['is_active' => true]);
     $department = Department::factory()->create(['company_id' => $company->id, 'manager_id' => null]);
@@ -334,19 +342,25 @@ it('15. PASS: conversion is blocked across company boundaries -- existing employ
     // (b) application's department belongs to a different company.
     $otherDepartment = Department::factory()->create(['company_id' => $otherCompany->id, 'manager_id' => null]);
     $candidateB = Candidate::query()->create(['company_id' => $f['company']->id, 'name' => 'Dept Cross', 'email_from' => 'deptcross@example.test']);
-    $applicationB = Applicant::query()->create([
+    // The application refuses the foreign department outright...
+    expect(fn () => Applicant::query()->create([
         'company_id' => $f['company']->id, 'candidate_id' => $candidateB->id, 'department_id' => $otherDepartment->id, 'create_date' => now(),
-    ]);
-    expect(fn () => app(CandidateConversionService::class)->convert($applicationB))
+    ]))->toThrow(InvalidArgumentException::class, 'different company');
+    // ...and conversion still refuses a legacy row that already has one.
+    $applicationB = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidateB->id, 'create_date' => now()]);
+    DB::table('recruitments_applicants')->where('id', $applicationB->id)->update(['department_id' => $otherDepartment->id]);
+    expect(fn () => app(CandidateConversionService::class)->convert($applicationB->fresh()))
         ->toThrow(RuntimeException::class, 'department does not belong');
 
     // (c) application's job belongs to a different company.
     $otherJob = JobPosition::query()->create(['company_id' => $otherCompany->id, 'name' => 'Other Co Role', 'is_active' => true]);
     $candidateC = Candidate::query()->create(['company_id' => $f['company']->id, 'name' => 'Job Cross', 'email_from' => 'jobcross@example.test']);
-    $applicationC = Applicant::query()->create([
+    expect(fn () => Applicant::query()->create([
         'company_id' => $f['company']->id, 'candidate_id' => $candidateC->id, 'job_id' => $otherJob->id, 'create_date' => now(),
-    ]);
-    expect(fn () => app(CandidateConversionService::class)->convert($applicationC))
+    ]))->toThrow(InvalidArgumentException::class, 'different company');
+    $applicationC = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidateC->id, 'create_date' => now()]);
+    DB::table('recruitments_applicants')->where('id', $applicationC->id)->update(['job_id' => $otherJob->id]);
+    expect(fn () => app(CandidateConversionService::class)->convert($applicationC->fresh()))
         ->toThrow(RuntimeException::class, 'job does not belong');
 
     expect(Employee::whereIn('name', ['Cross Co', 'Dept Cross', 'Job Cross'])->exists())->toBeFalse();

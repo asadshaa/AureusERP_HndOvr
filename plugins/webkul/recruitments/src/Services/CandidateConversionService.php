@@ -2,14 +2,24 @@
 
 namespace Webkul\Recruitment\Services;
 
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Support\HrPermissions;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\Candidate;
+use Webkul\Security\Models\User;
 
 class CandidateConversionService
 {
+    /** The single rule for who may turn a candidate into an employee. */
+    public static function canConvert(?User $user): bool
+    {
+        return (bool) $user?->can(HrPermissions::ConvertCandidates);
+    }
+
     public function convert(Applicant $application): ?Employee
     {
         return DB::transaction(function () use ($application): ?Employee {
@@ -43,6 +53,13 @@ class CandidateConversionService
                 ->where('company_id', $application->company_id)
                 ->exists()) {
                 throw new RuntimeException('The application job does not belong to the application company.');
+            }
+
+            // Creating an employee is a hiring decision (hiring manager / HR), not a
+            // recruiter one. Enforced here so that no UI entry point can bypass it.
+            // Returning an already-linked employee (above) needs no extra right.
+            if (Auth::check() && ! self::canConvert(Auth::user())) {
+                throw new AuthorizationException('You are not allowed to convert candidates to employees.');
             }
 
             $employee = Employee::query()->create([

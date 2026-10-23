@@ -2,6 +2,7 @@
 
 namespace Webkul\Recruitment\Models;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -60,6 +61,22 @@ class Stage extends Model implements Sortable
         return $this->belongsToMany(EmployeeJobPosition::class, 'recruitments_stages_jobs', 'stage_id', 'job_id');
     }
 
+    /** A stage with no company is shared by every company's pipeline. */
+    public function isShared(): bool
+    {
+        return ($this->exists ? $this->getOriginal('company_id') : $this->company_id) === null;
+    }
+
+    /**
+     * Shared stages belong to every company, so only a system administrator
+     * (the panel's Admin role) may change or remove them. Company-owned stages
+     * follow the normal stage permissions.
+     */
+    public static function userManagesSharedStages(?User $user): bool
+    {
+        return (bool) $user?->roles->contains(fn ($role): bool => $role->isSystemRole());
+    }
+
     protected static function boot()
     {
         parent::boot();
@@ -67,5 +84,19 @@ class Stage extends Model implements Sortable
         static::creating(function ($stage) {
             $stage->creator_id ??= Auth::id();
         });
+
+        // Server-side enforcement of the policy rule (covers bulk actions and
+        // crafted requests). No signed-in user = seeders / console: allowed.
+        $guardShared = function (self $stage): void {
+            // Also covers turning a company stage into a shared one (company cleared).
+            $touchesShared = $stage->isShared() || ($stage->isDirty('company_id') && $stage->company_id === null);
+
+            if ($touchesShared && Auth::check() && ! static::userManagesSharedStages(Auth::user())) {
+                throw new AuthorizationException('Shared pipeline stages are used by every company and can only be changed by an administrator.');
+            }
+        };
+
+        static::updating($guardShared);
+        static::deleting($guardShared);
     }
 }

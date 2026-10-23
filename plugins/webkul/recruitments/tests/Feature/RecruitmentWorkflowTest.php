@@ -13,8 +13,11 @@
  */
 
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Spatie\Permission\PermissionRegistrar;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Support\HrPermissions;
 use Webkul\Partner\Models\Partner;
 use Webkul\Recruitment\Database\Seeders\RecruitmentWorkflowSeeder;
 use Webkul\Recruitment\Enums\ApplicationStatus;
@@ -24,6 +27,7 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\RefuseReason;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Recruitment\Services\CandidateConversionService;
+use Webkul\Security\Models\Permission;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\UTMMedium;
@@ -37,7 +41,11 @@ function recruitmentFixture(): array
     // Auth::id() here and fail FK checks in boot hooks that stamp
     // creator_id from it (e.g. Candidate::handlePartnerCreation()).
     $systemUser = User::factory()->create(['is_active' => true]);
-    Auth::login($systemUser);
+    // Converting a candidate into an employee is a hiring-manager right
+    // (CandidateConversionService enforces it), so the acting user holds it.
+    $systemUser->givePermissionTo(Permission::query()->firstOrCreate(['name' => HrPermissions::ConvertCandidates, 'guard_name' => 'web']));
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    Auth::login($systemUser->refresh());
 
     $company = Company::factory()->create(['is_active' => true]);
     $department = Department::factory()->create(['company_id' => $company->id, 'manager_id' => null]);
@@ -263,9 +271,16 @@ it('refuses conversion when the application\'s department does not belong to the
     $otherDepartment = Department::factory()->create(['company_id' => $otherCompany->id, 'manager_id' => null]);
 
     $candidate = Candidate::query()->create(['company_id' => $f['company']->id, 'name' => 'Dept Mismatch', 'email_from' => 'dept@example.test', 'is_active' => true]);
-    $application = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidate->id, 'job_id' => $f['job']->id, 'department_id' => $otherDepartment->id, 'create_date' => now()]);
 
-    expect(fn () => app(CandidateConversionService::class)->convert($application))
+    // First line of defence: the application itself refuses another company's department.
+    expect(fn () => Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidate->id, 'job_id' => $f['job']->id, 'department_id' => $otherDepartment->id, 'create_date' => now()]))
+        ->toThrow(InvalidArgumentException::class, 'different company');
+
+    // Second line: legacy rows written before that guard existed are still refused at conversion.
+    $application = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidate->id, 'job_id' => $f['job']->id, 'create_date' => now()]);
+    DB::table('recruitments_applicants')->where('id', $application->id)->update(['department_id' => $otherDepartment->id]);
+
+    expect(fn () => app(CandidateConversionService::class)->convert($application->fresh()))
         ->toThrow(RuntimeException::class, 'department does not belong');
 });
 

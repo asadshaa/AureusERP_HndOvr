@@ -7,13 +7,14 @@ use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Webkul\Chatter\Filament\Actions\ChatterAction;
-use Webkul\Employee\Filament\Resources\EmployeeResource;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource;
 use Webkul\Recruitment\Models\Candidate;
+use Webkul\Recruitment\Traits\HandlesEmployeeConversion;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 
 class EditCandidate extends EditRecord
 {
+    use HandlesEmployeeConversion;
     use HasRecordNavigationTabs;
 
     protected static string $resource = CandidateResource::class;
@@ -39,19 +40,13 @@ class EditCandidate extends EditRecord
                 ->visible(fn ($record) => $record->employee_id)
                 ->icon('heroicon-s-arrow-top-right-on-square')
                 ->iconButton()
-                ->action(function (Candidate $record) {
-                    $employee = $record->createEmployee();
-
-                    return redirect(EmployeeResource::getUrl('view', ['record' => $employee]));
-                }),
+                ->action(fn (Candidate $record) => $this->convertAndRedirect(fn () => $record->createEmployee(), 'view')),
             Action::make('createEmployee')
                 ->label(__('recruitments::filament/clusters/applications/resources/candidate/pages/edit-candidate.create-employee'))
                 ->hidden(fn ($record) => $record->employee_id)
-                ->action(function (Candidate $record) {
-                    $employee = $record->createEmployee();
-
-                    return redirect(EmployeeResource::getUrl('edit', ['record' => $employee]));
-                }),
+                ->visible(fn (): bool => static::userCanConvert())
+                ->action(fn (Candidate $record) => $this->convertAndRedirect(fn () => $record->createEmployee(), 'edit')),
+            CandidateResource::downloadCvAction(),
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getRecord()->activityPlans()),

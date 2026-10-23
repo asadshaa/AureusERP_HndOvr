@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Spatie\Permission\PermissionRegistrar;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Enums\MoveState;
@@ -349,7 +350,10 @@ it('converts a sourced applicant to one company employee without duplicate re-en
     $currency = Currency::query()->where('code', 'PKR')->firstOrFail();
     $company = Company::factory()->create(['currency_id' => $currency->id, 'is_active' => true]);
     $user = hrPlatformUser($company);
-    $this->actingAs($user);
+    // Conversion is a hiring-manager right, enforced by CandidateConversionService.
+    $user->givePermissionTo(Permission::query()->firstOrCreate(['name' => HrPermissions::ConvertCandidates, 'guard_name' => 'web']));
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    $this->actingAs($user->refresh());
     $department = Department::query()->create(['company_id' => $company->id, 'name' => 'Technology']);
     $job = EmployeeJobPosition::query()->create([
         'company_id'       => $company->id,

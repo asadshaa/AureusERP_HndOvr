@@ -2,6 +2,7 @@
 
 namespace Webkul\Recruitment\Filament\Clusters\Applications\Resources;
 
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -35,7 +36,9 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Recruitment\Filament\Clusters\Applications;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource\Pages\CreateCandidate;
@@ -45,10 +48,45 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource\Pages\ViewCandidate;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource\RelationManagers\SkillsRelationManager;
 use Webkul\Recruitment\Models\Candidate;
+use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 
 class CandidateResource extends Resource
 {
     protected static ?string $model = Candidate::class;
+
+    /** CVs live on the private disk and are only handed out through downloadCvAction(). */
+    public const CV_DISK = 'local';
+
+    public const CV_MAX_KB = 5120;
+
+    /**
+     * "Download CV" for the candidate pages. Record access is already limited
+     * to the user's company by getEloquentQuery(); the policy check makes the
+     * download follow the same view permission as the record itself.
+     */
+    public static function downloadCvAction(): Action
+    {
+        return Action::make('downloadCv')
+            ->label('Download CV')
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('gray')
+            ->visible(fn (Candidate $record): bool => filled($record->resume_path)
+                && (bool) Auth::user()?->can('view', $record))
+            ->action(function (Candidate $record) {
+                abort_unless(Auth::user()?->can('view', $record), 403);
+
+                $disk = Storage::disk(self::CV_DISK);
+                if (! $disk->exists($record->resume_path)) {
+                    Notification::make()->danger()->title('The CV file could not be found.')->send();
+
+                    return null;
+                }
+
+                $extension = pathinfo($record->resume_path, PATHINFO_EXTENSION);
+
+                return $disk->download($record->resume_path, Str::slug($record->name ?: 'candidate').'-cv'.($extension ? '.'.$extension : ''));
+            });
+    }
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-user-group';
 
@@ -124,8 +162,12 @@ class CandidateResource extends Resource
                                 FileUpload::make('resume_path')
                                     ->label('CV / résumé')
                                     ->acceptedFileTypes(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+                                    // Private, non web-served disk. The default disk here is "public"
+                                    // (served at /storage), where visibility('private') protects nothing.
+                                    ->disk(self::CV_DISK)
                                     ->directory('recruitment/cv')
                                     ->visibility('private')
+                                    ->maxSize(self::CV_MAX_KB)
                                     ->columnSpanFull(),
                             ])
                             ->columns(2),
@@ -143,7 +185,7 @@ class CandidateResource extends Resource
                                     ->preload()
                                     ->label(__('recruitments::filament/clusters/applications/resources/candidate.form.sections.additional-details.fields.tags')),
                                 Select::make('manager_id')
-                                    ->relationship('manager', 'name')
+                                    ->relationship('manager', 'name', modifyQueryUsing: fn (Builder $query): Builder => RecruitmentCompanyScope::companyUsers($query))
                                     ->searchable()
                                     ->preload()
                                     ->label(__('recruitments::filament/clusters/applications/resources/candidate.form.sections.additional-details.fields.manager')),

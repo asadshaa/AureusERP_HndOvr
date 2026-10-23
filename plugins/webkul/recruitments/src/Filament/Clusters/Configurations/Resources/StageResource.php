@@ -31,6 +31,7 @@ use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint;
 use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint\Operators\IsRelatedToOperator;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Recruitment\Filament\Clusters\Configurations;
@@ -297,13 +298,34 @@ class StageResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    // Shared (company-less) stages are skipped for non-administrators instead
+                    // of failing the whole bulk delete; see StagePolicy / Stage::boot().
                     DeleteBulkAction::make()
-                        ->successNotification(
-                            Notification::make()
-                                ->success()
+                        ->action(function (Collection $records): void {
+                            $user = Auth::user();
+                            [$allowed, $skipped] = $records->partition(fn (Stage $stage): bool => (bool) $user?->can('delete', $stage));
+
+                            $failed = 0;
+                            foreach ($allowed as $stage) {
+                                try {
+                                    $stage->delete();
+                                } catch (QueryException) {
+                                    $failed++;
+                                }
+                            }
+
+                            $deleted = $allowed->count() - $failed;
+                            $notification = Notification::make()
                                 ->title(__('recruitments::filament/clusters/configurations/resources/stage.table.bulk-actions.delete.notification.title'))
-                                ->body(__('recruitments::filament/clusters/configurations/resources/stage.table.bulk-actions.delete.notification.body'))
-                        ),
+                                ->body(trim(sprintf(
+                                    '%d deleted. %s%s',
+                                    $deleted,
+                                    $skipped->isNotEmpty() ? $skipped->count().' shared stage(s) skipped: only an administrator can delete them. ' : '',
+                                    $failed ? $failed.' could not be deleted because they are still in use.' : '',
+                                )));
+
+                            ($skipped->isEmpty() && ! $failed ? $notification->success() : $notification->warning())->send();
+                        }),
                 ]),
             ])
             ->reorderable('sort', 'Desc');
