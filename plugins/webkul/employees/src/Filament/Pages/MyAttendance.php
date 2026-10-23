@@ -21,6 +21,7 @@ use RuntimeException;
 use Throwable;
 use Webkul\Employee\Enums\AttendanceVerificationAction as VerificationAction;
 use Webkul\Employee\Models\AttendanceRecord;
+use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\Data\LocationEvidence;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
@@ -167,13 +168,16 @@ class MyAttendance extends Page
             ->get()
             ->keyBy(fn ($r) => $r->attendance_date->toDateString());
 
-        $leaves = Leave::query()
-            ->where('company_id', $employee->company_id)
-            ->where('employee_id', $employee->id)
-            ->where('state', 'confirm')
-            ->whereDate('date_from', '<=', $monthEnd->toDateString())
-            ->whereDate('date_to', '>=', $monthStart->toDateString())
-            ->get();
+        // Approved AND pending leave, so a pending request can be shown as pending
+        // (it never counts as leave). Dates use ApprovedLeaveLookup's rule.
+        $leaves = ApprovedLeaveLookup::overlapping(
+            Leave::query()
+                ->where('company_id', $employee->company_id)
+                ->where('employee_id', $employee->id)
+                ->whereIn('state', [ApprovedLeaveLookup::APPROVED_STATE, ...ApprovedLeaveLookup::PENDING_STATES]),
+            $monthStart->toDateString(),
+            $monthEnd->toDateString(),
+        )->get();
 
         $daysPresent = 0;
         $totalHours = 0.0;
@@ -202,9 +206,9 @@ class MyAttendance extends Page
             /** @var AttendanceRecord|null $record */
             $record = $records->get($dateStr);
 
-            $matchingLeave = $leaves->first(function ($l) use ($dateStr) {
-                return $l->date_from->toDateString() <= $dateStr && $l->date_to->toDateString() >= $dateStr;
-            });
+            $dayLeaves = $leaves->filter(fn ($l) => ApprovedLeaveLookup::covers($l, $dateStr));
+            $matchingLeave = $dayLeaves->first(fn ($l) => ApprovedLeaveLookup::isApproved($l));
+            $pendingLeave = $matchingLeave ? null : $dayLeaves->first();
 
             $status = 'none';
             $workedHours = null;
@@ -250,6 +254,12 @@ class MyAttendance extends Page
                 $status = 'leave';
                 $badgeColor = 'info';
                 $label = 'Leave';
+            } elseif ($pendingLeave && ! $isWeekend) {
+                // Pending leave does not excuse the day; it is shown so the employee
+                // knows the request is still waiting.
+                $status = 'leave_pending';
+                $badgeColor = 'warning';
+                $label = 'Leave pending';
             } elseif (! $isWeekend && ! $isFuture) {
                 $status = 'absent';
                 $badgeColor = 'danger';

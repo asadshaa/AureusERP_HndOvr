@@ -738,12 +738,15 @@ class Profile extends Page implements HasForms
                 // Ignore if service cannot resolve shift state
             }
 
+            // Scoped to the employee's own company, like every other attendance query.
             $todayRecord = AttendanceRecord::query()
+                ->where('company_id', $employee->company_id)
                 ->where('employee_id', $employee->id)
                 ->whereDate('attendance_date', $today->toDateString())
                 ->first();
 
             $recentRecords = AttendanceRecord::query()
+                ->where('company_id', $employee->company_id)
                 ->where('employee_id', $employee->id)
                 ->orderByDesc('attendance_date')
                 ->take(7)

@@ -7,17 +7,23 @@ use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 
 class AutoCompleteShiftsCommand extends Command
 {
-    protected $signature = 'hr:auto-complete-shifts {--force : Force completion check}';
+    protected $signature = 'hr:auto-complete-shifts {--force : Kept for compatibility; has no effect}';
 
-    protected $description = 'Automatically completes open attendance shifts that have reached their scheduled end or completed 8 hours.';
+    protected $description = 'Close open GPS attendance shifts at their scheduled end, marked for HR review. Only runs when hr_attendance_geofence.auto_close_policy is "scheduled_end".';
 
     public function handle(GeofencedAttendanceService $service): int
     {
-        $this->info('Checking for completed open shifts...');
+        $policy = (string) config('hr_attendance_geofence.auto_close_policy', 'none');
+
+        if ($policy !== 'scheduled_end') {
+            $this->info("Auto-close is disabled (auto_close_policy={$policy}). Missing check-outs are flagged for review by hr:flag-forgotten-shifts instead.");
+
+            return self::SUCCESS;
+        }
 
         $count = $service->autoCompleteCompletedShifts();
 
-        $this->info("Completed {$count} open shift(s).");
+        $this->info("Closed {$count} open shift(s) at their scheduled end; each is marked for HR review.");
 
         return self::SUCCESS;
     }

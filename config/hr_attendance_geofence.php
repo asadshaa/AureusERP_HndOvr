@@ -36,11 +36,11 @@ return [
     'long_shift_hours'       => 12,
     'long_shift_grace_hours' => 3,
 
-    // A check-out that makes the shift longer than this (or, when the employee has a
-    // schedule, later than the scheduled end plus the grace) is recorded but flagged
-    // for review: it is usually a forgotten check-out tapped the next day.
-    'long_shift_hours'        => 12,
-    'long_shift_grace_hours'  => 3,
+    // What hr:auto-complete-shifts may do with an open shift. "none" (default):
+    // never close it -- the forgotten-shift flag + review queue handles it.
+    // "scheduled_end": close shifts that have a scheduled end at that end,
+    // always marked needs-review (never "verified"); no-schedule shifts stay open.
+    'auto_close_policy' => env('HR_ATTENDANCE_AUTO_CLOSE_POLICY', 'none'),
 
     // review | reject
     'checkout_outside_geofence' => 'review',

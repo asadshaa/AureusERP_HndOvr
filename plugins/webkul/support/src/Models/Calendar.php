@@ -255,9 +255,11 @@ class Calendar extends Model
             $weekdays[] = $weekday;
 
             if ($this->two_weeks_calendar) {
-                $weekType = (int) $attendance->week_type;
-
-                $attendancesPerDay[$weekday + 7 * $weekType][] = $attendance;
+                // week_type holds the strings "even" / "odd" / "all"; (int) cast
+                // turned every one of them into 0, collapsing both weeks into one.
+                foreach (CalendarAttendance::weekSlotsFor($attendance->week_type) as $slot) {
+                    $attendancesPerDay[$weekday + 7 * $slot][] = $attendance;
+                }
             } else {
                 $attendancesPerDay[$weekday][] = $attendance;
                 $attendancesPerDay[$weekday + 7][] = $attendance;
@@ -295,7 +297,8 @@ class Calendar extends Model
             if (in_array($systemDay, $weekdays)) {
                 $weekType = CalendarAttendance::getWeekType($current);
 
-                $dayAttends = $attendancesPerDay[$systemDay + 7 * $weekType];
+                // A weekday may have rows only in the other week of a two-week calendar.
+                $dayAttends = $attendancesPerDay[$systemDay + 7 * $weekType] ?? [];
 
                 foreach ($dayAttends as $attendance) {
                     if (
@@ -305,9 +308,9 @@ class Calendar extends Model
                         continue;
                     }
 
-                    $dayFrom = $current->clone()->setTime(0, 0)->addMinutes($attendance->hour_from * 60);
+                    $dayFrom = $current->clone()->setTime(0, 0)->addMinutes(CalendarAttendance::toMinutes($attendance->hour_from));
 
-                    $dayTo = $current->clone()->setTime(0, 0)->addMinutes($attendance->hour_to * 60);
+                    $dayTo = $current->clone()->setTime(0, 0)->addMinutes(CalendarAttendance::toMinutes($attendance->hour_to));
 
                     if ($attendance->resource_id) {
                         $perResourceResult[$attendance->resource_id][] = [$dayFrom, $dayTo, $attendance];

@@ -11,7 +11,7 @@ use Webkul\Chatter\Models\Message;
 use Webkul\Chatter\Notifications\ChatterDatabaseNotification;
 use Webkul\Chatter\Support\ChatterMentions;
 use Webkul\Employee\Models\Employee;
-use Webkul\Employees\Models\EmployeeRequest;
+use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Partner\Models\Partner;
 use Webkul\Security\Models\User;
 use Webkul\TimeOff\Models\Leave;

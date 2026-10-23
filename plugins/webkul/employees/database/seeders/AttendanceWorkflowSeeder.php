@@ -24,34 +24,43 @@ class AttendanceWorkflowSeeder extends Seeder
 {
     public function run(): void
     {
-        Company::query()->each(function (Company $company): void {
-            EmployeeRequestType::query()->firstOrCreate(
-                ['company_id' => $company->id, 'code' => 'attendance_time_change'],
-                [
-                    'name'                  => 'Attendance Time Change',
-                    'category'              => 'attendance_correction',
-                    'approval_request_type' => 'attendance_time_change',
-                    'is_financial'          => false,
-                    'requires_amount'       => false,
-                    'requires_document'     => false,
-                    'is_active'             => true,
-                ]
-            );
+        Company::query()->each(fn (Company $company) => $this->provisionForCompany($company));
+    }
 
-            $workflow = ApprovalWorkflow::query()->firstOrCreate(
-                ['company_id' => $company->id, 'request_type' => 'attendance_time_change'],
-                ['name' => 'Attendance Time Change Approval', 'is_active' => true]
-            );
+    /**
+     * Idempotent per-company provisioning. Also called when a company is created
+     * (EmployeeServiceProvider) and by hr:provision-attendance-workflows, so a
+     * company added after the initial seed still gets its correction workflow --
+     * without it, ApprovalEngine::submit() refuses every correction request.
+     */
+    public function provisionForCompany(Company $company): void
+    {
+        EmployeeRequestType::query()->firstOrCreate(
+            ['company_id' => $company->id, 'code' => 'attendance_time_change'],
+            [
+                'name'                  => 'Attendance Time Change',
+                'category'              => 'attendance_correction',
+                'approval_request_type' => 'attendance_time_change',
+                'is_financial'          => false,
+                'requires_amount'       => false,
+                'requires_document'     => false,
+                'is_active'             => true,
+            ]
+        );
 
-            if ($workflow->steps()->doesntExist()) {
-                ApprovalStep::query()->create([
-                    'workflow_id'        => $workflow->id,
-                    'sequence'           => 1,
-                    'name'               => 'Line Manager Review',
-                    'hierarchy_route'    => 'requester_manager',
-                    'required_approvals' => 1,
-                ]);
-            }
-        });
+        $workflow = ApprovalWorkflow::query()->firstOrCreate(
+            ['company_id' => $company->id, 'request_type' => 'attendance_time_change'],
+            ['name' => 'Attendance Time Change Approval', 'is_active' => true]
+        );
+
+        if ($workflow->steps()->doesntExist()) {
+            ApprovalStep::query()->create([
+                'workflow_id'        => $workflow->id,
+                'sequence'           => 1,
+                'name'               => 'Line Manager Review',
+                'hierarchy_route'    => 'requester_manager',
+                'required_approvals' => 1,
+            ]);
+        }
     }
 }

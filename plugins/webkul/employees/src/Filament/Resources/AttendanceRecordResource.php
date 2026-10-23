@@ -14,6 +14,7 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -409,7 +410,7 @@ class AttendanceRecordResource extends Resource
                     ->color('success')
                     ->visible(fn (): bool => (bool) (Auth::user()?->can(HrPermissions::ManageAttendance) || Auth::user()?->can(HrPermissions::ViewAttendance)))
                     ->modalHeading('Export Attendance Records')
-                    ->modalDescription('Download attendance records as CSV. Weekends (Saturday & Sunday) are automatically excluded.')
+                    ->modalDescription('Download attendance records as CSV. Times are shown in each employee\'s own time zone. Weekends (Saturday & Sunday) are excluded unless you include them.')
                     ->modalSubmitActionLabel('Download CSV')
                     ->schema([
                         Select::make('employee_id')
@@ -434,6 +435,10 @@ class AttendanceRecordResource extends Resource
                         DatePicker::make('to_date')
                             ->label('To Date')
                             ->placeholder('End date (optional)'),
+                        Toggle::make('include_weekends')
+                            ->label('Include weekends')
+                            ->helperText('Off by default. Turn on to also export Saturday and Sunday rows (e.g. weekend work).')
+                            ->default(false),
                     ])
                     ->action(function (array $data, $livewire) {
                         $query = $livewire->getFilteredTableQuery()->with(['employee.department']);
@@ -452,10 +457,13 @@ class AttendanceRecordResource extends Resource
 
                         $records = $query->orderBy('attendance_date', 'desc')->get();
 
-                        // Weekends (Saturday & Sunday) are strictly excluded
-                        $records = $records->reject(function ($r): bool {
-                            return $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false;
-                        });
+                        // Weekends (Saturday & Sunday) are excluded unless explicitly requested,
+                        // so weekend work is not silently invisible when it is needed.
+                        if (empty($data['include_weekends'])) {
+                            $records = $records->reject(function ($r): bool {
+                                return $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false;
+                            });
+                        }
 
                         $empName = ! empty($data['employee_id'])
                             ? Employee::find($data['employee_id'])?->name
@@ -466,7 +474,9 @@ class AttendanceRecordResource extends Resource
                         $toPart = ! empty($data['to_date']) ? Carbon::parse($data['to_date'])->format('Ymd') : now()->format('Ymd');
                         $filename = "{$prefix}-{$fromPart}-to-{$toPart}.csv";
 
-                        return response()->streamDownload(function () use ($records) {
+                        $scheduleResolver = app(AttendanceScheduleResolver::class);
+
+                        return response()->streamDownload(function () use ($records, $scheduleResolver) {
                             $handle = fopen('php://output', 'w');
                             fputcsv($handle, [
                                 'Date',
@@ -482,17 +492,21 @@ class AttendanceRecordResource extends Resource
                                 'Status',
                                 'Verification',
                                 'Source',
+                                'Time Zone',
                             ]);
 
                             foreach ($records as $r) {
                                 $dt = $r->attendance_date ? Carbon::parse($r->attendance_date) : null;
+                                // Stored in UTC; shown in the employee's own time zone (as on screen).
+                                $timezone = $r->employee ? $scheduleResolver->timezoneFor($r->employee) : config('app.timezone');
+                                $local = fn ($moment): string => $moment ? Carbon::parse($moment)->setTimezone($timezone)->format('Y-m-d H:i:s') : '';
                                 fputcsv($handle, [
                                     $dt ? $dt->format('Y-m-d') : '',
                                     $dt ? $dt->format('l') : '',
                                     $r->employee?->name ?? '',
                                     $r->employee?->department?->name ?? '',
-                                    $r->check_in ? Carbon::parse($r->check_in)->format('Y-m-d H:i:s') : '',
-                                    $r->check_out ? Carbon::parse($r->check_out)->format('Y-m-d H:i:s') : '',
+                                    $local($r->check_in),
+                                    $local($r->check_out),
                                     number_format((float) $r->worked_hours, 2),
                                     (int) $r->late_minutes,
                                     (int) $r->early_departure_minutes,
@@ -500,6 +514,7 @@ class AttendanceRecordResource extends Resource
                                     ucfirst((string) $r->status),
                                     $r->verification_status,
                                     $r->source,
+                                    $timezone,
                                 ]);
                             }
 

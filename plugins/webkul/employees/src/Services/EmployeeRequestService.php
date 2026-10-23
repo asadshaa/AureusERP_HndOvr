@@ -20,12 +20,12 @@ use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
 use Webkul\TimeOff\Enums\State;
-use Webkul\TimeOff\Models\Leave;
 
 class EmployeeRequestService
 {
@@ -198,13 +198,8 @@ class EmployeeRequestService
             throw new RuntimeException('A record already exists for that day. Request a time change on it instead.');
         }
 
-        if (class_exists(Leave::class)) {
-            $onLeave = Leave::query()
-                ->where('employee_id', $employee->id)
-                ->where('state', State::VALIDATE_TWO)
-                ->whereDate('date_from', '<=', $date->toDateString())
-                ->whereDate('date_to', '>=', $date->toDateString())
-                ->exists();
+        if (ApprovedLeaveLookup::available()) {
+            $onLeave = ApprovedLeaveLookup::approvedForEmployee($employee->id, $date->toDateString(), $date->toDateString())->exists();
             if ($onLeave) {
                 throw new RuntimeException('A missed attendance day cannot be requested on a day the employee has an approved leave.');
             }

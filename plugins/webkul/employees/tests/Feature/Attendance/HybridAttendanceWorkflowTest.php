@@ -88,42 +88,71 @@ it('sets status to present when worked hours reach or exceed 7.5 hours', functio
         ->and((float) $record->worked_hours)->toBeGreaterThanOrEqual(7.9);
 });
 
-it('auto-completes open shifts when scheduled shift end time has passed', function () {
+it('never closes an open shift on its own unless auto-close is explicitly enabled', function () {
+    config(['hr_attendance_geofence.auto_close_policy' => 'none']);
     $f = geoFixture();
     $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
 
-    // 9 hours later - shift hours are complete
     $now = CarbonImmutable::parse('2026-10-05 18:00:00', 'UTC');
     $this->travelTo($now);
 
-    $closedCount = $this->service->autoCompleteCompletedShifts($now);
-    expect($closedCount)->toBe(1);
+    expect($this->service->autoCompleteCompletedShifts($now))->toBe(0);
+    expect(AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first()->check_out)->toBeNull();
+});
 
+it('with auto_close_policy=scheduled_end, closes a shift at its scheduled end and sends it for review', function () {
+    config(['hr_attendance_geofence.auto_close_policy' => 'scheduled_end']);
+    $f = geoFixture();
+    $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
     $record = AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first();
-    expect($record->check_out)->not->toBeNull()
-        ->and($record->status)->toBe('present');
+    $record->newQuery()->whereKey($record->id)->update(['scheduled_end' => '2026-10-05 13:00:00']);
 
-    // Verification record was logged
+    $now = CarbonImmutable::parse('2026-10-05 18:00:00', 'UTC');
+    $this->travelTo($now);
+
+    expect($this->service->autoCompleteCompletedShifts($now))->toBe(1);
+
+    $record = $record->fresh();
+    expect($record->check_out->toDateTimeString())->toBe('2026-10-05 13:00:00')
+        ->and($record->status)->toBe('present')
+        ->and($record->verification_status)->toBe('needs_review');
+
     $verification = AttendanceVerification::query()
         ->where('employee_id', $f['employee']->id)
         ->where('action', 'check_out')
         ->first();
     expect($verification)->not->toBeNull()
         ->and($verification->method->value)->toBe('manual')
-        ->and($verification->flags)->toContain('auto_completed_full_shift');
+        ->and($verification->review_status)->toBe('pending')
+        ->and($verification->flags)->toContain('auto_closed', 'auto_completed_full_shift');
+});
+
+it('with auto_close_policy=scheduled_end, leaves a shift without a schedule open (no invented end time)', function () {
+    config(['hr_attendance_geofence.auto_close_policy' => 'scheduled_end']);
+    $f = geoFixture();
+    $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
+
+    $now = CarbonImmutable::parse('2026-10-05 18:00:00', 'UTC');
+    $this->travelTo($now);
+
+    expect($this->service->autoCompleteCompletedShifts($now))->toBe(0);
+    expect(AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first()->check_out)->toBeNull();
 });
 
 it('executes hr:auto-complete-shifts artisan command successfully', function () {
     $f = geoFixture();
     $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
-
+    $record = AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first();
+    $record->newQuery()->whereKey($record->id)->update(['scheduled_end' => '2026-10-05 13:00:00']);
     $this->travelTo(CarbonImmutable::parse('2026-10-05 18:30:00', 'UTC'));
 
-    $exitCode = Artisan::call('hr:auto-complete-shifts', ['--force' => true]);
-    expect($exitCode)->toBe(0);
+    config(['hr_attendance_geofence.auto_close_policy' => 'none']);
+    expect(Artisan::call('hr:auto-complete-shifts', ['--force' => true]))->toBe(0);
+    expect($record->fresh()->check_out)->toBeNull();
 
-    $record = AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first();
-    expect($record->check_out)->not->toBeNull();
+    config(['hr_attendance_geofence.auto_close_policy' => 'scheduled_end']);
+    expect(Artisan::call('hr:auto-complete-shifts'))->toBe(0);
+    expect($record->fresh()->check_out)->not->toBeNull();
 });
 
 it('exposes employee attendance records relation manager and employee filter for HR', function () {

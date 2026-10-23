@@ -2,7 +2,9 @@
 
 namespace Webkul\Employee\Services;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 
 class HrAnalyticsService
 {
@@ -48,12 +50,11 @@ class HrAnalyticsService
             'late_arrivals'             => (clone $attendance)->where('late_minutes', '>', 0)->count(),
             'early_departures'          => (clone $attendance)->where('early_departure_minutes', '>', 0)->count(),
             'attendance_overtime_hours' => round((float) (clone $attendance)->sum('overtime_hours'), 2),
-            'leave_days'                => round((float) DB::table('time_off_leaves')
-                ->where('company_id', $companyId)
-                ->where('state', 'validate_two')
-                ->whereDate('date_from', '<=', $to)
-                ->whereDate('date_to', '>=', $from)
-                ->sum('number_of_days'), 2),
+            'leave_days'                => round((float) ApprovedLeaveLookup::overlapping(
+                DB::table('time_off_leaves')->where('company_id', $companyId)->where('state', ApprovedLeaveLookup::APPROVED_STATE),
+                Carbon::parse($from)->toDateString(),
+                Carbon::parse($to)->toDateString(),
+            )->sum('number_of_days'), 2),
             'timesheet_hours'           => round($totalHours, 2),
             'billable_hours'            => round($billableHours, 2),
             'utilization_rate'          => $totalHours > 0 ? round(($billableHours / $totalHours) * 100, 2) : 0.0,

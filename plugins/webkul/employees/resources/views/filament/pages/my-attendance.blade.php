@@ -475,6 +475,8 @@
                                                 <span class="h-2 w-2 rounded-full bg-amber-500"></span>
                                             @elseif ($cell['status'] === 'leave')
                                                 <span class="h-2 w-2 rounded-full bg-purple-500"></span>
+                                            @elseif ($cell['status'] === 'leave_pending')
+                                                <span class="h-2 w-2 rounded-full border border-purple-500"></span>
                                             @elseif ($cell['status'] === 'needs_review')
                                                 <span class="h-2 w-2 rounded-full bg-orange-500"></span>
                                             @elseif ($cell['status'] === 'absent')
@@ -488,6 +490,7 @@
                                                 {{ $cell['status'] === 'present' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : '' }}
                                                 {{ $cell['status'] === 'late' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : '' }}
                                                 {{ $cell['status'] === 'leave' ? 'bg-purple-500/10 text-purple-700 dark:text-purple-300' : '' }}
+                                                {{ $cell['status'] === 'leave_pending' ? 'border border-dashed border-purple-400 text-purple-700 dark:text-purple-300' : '' }}
                                                 {{ $cell['status'] === 'needs_review' ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300' : '' }}
                                                 {{ $cell['status'] === 'absent' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : '' }}
                                                 {{ $cell['status'] === 'weekend' ? 'text-gray-400 dark:text-gray-500' : '' }}

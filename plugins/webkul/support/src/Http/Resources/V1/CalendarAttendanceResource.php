@@ -4,6 +4,7 @@ namespace Webkul\Support\Http\Resources\V1;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Webkul\Support\Models\CalendarAttendance;
 
 class CalendarAttendanceResource extends JsonResource
 {
@@ -19,8 +20,8 @@ class CalendarAttendanceResource extends JsonResource
             'day_to'         => (float) $this->day_to,
             'duration_days'  => (float) $this->duration_days,
             'duration_hours' => (float) $this->duration_hours,
-            'hour_from'      => (float) $this->hour_from,
-            'hour_to'        => (float) $this->hour_to,
+            'hour_from'      => CalendarAttendance::toDecimalHours($this->hour_from),
+            'hour_to'        => CalendarAttendance::toDecimalHours($this->hour_to),
             'sequence'       => $this->sequence,
             'display_type'   => $this->display_type,
             'calendar_id'    => $this->calendar_id,

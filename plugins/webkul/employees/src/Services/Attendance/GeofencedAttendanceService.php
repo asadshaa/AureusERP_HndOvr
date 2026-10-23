@@ -37,6 +37,7 @@ use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
+use Webkul\Support\Services\HierarchicalNotificationService;
 
 /**
  * The single writer for browser-GPS attendance. Laravel is authoritative:
@@ -375,7 +376,7 @@ class GeofencedAttendanceService
         $verification->update(['attendance_record_id' => $record->id]);
 
         if ($decision->needsReview) {
-            $this->notifyLineManager($record, 'Check-in flagged', $this->flaggedSentence('check-in', $decision));
+            $this->notifyLineManager($record, 'checkin_flagged', 'Check-in flagged', $this->flaggedSentence('check-in', $decision));
         }
 
         return $this->resultFor(Action::CheckIn, $decision->result, true, $this->localTime($record->check_in, $timezone), $record);
@@ -470,7 +471,7 @@ class GeofencedAttendanceService
         });
 
         if ($decision->needsReview) {
-            $this->notifyLineManager($open, 'Check-out flagged', $this->flaggedSentence('check-out', $decision));
+            $this->notifyLineManager($open, 'checkout_flagged', 'Check-out flagged', $this->flaggedSentence('check-out', $decision));
         }
 
         return $this->resultFor(Action::CheckOut, $decision->result, true, $this->localTime($open->check_out, $timezone), $open);
@@ -704,7 +705,7 @@ class GeofencedAttendanceService
                         ]);
                     });
 
-                    $this->notifyLineManager($record, 'Missing check-out', 'never checked out. Set the correct check-out time (Edit) or ask them to request a correction.');
+                    $this->notifyLineManager($record, 'missing_checkout', 'Missing check-out', 'never checked out. Set the correct check-out time (Edit) or ask them to request a correction.');
                     $flagged++;
                 }
             });
@@ -713,79 +714,70 @@ class GeofencedAttendanceService
     }
 
     /**
-     * Automatically completes open shifts that have reached their scheduled end time
-     * or completed their full scheduled hours (e.g. 8 hours) without check-out.
-     * Safely closes the shift with check_out = scheduled_end (or check_in + 8h),
-     * computes full worked hours, and sets status to 'present'.
+     * Optional auto-close of open GPS / self-service shifts, governed by
+     * config('hr_attendance_geofence.auto_close_policy'):
      *
-     * @return int Number of shifts auto-completed.
+     *  - "none" (default): nothing is closed. Missing check-outs are handled by
+     *    hr:flag-forgotten-shifts (review queue + line-manager notice) and the
+     *    employee's own correction request. No work time is ever made up.
+     *  - "scheduled_end": a shift that HAS a scheduled end is closed at that end
+     *    once it has passed. Shifts without a schedule are left open (no more
+     *    invented "check-in + 8 hours").
+     *
+     * An auto-closed day is never silently "verified": it is marked needs-review
+     * with a pending review item and the auto_closed flag, and its attendance
+     * status is left as it was, so HR confirms or corrects it.
      */
     public function autoCompleteCompletedShifts(?CarbonImmutable $nowUtc = null): int
     {
+        if (config('hr_attendance_geofence.auto_close_policy', 'none') !== 'scheduled_end') {
+            return 0;
+        }
+
         $nowUtc ??= CarbonImmutable::now('UTC');
         $completed = 0;
 
         AttendanceRecord::query()
             ->whereNotNull('check_in')
             ->whereNull('check_out')
+            ->whereNotNull('scheduled_end')
+            ->where('scheduled_end', '<=', $nowUtc->setTimezone(config('app.timezone')))
             ->whereIn('source', AttendanceSource::evidenceBacked())
-            ->with(['employee', 'company'])
-            ->chunkById(200, function ($records) use (&$completed, $nowUtc): void {
+            ->with(['employee'])
+            ->chunkById(200, function ($records) use (&$completed): void {
                 foreach ($records as $record) {
-                    $employee = $record->employee;
-                    if (! $employee) {
+                    if (! $record->employee || ! $record->scheduled_end->greaterThan($record->check_in)) {
                         continue;
                     }
 
-                    $timezone = $this->schedule->timezoneFor($employee);
-                    $nowLocal = $nowUtc->setTimezone($timezone);
-
-                    // Check if shift hours or scheduled end are complete
-                    $shouldComplete = false;
-                    $targetCheckOut = null;
-
-                    if ($record->scheduled_end) {
-                        $scheduledEnd = Carbon::parse($record->scheduled_end, $timezone);
-                        if ($nowLocal->greaterThanOrEqualTo($scheduledEnd)) {
-                            $shouldComplete = true;
-                            $targetCheckOut = $scheduledEnd->setTimezone(config('app.timezone'));
-                        }
-                    } elseif ($record->check_in) {
-                        $elapsedMinutes = $record->check_in->diffInMinutes($nowUtc);
-                        if ($elapsedMinutes >= 480) {
-                            $shouldComplete = true;
-                            $targetCheckOut = $record->check_in->copy()->addMinutes(480)->setTimezone(config('app.timezone'));
-                        }
-                    }
-
-                    if (! $shouldComplete || ! $targetCheckOut) {
-                        continue;
-                    }
-
-                    DB::transaction(function () use ($record, $targetCheckOut): void {
+                    DB::transaction(function () use ($record): void {
                         $verification = AttendanceVerification::query()->create([
                             'company_id'           => $record->company_id,
                             'employee_id'          => $record->employee_id,
                             'attendance_record_id' => $record->id,
                             'action'               => Action::CheckOut,
                             'method'               => Method::Manual,
-                            'result'               => Result::Verified,
+                            'result'               => Result::NeedsReview,
                             'accepted'             => true,
-                            'flags'                => ['auto_completed_full_shift'],
-                            'metadata'             => ['reason' => 'Automatically completed upon shift hours completion'],
-                            'review_status'        => null,
+                            // auto_completed_full_shift kept for existing reports/filters.
+                            'flags'                => ['auto_closed', 'auto_completed_full_shift'],
+                            'metadata'             => [
+                                'reason' => 'Closed automatically at the scheduled end because no check-out was recorded (auto_close_policy=scheduled_end).',
+                                'policy' => 'scheduled_end',
+                            ],
+                            'review_status'        => 'pending',
                             'server_recorded_at'   => now(),
                         ]);
 
-                        $this->withAuditSuppressed(function () use ($record, $targetCheckOut, $verification): void {
-                            $record->check_out = $targetCheckOut;
-                            $record->status = 'present';
+                        $this->withAuditSuppressed(function () use ($record, $verification): void {
+                            $record->check_out = $record->scheduled_end;
                             $record->check_out_verification_id = $verification->id;
-                            $record->verification_status = Status::Verified->value;
+                            $record->verification_status = Status::NeedsReview->value;
                             $record->save();
                         });
                     });
 
+                    $this->notifyLineManager($record, 'auto_closed', 'Check-out added automatically', 'had no check-out, so it was closed at the scheduled end. Please confirm or correct it.');
                     $completed++;
                 }
             });
@@ -806,7 +798,13 @@ class GeofencedAttendanceService
         return "{$what} was recorded but needs review".($reasons !== '' ? " ({$reasons})" : '').'. Open HR → Attendance and use Approve or Reject.';
     }
 
-    private function notifyLineManager(AttendanceRecord $record, string $title, string $what): void
+    /**
+     * $event identifies what happened (checkin_flagged, checkout_flagged,
+     * missing_checkout, auto_closed). Together with the record it forms an
+     * idempotency key, so re-running a job or re-processing the same event never
+     * notifies the same person twice.
+     */
+    private function notifyLineManager(AttendanceRecord $record, string $event, string $title, string $what): void
     {
         try {
             $parentId = $record->employee?->parent_id;
@@ -837,7 +835,7 @@ class GeofencedAttendanceService
 
                 foreach ($hrUsers as $hrUser) {
                     if ((int) $hrUser->id !== (int) $record->employee?->user_id) {
-                        $hrUser->notifyNow($notification->toDatabase());
+                        $this->sendAttendanceNotice($hrUser, $notification, $record, $event);
                     }
                 }
 
@@ -854,10 +852,20 @@ class GeofencedAttendanceService
                     $what,
                 ));
 
-            $manager->notifyNow($notification->toDatabase());
+            $this->sendAttendanceNotice($manager, $notification, $record, $event);
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    private function sendAttendanceNotice(User $recipient, FilamentNotification $notification, AttendanceRecord $record, string $event): void
+    {
+        app(HierarchicalNotificationService::class)->sendIdempotentNotification(
+            $recipient,
+            $notification,
+            sprintf('attendance_%s_%d_%d', $event, $record->id, $recipient->id),
+            ['attendance_record_id' => $record->id, 'event' => $event],
+        );
     }
 
     // ------------------------------------------------------------------

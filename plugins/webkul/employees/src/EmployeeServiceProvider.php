@@ -3,13 +3,17 @@
 namespace Webkul\Employee;
 
 use Filament\Panel;
+use Illuminate\Support\Facades\Schema;
+use Throwable;
 use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
+use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
 use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Support\Models\Company;
 
 class EmployeeServiceProvider extends PackageServiceProvider
 {
@@ -75,7 +79,18 @@ class EmployeeServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
-        //
+        // A company created after the initial seed must still get its attendance
+        // correction workflow, otherwise every correction / missed-day request in
+        // that company is refused ("No active approval workflow is configured").
+        Company::created(function (Company $company): void {
+            try {
+                if (Schema::hasTable('employees_request_types') && Schema::hasTable('support_approval_workflows')) {
+                    app(AttendanceWorkflowSeeder::class)->provisionForCompany($company);
+                }
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 
     public function packageRegistered(): void

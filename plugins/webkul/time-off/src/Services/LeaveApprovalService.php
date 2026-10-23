@@ -10,6 +10,7 @@ use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
+use Webkul\Support\Services\HierarchicalNotificationService;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 
@@ -258,8 +259,12 @@ class LeaveApprovalService
                 ->title($title)
                 ->body($body);
 
+            // synchronize() runs twice per decision (from the engine's subject
+            // synchronizer and again from approve()/reject()), so the notice is
+            // keyed per request + decision + step and sent at most once.
+            $key = sprintf('leave_decision_%d_%s_%d', (int) $approval?->id, $decision, (int) $approval?->decisions?->count());
             foreach ($recipients as $recipient) {
-                $recipient->notifyNow($notification->toDatabase());
+                app(HierarchicalNotificationService::class)->sendIdempotentNotification($recipient, $notification, $key.'_'.$recipient->id, ['leave_id' => $leave->id, 'decision' => $decision]);
             }
         } catch (\Throwable $e) {
             report($e);

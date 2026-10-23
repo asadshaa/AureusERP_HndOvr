@@ -57,9 +57,54 @@ class CalendarAttendance extends Model implements Sortable
         return $this->morphTo();
     }
 
+    /**
+     * Two-week calendars alternate by ISO week: 0 for an even ISO week, 1 for an
+     * odd one. (Previously derived from the day of the year, which does not line
+     * up with weeks.)
+     */
     public static function getWeekType(\DateTime|Carbon $date): int
     {
-        return (int) floor(($date->toDateTime()->format('z') + 1) / 7) % 2;
+        return Carbon::instance($date)->isoWeek() % 2 === 0 ? 0 : 1;
+    }
+
+    /**
+     * Which two-week slots a row applies to: "even" -> [0], "odd" -> [1], and
+     * anything else (null, "all", legacy "both") -> both weeks.
+     *
+     * @return array<int, int>
+     */
+    public static function weekSlotsFor(mixed $weekType): array
+    {
+        return match ($weekType instanceof \BackedEnum ? $weekType->value : $weekType) {
+            'even'  => [0],
+            'odd'   => [1],
+            default => [0, 1],
+        };
+    }
+
+    /**
+     * hour_from / hour_to are strings that hold either a decimal hour ("10",
+     * "10.5", legacy rows) or a clock time ("10:30" / "10:30:00", what the
+     * Filament TimePicker saves). Both become minutes after midnight, so a
+     * 10:30 start is no longer read as 10:00.
+     */
+    public static function toMinutes(mixed $value): int
+    {
+        if ($value === null || $value === '') {
+            return 0;
+        }
+
+        if (is_string($value) && preg_match('/^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*$/', $value, $m)) {
+            return ((int) $m[1]) * 60 + (int) $m[2];
+        }
+
+        return is_numeric($value) ? (int) round(((float) $value) * 60) : 0;
+    }
+
+    /** The same value as decimal hours (e.g. "10:30:00" -> 10.5). */
+    public static function toDecimalHours(mixed $value): float
+    {
+        return self::toMinutes($value) / 60;
     }
 
     protected static function boot()

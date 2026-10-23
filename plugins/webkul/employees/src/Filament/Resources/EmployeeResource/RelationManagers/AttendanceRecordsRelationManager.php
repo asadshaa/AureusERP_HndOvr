@@ -57,17 +57,24 @@ class AttendanceRecordsRelationManager extends RelationManager
 
     public static function getMonthlySummary(Model $employee, ?string $yearMonth = null): array
     {
-        $target = $yearMonth ? Carbon::createFromFormat('Y-m', $yearMonth) : now();
+        // Anchor on the 1st: createFromFormat('Y-m') borrows today's day number, so on
+        // the 29th-31st a shorter month (e.g. "2026-02") overflowed into the next one.
+        $target = $yearMonth && preg_match('/^\d{4}-\d{2}$/', $yearMonth)
+            ? Carbon::createFromFormat('!Y-m-d', $yearMonth.'-01')
+            : now()->startOfMonth();
         $startOfMonth = $target->copy()->startOfMonth()->toDateString();
         $endOfMonth = $target->copy()->endOfMonth()->toDateString();
         $monthLabel = $target->format('F Y');
 
         $records = $employee->attendanceRecords()
+            ->where('company_id', $employee->company_id)
             ->whereBetween('attendance_date', [$startOfMonth, $endOfMonth])
             ->get()
             ->reject(fn ($r): bool => $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false);
 
-        $present = $records->where('status', 'present')->count();
+        // A remote working day is an attended day.
+        $remote = $records->where('status', 'remote')->count();
+        $present = $records->where('status', 'present')->count() + $remote;
         $halfDay = $records->where('status', 'half_day')->count();
         $absent = $records->where('status', 'absent')->count();
         $leave = $records->where('status', 'leave')->count();
@@ -90,6 +97,7 @@ class AttendanceRecordsRelationManager extends RelationManager
         return [
             'month'          => $monthLabel,
             'present'        => $present,
+            'remote'         => $remote,
             'half_day'       => $halfDay,
             'absent'         => $absent,
             'leave'          => $leave,
