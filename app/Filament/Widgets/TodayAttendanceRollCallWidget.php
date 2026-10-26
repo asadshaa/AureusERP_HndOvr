@@ -10,6 +10,7 @@ use Webkul\Employee\Filament\Resources\AttendanceRecordResource;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Support\HrPermissions;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\TimeOff\Models\Leave;
 
 class TodayAttendanceRollCallWidget extends Widget
@@ -42,7 +43,7 @@ class TodayAttendanceRollCallWidget extends Widget
     protected function getViewData(): array
     {
         $user = Auth::user();
-        $companyId = (int) ($user?->default_company_id ?? 1);
+        $companyId = (int) CurrentCompany::id();
         $today = Carbon::today(config('app.timezone', 'Asia/Karachi'))->toDateString();
 
         $totalEmployees = Employee::query()

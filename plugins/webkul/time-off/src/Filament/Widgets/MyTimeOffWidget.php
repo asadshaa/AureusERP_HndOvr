@@ -9,6 +9,7 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Models\Employee;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveAllocation;
@@ -57,7 +58,7 @@ class MyTimeOffWidget extends BaseWidget
         $employee = $user?->employee ?? ($user ? Employee::where('user_id', $user->id)->first() : null);
         $employeeId = $employee?->id;
         $endOfYear = Carbon::now()->endOfYear();
-        $companyId = (int) ($employee?->company_id ?? $user?->default_company_id ?? 1);
+        $companyId = (int) ($employee?->company_id ?? CurrentCompany::id());
 
         $leaveTypes = LeaveType::query()
             ->where('is_active', true)

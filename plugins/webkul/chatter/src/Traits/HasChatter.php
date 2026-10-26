@@ -633,8 +633,10 @@ trait HasChatter
             return false;
         }
 
-        if (Storage::exists('public/'.$attachment->file_path)) {
-            Storage::delete('public/'.$attachment->file_path);
+        foreach ([Attachment::DISK, 'public'] as $disk) {
+            if (Storage::disk($disk)->exists($attachment->file_path)) {
+                Storage::disk($disk)->delete($attachment->file_path);
+            }
         }
 
         return $attachment->delete();
@@ -670,7 +672,7 @@ trait HasChatter
     {
         $attachment = $this->attachments()->find($attachmentId);
 
-        return $attachment && Storage::exists('public/'.$attachment->file_path);
+        return $attachment && (Storage::disk(Attachment::DISK)->exists($attachment->file_path) || Storage::disk('public')->exists($attachment->file_path));
     }
 
     public function followers(): MorphMany

@@ -539,6 +539,7 @@ class EmployeeRequestResource extends Resource
                     FileUpload::make('attachments')
                         ->label('Supporting Documents / Receipts')
                         ->multiple()
+                        ->disk('local')
                         ->directory('employees/requests')
                         ->visibility('private')
                         ->columnSpanFull(),

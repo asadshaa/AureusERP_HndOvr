@@ -2,6 +2,7 @@
 
 namespace Webkul\Employee\Filament\Resources;
 
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -84,9 +85,9 @@ use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Field\Filament\Traits\HasCustomFields;
 use Webkul\Security\Enums\PermissionType;
-use Webkul\Security\Filament\Resources\CompanyResource;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Models\Calendar;
 use Webkul\Support\Models\Country;
@@ -418,12 +419,23 @@ class EmployeeResource extends Resource
                                                         Fieldset::make(__('employees::filament/resources/employee.form.tabs.work-information.fields.organization-details'))
                                                             ->schema([
                                                                 Select::make('company_id')
-                                                                    ->relationship('company', 'name')
+                                                                    ->relationship(
+                                                                        'company',
+                                                                        'name',
+                                                                        modifyQueryUsing: fn (Builder $query) => CurrentCompany::isGroupOwner()
+                                                                            ? $query
+                                                                            : $query->whereKey(CurrentCompany::id() ?? 0),
+                                                                    )
+                                                                    ->default(fn (): ?int => CurrentCompany::id())
+                                                                    ->rule(fn () => function (string $attribute, $value, Closure $fail): void {
+                                                                        if ($value && ! CurrentCompany::isGroupOwner() && (int) $value !== CurrentCompany::id()) {
+                                                                            $fail('Employees can only be added to your active company.');
+                                                                        }
+                                                                    })
                                                                     ->searchable()
                                                                     ->preload()
                                                                     ->prefixIcon('heroicon-o-building-office')
-                                                                    ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.company'))
-                                                                    ->createOptionForm(fn (Schema $schema) => CompanyResource::form($schema)),
+                                                                    ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.company')),
                                                                 ColorPicker::make('color')
                                                                     ->label(__('employees::filament/resources/employee.form.tabs.work-information.fields.color'))
                                                                     ->hexColor(),
@@ -505,7 +517,11 @@ class EmployeeResource extends Resource
                                                                     )
                                                                     ->tel(),
                                                                 Select::make('bank_account_id')
-                                                                    ->relationship('bankAccount', 'account_number')
+                                                                    ->relationship(
+                                                                        'bankAccount',
+                                                                        'account_number',
+                                                                        modifyQueryUsing: fn (Builder $query, $livewire) => $query->where('partner_id', $livewire->record?->partner_id ?? 0),
+                                                                    )
                                                                     ->searchable()
                                                                     ->preload()
                                                                     ->createOptionForm([
@@ -773,6 +789,8 @@ class EmployeeResource extends Resource
                                                                 'image/*',
                                                                 'application/pdf',
                                                             ])
+                                                            ->disk('local')
+                                                            ->visibility('private')
                                                             ->directory('employees/work-permit')
                                                             ->visibility('public'),
                                                     ])->columns(1),
@@ -803,7 +821,7 @@ class EmployeeResource extends Resource
                                                         Toggle::make('work_permit_scheduled_activity')
                                                             ->label(__('employees::filament/resources/employee.form.tabs.settings.fields.work-permit-scheduled-activity')),
                                                         Select::make('user_id')
-                                                            ->relationship(name: 'user', titleAttribute: 'name', modifyQueryUsing: fn ($query) => $query->withTrashed())
+                                                            ->relationship(name: 'user', titleAttribute: 'name', modifyQueryUsing: fn ($query) => CurrentCompany::scopeUsersOf($query->withTrashed(), CurrentCompany::id() ?? 0))
                                                             ->getOptionLabelFromRecordUsing(function ($record, $livewire) {
                                                                 $label = $record->name;
 
@@ -1434,7 +1452,7 @@ class EmployeeResource extends Resource
                             TextInput::make('passport_id')->label('Passport'),
                             TextInput::make('ssnid')->label('SSN'),
                             TextInput::make('sinid')->label('SIN'),
-                            Select::make('bank_account_id')->relationship('bankAccount', 'account_number')->searchable()->preload(),
+                            Select::make('bank_account_id')->relationship('bankAccount', 'account_number', modifyQueryUsing: fn (Builder $query, ?Employee $record) => $query->where('partner_id', $record?->partner_id ?? 0))->searchable()->preload(),
                             TextInput::make('salary_grade'),
                             TextInput::make('base_salary')->numeric()->minValue(0),
                             Select::make('salary_currency_id')->relationship('salaryCurrency', 'name')->searchable()->preload(),
@@ -1532,7 +1550,7 @@ class EmployeeResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $user = Auth::user();
-        $companyId = (int) $user?->default_company_id;
+        $companyId = (int) CurrentCompany::id();
         if (! $user || $companyId <= 0) {
             return parent::getEloquentQuery()->whereRaw('1 = 0');
         }
@@ -1769,6 +1787,8 @@ class EmployeeResource extends Resource
                                                                 : 'success'
                                                         ),
                                                     ImageEntry::make('work_permit')
+                                                        ->disk('local')
+                                                        ->visibility('private')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.work-permit-document'))
                                                         ->columnSpanFull()
                                                         ->placeholder('—')

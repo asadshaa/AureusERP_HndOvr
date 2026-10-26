@@ -5,6 +5,7 @@ namespace App\Filament\Widgets;
 use App\Services\Dashboard\RoleActionCenterService;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Facades\Auth;
+use Webkul\Security\Services\CurrentCompany;
 
 class PendingActionsCenterWidget extends Widget
 {
@@ -31,7 +32,7 @@ class PendingActionsCenterWidget extends Widget
             return ['data' => ['pending_count' => 0, 'items' => []]];
         }
 
-        $companyId = (int) ($user->default_company_id ?? 1);
+        $companyId = (int) CurrentCompany::id($user);
 
         return [
             'data' => app(RoleActionCenterService::class)->getPendingActionsFor($user, $companyId),

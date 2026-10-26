@@ -45,10 +45,16 @@ use Webkul\Employee\Filament\Clusters\Configurations\Resources\JobPositionResour
 use Webkul\Employee\Filament\Resources\DepartmentResource;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\EmployeeJobPosition;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\Security\Filament\Resources\CompanyResource;
 
 class JobPositionResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Rows with no company are definitions every company uses. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = EmployeeJobPosition::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-briefcase';

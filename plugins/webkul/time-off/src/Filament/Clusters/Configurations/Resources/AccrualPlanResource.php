@@ -27,6 +27,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\TimeOff\Enums\AccruedGainTime;
 use Webkul\TimeOff\Enums\CarryoverDate;
 use Webkul\TimeOff\Enums\CarryoverMonth;
@@ -41,6 +42,11 @@ use Webkul\TimeOff\Models\LeaveAccrualPlan;
 
 class AccrualPlanResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Rows with no company are definitions every company uses. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = LeaveAccrualPlan::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-paper-airplane';

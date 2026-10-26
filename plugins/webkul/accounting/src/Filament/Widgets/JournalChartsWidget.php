@@ -5,6 +5,7 @@ namespace Webkul\Accounting\Filament\Widgets;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Journal;
+use Webkul\Security\Services\CurrentCompany;
 
 class JournalChartsWidget extends Widget
 {
@@ -44,7 +45,7 @@ class JournalChartsWidget extends Widget
 
     public function getJournals()
     {
-        $companyId = (int) (Auth::user()?->default_company_id ?? 1);
+        $companyId = (int) CurrentCompany::id();
 
         return Journal::where('company_id', $companyId)
             ->where('show_on_dashboard', true)

@@ -62,7 +62,7 @@
                                     <div class="relative overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 flex-shrink-0">
                                         @if ($isImage)
                                             <img
-                                                src="{{ Storage::url($attachment->file_path) }}"
+                                                src="{{ $attachment->url }}"
                                                 alt="{{ $attachment->original_file_name }}"
                                                 class="object-cover w-10 h-10"
                                                 loading="lazy"
@@ -92,7 +92,7 @@
                                                     color="gray"
                                                     size="xs"
                                                     tag="a"
-                                                    :href="Storage::url($attachment->file_path)"
+                                                    :href="$attachment->url"
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                 />
@@ -103,7 +103,7 @@
                                                 color="primary"
                                                 size="xs"
                                                 tag="a"
-                                                :href="Storage::url($attachment->file_path)"
+                                                :href="$attachment->url"
                                                 download="{{ $attachment->original_file_name }}"
                                                 target="_blank"
                                                 rel="noopener noreferrer"

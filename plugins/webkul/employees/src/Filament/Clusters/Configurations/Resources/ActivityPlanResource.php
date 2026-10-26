@@ -40,10 +40,16 @@ use Webkul\Employee\Filament\Clusters\Configurations\Resources\ActivityPlanResou
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\ActivityPlanResource\RelationManagers\ActivityTemplateRelationManager;
 use Webkul\Employee\Filament\Resources\DepartmentResource;
 use Webkul\Employee\Models\ActivityPlan;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\Security\Filament\Resources\CompanyResource;
 
 class ActivityPlanResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Rows with no company are definitions every company uses. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = ActivityPlan::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-briefcase';

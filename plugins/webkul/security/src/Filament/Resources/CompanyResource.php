@@ -48,6 +48,7 @@ use Webkul\Security\Filament\Resources\CompanyResource\Pages\EditCompany;
 use Webkul\Security\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use Webkul\Security\Filament\Resources\CompanyResource\Pages\ViewCompany;
 use Webkul\Security\Filament\Resources\CompanyResource\RelationManagers\BranchesRelationManager;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Security\Settings\UserSettings;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
 use Webkul\Support\Enums\NavigationGroup;
@@ -56,7 +57,9 @@ use Webkul\Support\Models\Currency;
 
 class CompanyResource extends Resource
 {
-    use HasCustomFields, HasResourcePermissionQuery;
+    use HasCustomFields, HasResourcePermissionQuery {
+        HasResourcePermissionQuery::getEloquentQuery as permissionScopedQuery;
+    }
 
     protected static ?string $model = Company::class;
 
@@ -88,6 +91,41 @@ class CompanyResource extends Resource
     public static function canCreate(): bool
     {
         return false;
+    }
+
+    /** A user sees only their own companies; a group owner sees every company. */
+    public static function getEloquentQuery(): Builder
+    {
+        $query = static::permissionScopedQuery();
+
+        return CurrentCompany::isGroupOwner()
+            ? $query
+            : $query->whereIn($query->qualifyColumn('id'), CurrentCompany::membershipIds());
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return CurrentCompany::isGroupOwner() && parent::canDelete($record);
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return CurrentCompany::isGroupOwner() && parent::canDeleteAny();
+    }
+
+    public static function canForceDelete(Model $record): bool
+    {
+        return CurrentCompany::isGroupOwner() && parent::canForceDelete($record);
+    }
+
+    public static function canForceDeleteAny(): bool
+    {
+        return CurrentCompany::isGroupOwner() && parent::canForceDeleteAny();
+    }
+
+    public static function canRestore(Model $record): bool
+    {
+        return CurrentCompany::isGroupOwner() && parent::canRestore($record);
     }
 
     public static function getGlobalSearchResultDetails(Model $record): array

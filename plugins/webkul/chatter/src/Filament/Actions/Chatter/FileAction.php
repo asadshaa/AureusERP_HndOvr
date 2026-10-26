@@ -10,6 +10,7 @@ use Filament\Support\Enums\IconPosition;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Webkul\Chatter\Models\Attachment;
 
 class FileAction extends Action
 {
@@ -32,7 +33,8 @@ class FileAction extends Action
                     ->hiddenLabel()
                     ->multiple()
                     ->directory('chats-attachments')
-                    ->disk('public')
+                    ->disk(Attachment::DISK)
+                    ->visibility('private')
                     ->visibility('public')
                     ->preserveFilenames()
                     ->downloadable()
@@ -52,7 +54,7 @@ class FileAction extends Action
                             if ($attachment) {
                                 $record->removeAttachment($attachment->id);
                             } else {
-                                Storage::disk('public')->delete($file);
+                                Storage::disk(Attachment::DISK)->delete($file);
                             }
                         } else {
                             $attachment = $record->attachments()->where('file_path', $file)->first();
@@ -61,7 +63,7 @@ class FileAction extends Action
                                 $attachment->delete();
                             }
 
-                            Storage::disk('public')->delete($file);
+                            Storage::disk(Attachment::DISK)->delete($file);
                         }
 
                         Notification::make()

@@ -46,6 +46,7 @@ use Webkul\Security\Filament\Resources\UserResource\Pages\EditUser;
 use Webkul\Security\Filament\Resources\UserResource\Pages\ListUsers;
 use Webkul\Security\Filament\Resources\UserResource\Pages\ViewUsers;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Security\Settings\UserSettings;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
 use Webkul\Support\Enums\NavigationGroup;
@@ -53,13 +54,27 @@ use Webkul\Support\Models\Company;
 
 class UserResource extends Resource
 {
-    use HasResourcePermissionQuery;
+    use HasResourcePermissionQuery {
+        getEloquentQuery as permissionScopedQuery;
+    }
 
     protected static ?string $model = User::class;
 
     protected static ?int $navigationSort = 4;
 
     protected static ?string $recordTitleAttribute = 'name';
+
+    /** Only the active company's users (default company or allowed company). */
+    public static function getEloquentQuery(): Builder
+    {
+        return CurrentCompany::scopeUsersOf(static::permissionScopedQuery(), CurrentCompany::id() ?? 0);
+    }
+
+    /** Companies the signed-in user may assign: their own, or every active company for a group owner. */
+    protected static function assignableCompanies(Builder $query): Builder
+    {
+        return CurrentCompany::isGroupOwner() ? $query : $query->whereIn($query->qualifyColumn('id'), CurrentCompany::membershipIds());
+    }
 
     public static function getNavigationLabel(): string
     {
@@ -218,12 +233,13 @@ class UserResource extends Resource
                                             ->relationship(
                                                 'defaultCompany',
                                                 'name',
-                                                modifyQueryUsing: fn (Builder $query) => $query->withTrashed(),
+                                                modifyQueryUsing: fn (Builder $query) => static::assignableCompanies($query),
                                             )
-                                            ->getOptionLabelFromRecordUsing(function ($record): string {
-                                                return $record->name.($record->trashed() ? ' (Deleted)' : '');
+                                            ->rule(fn (?User $record) => function (string $attribute, $value, Closure $fail) use ($record): void {
+                                                if ($value && (int) $value !== (int) $record?->default_company_id && ! CurrentCompany::canAssignCompany((int) $value)) {
+                                                    $fail('You can only assign users to your own companies.');
+                                                }
                                             })
-                                            ->disableOptionWhen(fn ($label) => str_contains($label, ' (Deleted)'))
                                             ->required()
                                             ->searchable()
                                             ->afterStateHydrated(function (Select $component, $state) {
@@ -240,6 +256,14 @@ class UserResource extends Resource
                                                 }
                                             })
                                             ->preload(),
+                                        Select::make('allowedCompanies')
+                                            ->label('Also has access to')
+                                            ->helperText('Other companies this user belongs to. Only a group owner can change this.')
+                                            ->relationship('allowedCompanies', 'name')
+                                            ->multiple()
+                                            ->searchable()
+                                            ->preload()
+                                            ->visible(fn (): bool => CurrentCompany::isGroupOwner()),
                                     ]),
                             ])
                             ->columnSpan(['lg' => 1]),

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Listeners\NotifyUsersOnMoveConfirmed;
+use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
@@ -35,6 +36,10 @@ class AppServiceProvider extends ServiceProvider
         if (config('app.force_https')) {
             URL::forceScheme('https');
         }
+
+        // Every list shows the newest records first (Filament orders by the record key as a final
+        // tie-breaker; this makes that descending). Tables with their own defaultSort keep it.
+        Table::configureUsing(fn (Table $table): Table => $table->defaultSort(null, 'desc'));
 
         Event::listen(
             MoveConfirmed::class,

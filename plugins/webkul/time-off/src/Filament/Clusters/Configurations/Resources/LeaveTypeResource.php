@@ -39,6 +39,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\TimeOff\Enums\AllocationValidationType;
 use Webkul\TimeOff\Enums\EmployeeRequest;
 use Webkul\TimeOff\Enums\LeaveValidationType;
@@ -54,6 +55,11 @@ use Webkul\TimeOff\Models\LeaveType;
 
 class LeaveTypeResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Rows with no company are definitions every company uses. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = LeaveType::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-text';

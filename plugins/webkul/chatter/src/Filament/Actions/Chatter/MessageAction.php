@@ -15,6 +15,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Throwable;
+use Webkul\Chatter\Models\Attachment;
 use Webkul\Chatter\Support\ChatterMentions;
 
 class MessageAction extends Action
@@ -104,7 +105,8 @@ class MessageAction extends Action
                     ->hiddenLabel()
                     ->multiple()
                     ->directory('messages-attachments')
-                    ->disk('public')
+                    ->disk(Attachment::DISK)
+                    ->visibility('private')
                     ->visibility('public')
                     ->preserveFilenames()
                     ->previewable(true)

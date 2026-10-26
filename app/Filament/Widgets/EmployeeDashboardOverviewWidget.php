@@ -6,6 +6,7 @@ use Filament\Widgets\Widget;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Models\Employee;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Filament\Pages\Profile;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
@@ -42,7 +43,7 @@ class EmployeeDashboardOverviewWidget extends Widget
      */
     public static function calculateCanonicalLeaves(Employee $employee, ?int $companyId = null, ?\DateTimeInterface $endOfYear = null): array
     {
-        $companyId = $companyId ?? (int) ($employee->company_id ?? 1);
+        $companyId = $companyId ?? (int) ($employee->company_id ?? CurrentCompany::id());
         $endOfYear = $endOfYear ?? Carbon::now()->endOfYear();
 
         $leaveTypes = LeaveType::query()
@@ -171,7 +172,7 @@ class EmployeeDashboardOverviewWidget extends Widget
             return [];
         }
 
-        $companyId = (int) ($employee->company_id ?? $user->default_company_id ?? 1);
+        $companyId = (int) ($employee->company_id ?? CurrentCompany::id($user));
         $endOfYear = Carbon::now()->endOfYear();
 
         $name = $employee->name ?? $user->name;
