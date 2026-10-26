@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             DegreeSeeder::class,
             RefuseReasonSeeder::class,
             ApplicantCategorySeeder::class,
+            JobOpeningWorkflowSeeder::class,
         ]);
     }
 }

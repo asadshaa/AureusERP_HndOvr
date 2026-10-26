@@ -18,6 +18,9 @@ use Webkul\Recruitment\Enums\RecruitmentState;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource;
 use Webkul\Recruitment\Filament\Widgets\JobPositionStatsWidget;
+use Webkul\Recruitment\Models\Candidate;
+use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Services\CandidateApplicationService;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
@@ -27,6 +30,8 @@ class ListApplicants extends ListRecords
     use HasTableViews;
 
     protected static string $resource = ApplicantResource::class;
+
+    public ?string $lastApplicationOutcome = null;
 
     public function getHeaderWidgets(): array
     {
@@ -156,36 +161,28 @@ class ListApplicants extends ListRecords
                                         ->modalIcon('heroicon-s-user-plus')
                                         ->modalWidth(Width::SixExtraLarge);
                                 }),
+                            // One application per candidate per job: the same candidate can
+                            // apply to several jobs (CandidateApplicationService).
+                            Select::make('job_id')
+                                ->label('Job position')
+                                ->relationship('job', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where(
+                                    fn (Builder $query): Builder => $query
+                                        ->where($query->qualifyColumn('company_id'), RecruitmentCompanyScope::companyId())
+                                        ->orWhereNull($query->qualifyColumn('company_id'))
+                                ))
+                                ->required()
+                                ->searchable()
+                                ->preload(),
                         ])->columns(2),
                 ])
-                ->mutateDataUsing(function (array $data): array {
-                    $data['creator_id'] = Auth::id();
-                    $data['company_id'] = Auth::user()->default_company_id;
-                    $data['create_date'] = now();
-                    $data['is_active'] = true;
-
-                    return $data;
-                })
                 ->using(function (array $data): Model {
-                    $model = static::$resource::getModel();
+                    $candidate = Candidate::query()->whereKey($data['candidate_id'])->tap(fn (Builder $query) => RecruitmentCompanyScope::ownCompany($query))->firstOrFail();
+                    $job = JobPosition::query()->findOrFail($data['job_id']);
 
-                    $existingApplicant = $model::where('candidate_id', $data['candidate_id'])
-                        ->where('company_id', $data['company_id'])
-                        ->first();
+                    $result = app(CandidateApplicationService::class)->applyToJob($candidate, $job, Auth::user());
+                    $this->lastApplicationOutcome = $result['outcome'];
 
-                    if ($existingApplicant) {
-                        $existingApplicant->update([
-                            'is_active'        => true,
-                            'deleted_at'       => null,
-                            'refuse_reason_id' => null,
-                            'date_closed'      => null,
-                            'recruiter_id'     => $data['creator_id'],
-                        ]);
-
-                        return $existingApplicant;
-                    }
-
-                    return $model::create($data);
+                    return $result['applicant'];
                 })
                 ->createAnother(false)
                 ->after(function ($record) {
@@ -193,12 +190,20 @@ class ListApplicants extends ListRecords
                         static::$resource::getUrl('edit', ['record' => $record]),
                     );
                 })
-                ->successNotification(
-                    Notification::make()
+                ->successNotification(fn (): Notification => match ($this->lastApplicationOutcome) {
+                    CandidateApplicationService::OUTCOME_EXISTING => Notification::make()
+                        ->info()
+                        ->title('Already applied')
+                        ->body('This candidate already has an application for this job. It has been opened instead of creating a duplicate.'),
+                    CandidateApplicationService::OUTCOME_REOPENED => Notification::make()
+                        ->success()
+                        ->title('Application reopened')
+                        ->body('The candidate\'s earlier application for this job was reopened.'),
+                    default => Notification::make()
                         ->success()
                         ->title(__('recruitments::filament/clusters/applications/resources/applicant/pages/list-applicant.notification.title'))
                         ->body(__('recruitments::filament/clusters/applications/resources/applicant/pages/list-applicant.notification.body')),
-                ),
+                }),
         ];
     }
 }

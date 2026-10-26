@@ -3,11 +3,15 @@
 namespace Webkul\Recruitment;
 
 use Filament\Panel;
+use Illuminate\Support\Facades\Schema;
+use Throwable;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
+use Webkul\Support\Models\Company;
 
 class RecruitmentServiceProvider extends PackageServiceProvider
 {
@@ -50,6 +54,21 @@ class RecruitmentServiceProvider extends PackageServiceProvider
             })
             ->hasUninstallCommand(function (UninstallCommand $command) {})
             ->icon('recruitments');
+    }
+
+    public function packageBooted(): void
+    {
+        // A company created after the initial seed still needs its job opening
+        // approval workflow; without it no job in that company can be published.
+        Company::created(function (Company $company): void {
+            try {
+                if (Schema::hasTable('support_approval_workflows')) {
+                    app(JobOpeningWorkflowSeeder::class)->provisionForCompany($company);
+                }
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 
     public function packageRegistered(): void

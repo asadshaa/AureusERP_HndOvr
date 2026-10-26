@@ -13,7 +13,6 @@ use Filament\Actions\RestoreAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -46,6 +45,7 @@ use Webkul\Employee\Filament\Resources\DepartmentResource;
 use Webkul\Employee\Models\Department;
 use Webkul\Partner\Filament\Resources\AddressResource;
 use Webkul\Partner\Filament\Resources\IndustryResource;
+use Webkul\Recruitment\Enums\JobPostingStatus;
 use Webkul\Recruitment\Filament\Clusters\Configurations;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\CreateJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\EditJobPosition;
@@ -264,21 +264,16 @@ class JobPositionResource extends Resource
                                         Toggle::make('is_active')
                                             ->label(__('recruitments::filament/clusters/configurations/resources/job-position.form.sections.workforce-planning.fields.status'))
                                             ->inline(false),
-                                        Select::make('posting_status')
+                                        // Changed only through the approval/publish buttons
+                                        // (JobOpeningPublicationService), never edited directly.
+                                        TextEntry::make('posting_status')
                                             ->label('Posting status')
-                                            ->options([
-                                                'draft'     => 'Draft',
-                                                'published' => 'Published',
-                                                'paused'    => 'Paused',
-                                                'closed'    => 'Closed',
-                                            ])
-                                            ->default('draft')
-                                            ->required()
-                                            ->live(),
-                                        DateTimePicker::make('published_at')
+                                            ->state(fn (?JobPosition $record): JobPostingStatus => $record?->postingStatus() ?? JobPostingStatus::DRAFT)
+                                            ->badge(),
+                                        TextEntry::make('published_at')
                                             ->label('Published at')
-                                            ->native(false)
-                                            ->visible(fn (Get $get): bool => $get('posting_status') === 'published'),
+                                            ->dateTime()
+                                            ->visible(fn (?JobPosition $record): bool => filled($record?->published_at)),
                                         Select::make('posting_channels')
                                             ->label('Source / channels')
                                             ->options([
@@ -325,6 +320,8 @@ class JobPositionResource extends Resource
                     ->sortable(),
                 TextColumn::make('posting_status')
                     ->label('Posting status')
+                    ->formatStateUsing(fn (?string $state): string => JobPostingStatus::fromStored($state)->getLabel())
+                    ->color(fn (?string $state): string => JobPostingStatus::fromStored($state)->getColor())
                     ->badge()
                     ->sortable(),
                 TextColumn::make('posting_channels')
@@ -608,6 +605,14 @@ class JobPositionResource extends Resource
                                         ->label(__('recruitments::filament/clusters/configurations/resources/job-position.infolist.sections.employment-information.entries.employment-type')),
                                     IconEntry::make('is_active')
                                         ->label(__('recruitments::filament/clusters/configurations/resources/job-position.infolist.sections.position-status.entries.status')),
+                                    TextEntry::make('posting_status')
+                                        ->label('Posting status')
+                                        ->state(fn (JobPosition $record): JobPostingStatus => $record->postingStatus())
+                                        ->badge(),
+                                    TextEntry::make('published_at')
+                                        ->label('Published at')
+                                        ->dateTime()
+                                        ->placeholder('—'),
                                     TextEntry::make('skills.name')
                                         ->listWithLineBreaks()
                                         ->badge()

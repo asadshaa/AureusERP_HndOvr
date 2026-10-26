@@ -61,6 +61,8 @@ use Webkul\Support\Models\Company;
 use Webkul\Support\Models\UTMMedium;
 use Webkul\Support\Models\UTMSource;
 
+require_once __DIR__.'/Support/JobOpeningHelpers.php';
+
 function recruitmentScenarioFixture(): array
 {
     // Same fresh-auth fix as RecruitmentWorkflowTest: Pest reuses the app
@@ -137,11 +139,9 @@ it('1-3. PASS: creates a hiring requirement, verifies the Job Description, and p
     expect($job->posting_status)->toBe('draft')
         ->and($job->published_at)->toBeNull();
 
-    $job->update([
-        'posting_status'   => 'published',
-        'published_at'     => now(),
-        'posting_channels' => ['company_website', 'linkedin'],
-    ]);
+    // Publishing requires an approved job opening (Stage 2.1).
+    publishApprovedJobOpening($job, $f['company']);
+    $job->refresh()->update(['posting_channels' => ['company_website', 'linkedin']]);
     $job->refresh();
     expect($job->posting_status)->toBe('published')
         ->and($job->published_at)->not->toBeNull()
@@ -168,9 +168,9 @@ it('4-13. PASS: a candidate moves through the full pipeline to conversion, with 
         'name'            => 'Warehouse Supervisor',
         'description'     => 'Supervise inbound/outbound warehouse operations.',
         'is_active'       => true,
-        'posting_status'  => 'published',
-        'published_at'    => now(),
     ]);
+    // The job is live, so it went through the job opening approval first (Stage 2.1).
+    publishApprovedJobOpening($job, $f['company']);
 
     // 4. Add candidate: pool entry (candidate + application), not yet staged.
     $candidate = Candidate::query()->create([

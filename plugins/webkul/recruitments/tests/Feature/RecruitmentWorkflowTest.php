@@ -27,11 +27,14 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\RefuseReason;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Recruitment\Services\CandidateConversionService;
+use Webkul\Recruitment\Services\JobOpeningPublicationService;
 use Webkul\Security\Models\Permission;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\UTMMedium;
 use Webkul\Support\Models\UTMSource;
+
+require_once __DIR__.'/Support/JobOpeningHelpers.php';
 
 function recruitmentFixture(): array
 {
@@ -203,11 +206,9 @@ it('tracks Job Posting as a distinct lifecycle from the Job Description, with ch
     expect($f['job']->posting_status)->toBe('draft')
         ->and($f['job']->published_at)->toBeNull();
 
-    $f['job']->update([
-        'posting_status'   => 'published',
-        'published_at'     => now(),
-        'posting_channels' => ['company_website', 'linkedin'],
-    ]);
+    // Publishing requires an approved job opening (Stage 2.1); channels stay a plain attribute.
+    $publisher = publishApprovedJobOpening($f['job'], $f['company']);
+    $f['job']->refresh()->update(['posting_channels' => ['company_website', 'linkedin']]);
     $f['job']->refresh();
 
     expect($f['job']->posting_status)->toBe('published')
@@ -217,7 +218,7 @@ it('tracks Job Posting as a distinct lifecycle from the Job Description, with ch
         ->and($f['job']->description)->toBe('Own the daily dispatch schedule and driver coordination.')
         ->and($f['job']->address_id)->toBe($f['officeAddress']->id);
 
-    $f['job']->update(['posting_status' => 'closed']);
+    app(JobOpeningPublicationService::class)->close($f['job'], $publisher);
     expect($f['job']->fresh()->posting_status)->toBe('closed');
 });
 
