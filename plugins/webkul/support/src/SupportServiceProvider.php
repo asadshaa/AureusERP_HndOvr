@@ -67,6 +67,7 @@ class SupportServiceProvider extends PackageServiceProvider
                 '2026_07_10_000000_fix_unit_of_measures_factor_precision',
                 '2026_08_03_093616_create_email_templates_table',
                 '2026_08_25_000001_create_approval_workflow_tables',
+                '2026_09_09_000001_add_tax_identity_to_companies_table',
             ])
             ->runsMigrations()
             ->hasSettings([
