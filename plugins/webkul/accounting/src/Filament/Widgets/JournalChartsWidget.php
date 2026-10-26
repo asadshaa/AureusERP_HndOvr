@@ -8,6 +8,9 @@ use Webkul\Account\Models\Journal;
 
 class JournalChartsWidget extends Widget
 {
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
     protected string $view = 'accounting::filament.widgets.journal-charts-widget';
 
     protected int|string|array $columnSpan = 'full';

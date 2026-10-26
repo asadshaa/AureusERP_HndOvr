@@ -15,7 +15,10 @@ class JobPositionStatsWidget extends BaseWidget
 {
     use HasWidgetShield, InteractsWithPageFilters;
 
-    protected ?string $pollingInterval = '15s';
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
+    protected ?string $pollingInterval = null;
 
     protected static function getPagePermission(): ?string
     {

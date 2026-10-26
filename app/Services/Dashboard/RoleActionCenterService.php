@@ -143,12 +143,7 @@ class RoleActionCenterService
         // =========================================================================
         if ($isManager && ! $isAdmin) {
             // ApprovalRequests where this manager can act
-            $pendingForMe = ApprovalRequest::query()
-                ->where('company_id', $companyId)
-                ->where('status', 'pending')
-                ->get()
-                ->filter(fn ($req): bool => app(ApprovalEngine::class)->canAct($req, $user))
-                ->count();
+            $pendingForMe = app(ApprovalEngine::class)->actionableRequestsFor($user, (int) $companyId)->count();
 
             if ($pendingForMe > 0) {
                 $items[] = [

@@ -187,6 +187,49 @@ final class ApprovalEngine
             ->values();
     }
 
+    /**
+     * Pending requests of a company that $actor can act on right now. Same
+     * answer as filtering with canAct() one by one, but everything canAct()
+     * reads (workflow steps, requester and subject hierarchy chains, the
+     * actor's roles) is loaded in a few batched queries instead of several
+     * queries per request. Used by the dashboard action center and the queue
+     * badge; decide() still re-checks canAct() on the locked row.
+     *
+     * @return Collection<int, ApprovalRequest>
+     */
+    public function actionableRequestsFor(User $actor, int $companyId): Collection
+    {
+        if (! $this->userCanAccessCompany($actor, $companyId)) {
+            return collect();
+        }
+
+        $actor->loadMissing('roles');
+
+        $requests = ApprovalRequest::query()
+            ->where('company_id', $companyId)
+            ->where('status', 'pending')
+            ->with([
+                'workflow.steps',
+                'requester.employee.parent.user',
+                'requester.employee.department.manager.user',
+                'requester.employee.team.manager.user',
+                'subject',
+            ])
+            ->get();
+
+        // Subjects with an employee (leave, employee requests...): load that
+        // employee's chain once per subject type.
+        $requests->pluck('subject')->filter()->groupBy(fn ($subject): string => $subject::class)
+            ->each(function ($subjects): void {
+                if (method_exists($subjects->first(), 'employee')) {
+                    (new \Illuminate\Database\Eloquent\Collection($subjects->all()))
+                        ->loadMissing(['employee.parent.user', 'employee.department.manager.user', 'employee.team.manager.user']);
+                }
+            });
+
+        return $requests->filter(fn (ApprovalRequest $request): bool => $this->canAct($request, $actor))->values();
+    }
+
     public function canAct(ApprovalRequest $request, User $actor): bool
     {
         if ($request->status !== 'pending' || ! $this->userCanAccessCompany($actor, (int) $request->company_id)) {
@@ -214,7 +257,9 @@ final class ApprovalEngine
         if ((int) $step->approver_user_id === (int) $actor->id) {
             return true;
         }
-        if ($step->approver_role_id && $actor->roles()->whereKey($step->approver_role_id)->exists()) {
+        if ($step->approver_role_id && ($actor->relationLoaded('roles')
+            ? $actor->roles->contains('id', $step->approver_role_id)
+            : $actor->roles()->whereKey($step->approver_role_id)->exists())) {
             return true;
         }
         if ($request->request_type === 'employee_sensitive_change' && $this->isHrApprover($actor)) {
@@ -434,7 +479,9 @@ final class ApprovalEngine
         $subject = $request->subject;
 
         if ($subject && method_exists($subject, 'employee')) {
-            $employee = $subject->employee()->with(['parent.user', 'department.manager.user', 'team.manager.user'])->first();
+            $employee = $subject->relationLoaded('employee')
+                ? $subject->employee?->loadMissing(['parent.user', 'department.manager.user', 'team.manager.user'])
+                : $subject->employee()->with(['parent.user', 'department.manager.user', 'team.manager.user'])->first();
             if ($employee) {
                 return $employee;
             }

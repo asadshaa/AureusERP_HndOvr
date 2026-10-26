@@ -5,7 +5,7 @@
         $items = $data['items'] ?? [];
     @endphp
 
-    <div class="space-y-4" wire:poll.30s>
+    <div class="space-y-4" wire:poll.120s.visible>
         {{-- Header Section matching Filament Native ERP Theme --}}
         <x-filament::section
             icon="heroicon-o-sparkles"

@@ -27,6 +27,9 @@ class OverviewCalendarWidget extends FullCalendarWidget
         canView as shieldCanView;
     }
 
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
     /** Shows other people's leave: HR / managers only (see LeaveOversight). */
     public static function canView(): bool
     {

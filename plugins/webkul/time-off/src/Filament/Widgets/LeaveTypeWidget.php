@@ -16,6 +16,12 @@ class LeaveTypeWidget extends ChartWidget
         canView as shieldCanView;
     }
 
+    /** No polling: these figures change rarely, and each poll is a full request. */
+    protected ?string $pollingInterval = null;
+
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
     /** Company-wide leave statistics: HR / managers only (see LeaveOversight). */
     public static function canView(): bool
     {

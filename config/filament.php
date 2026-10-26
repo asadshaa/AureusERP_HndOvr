@@ -69,7 +69,7 @@ return [
     |
     */
 
-    'cache_path' => base_path('bootstrap/cache/filament'),
+    'cache_path' => base_path(env('FILAMENT_CACHE_PATH', 'bootstrap/cache/filament')),
 
     /*
     |--------------------------------------------------------------------------

@@ -15,6 +15,12 @@ class ApplicantChartWidget extends ChartWidget
         canView as shieldCanView;
     }
 
+    /** No polling: these figures change rarely, and each poll is a full request. */
+    protected ?string $pollingInterval = null;
+
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
     protected static ?int $sort = 2;
 
     protected int|string|array $columnSpan = 'full';

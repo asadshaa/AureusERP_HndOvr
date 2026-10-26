@@ -63,13 +63,7 @@ class ApprovalRequestResource extends Resource
             return null;
         }
 
-        $engine = app(ApprovalEngine::class);
-
-        $count = static::getEloquentQuery()
-            ->where('status', 'pending')
-            ->get()
-            ->filter(fn (ApprovalRequest $request): bool => $engine->canAct($request, $user))
-            ->count();
+        $count = app(ApprovalEngine::class)->actionableRequestsFor($user, (int) $user->default_company_id)->count();
 
         return $count > 0 ? (string) $count : null;
     }

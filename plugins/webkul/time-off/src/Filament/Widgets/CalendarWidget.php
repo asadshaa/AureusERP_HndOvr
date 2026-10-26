@@ -31,6 +31,9 @@ class CalendarWidget extends FullCalendarWidget
     use HasWidgetShield;
     use TimeOffHelper;
 
+    /** Rendered with the dashboard instead of in its own request. */
+    protected static bool $isLazy = false;
+
     public Model|string|null $model = Leave::class;
 
     protected static function getPagePermission(): ?string
