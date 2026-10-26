@@ -8,6 +8,7 @@ use Webkul\Recruitment\Enums\ApplicationStatus;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Security\Models\User;
 
@@ -15,10 +16,14 @@ use Webkul\Security\Models\User;
  * One application per candidate per job (Recruitment Stage 2.2): the same
  * candidate can apply to several jobs, each with its own pipeline history.
  * Applying again to the same job never creates a duplicate; a refused or
- * archived application for that job is reopened instead.
+ * archived application for that job is reopened instead. An optional job ad
+ * (posting) records where the CV came from -- first touch: an application
+ * that already has an ad keeps it.
  */
 class CandidateApplicationService
 {
+    public function __construct(protected JobPostingLinks $links) {}
+
     public const OUTCOME_CREATED = 'created';
 
     public const OUTCOME_REOPENED = 'reopened';
@@ -26,7 +31,7 @@ class CandidateApplicationService
     public const OUTCOME_EXISTING = 'existing';
 
     /** @return array{applicant: Applicant, outcome: string} */
-    public function applyToJob(Candidate $candidate, JobPosition $job, User $actor): array
+    public function applyToJob(Candidate $candidate, JobPosition $job, User $actor, ?JobPosting $posting = null): array
     {
         $companyId = (int) ($candidate->company_id ?? $actor->default_company_id);
 
@@ -34,7 +39,13 @@ class CandidateApplicationService
             throw new RuntimeException('The job belongs to a different company than the candidate.');
         }
 
-        return DB::transaction(function () use ($candidate, $job, $actor, $companyId): array {
+        if ($posting && ((int) $posting->job_id !== (int) $job->id || (int) $posting->company_id !== $companyId)) {
+            throw new RuntimeException('The posting does not belong to this job.');
+        }
+
+        $attribution = $posting ? $this->links->attributionFor($posting) : null;
+
+        return DB::transaction(function () use ($candidate, $job, $actor, $companyId, $attribution): array {
             $existing = Applicant::withTrashed()
                 ->where('company_id', $companyId)
                 ->where('candidate_id', $candidate->id)
@@ -54,9 +65,22 @@ class CandidateApplicationService
                     'creator_id'    => $actor->id,
                     'create_date'   => now(),
                     'is_active'     => true,
+                    ...($attribution ? [
+                        'job_posting_id' => $attribution['job_posting_id'],
+                        'source_id'      => $attribution['source_id'],
+                        'source_details' => $attribution['source_details'],
+                    ] : []),
                 ]);
 
                 return ['applicant' => $applicant, 'outcome' => self::OUTCOME_CREATED];
+            }
+
+            if ($attribution && ! $existing->job_posting_id) {
+                $existing->update([
+                    'job_posting_id' => $attribution['job_posting_id'],
+                    'source_id'      => $existing->source_id ?? $attribution['source_id'],
+                    'source_details' => $existing->source_details ?? $attribution['source_details'],
+                ]);
             }
 
             if (in_array($existing->application_status, [ApplicationStatus::REFUSED, ApplicationStatus::ARCHIVED], true)) {

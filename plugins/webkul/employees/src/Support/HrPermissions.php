@@ -26,6 +26,9 @@ final class HrPermissions
 
     public const ConvertCandidates = 'hr_convert_candidates';
 
+    /** Add job ads (channels) to a job and confirm them as posted / taken down (Recruitment Stage 2.3). */
+    public const ManageJobPostings = 'hr_manage_job_postings';
+
     public const ViewAnalytics = 'page_employees_hr_analytics';
 
     /**
@@ -68,6 +71,7 @@ final class HrPermissions
             self::ManageEmployeeRequests,
             self::ProcessFinancialRequests,
             self::ConvertCandidates,
+            self::ManageJobPostings,
             self::ViewAnalytics,
             self::ViewAttendance,
             self::ViewPerformance,
@@ -200,6 +204,7 @@ final class HrPermissions
             self::ManageEmployeeRequests,
             self::ManageTeams,
             self::ManageAttendanceGeofences,
+            self::ManageJobPostings,
             'view_any_employee_department', 'view_employee_department', 'create_employee_department', 'update_employee_department', 'delete_employee_department',
             'view_any_recruitment_department', 'view_recruitment_department', 'create_recruitment_department', 'update_recruitment_department',
             'view_any_employee_job::position', 'view_employee_job::position', 'create_employee_job::position', 'update_employee_job::position', 'delete_employee_job::position',
@@ -316,6 +321,7 @@ final class HrPermissions
     public static function recruiter(): array
     {
         return [
+            self::ManageJobPostings,
             'view_any_recruitment_applicant', 'view_recruitment_applicant', 'create_recruitment_applicant', 'update_recruitment_applicant',
             'view_any_recruitment_applicant::category', 'view_recruitment_applicant::category',
             'view_any_recruitment_candidate', 'view_recruitment_candidate', 'create_recruitment_candidate', 'update_recruitment_candidate',

@@ -2,6 +2,8 @@
 
 namespace Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages;
 
+use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\EditJobPosition as BaseEditJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource;
 use Webkul\Recruitment\Traits\HasJobPublicationActions;
@@ -14,9 +16,16 @@ class EditJobPosition extends BaseEditJobPosition
 
     protected function getHeaderActions(): array
     {
+        $inherited = array_map(
+            fn (Action $action): Action => $action instanceof DeleteAction
+                ? $action->failureNotificationTitle('This job has ads that may still be up. Close it and confirm the ads are taken down first.')
+                : $action,
+            parent::getHeaderActions(),
+        );
+
         return [
             ...$this->getJobPublicationActions(),
-            ...parent::getHeaderActions(),
+            ...$inherited,
         ];
     }
 

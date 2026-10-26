@@ -4,6 +4,7 @@ namespace Webkul\Recruitment\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use InvalidArgumentException;
 use RuntimeException;
@@ -12,7 +13,9 @@ use Webkul\Employee\Models\EmployeeJobPosition as BaseJobPosition;
 use Webkul\Employee\Models\Skill;
 use Webkul\Partner\Models\Industry;
 use Webkul\Partner\Models\Partner;
+use Webkul\Recruitment\Enums\ChannelPostingStatus;
 use Webkul\Recruitment\Enums\JobPostingStatus;
+use Webkul\Recruitment\Services\JobPostingLifecycle;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 
@@ -115,6 +118,22 @@ class JobPosition extends BaseJobPosition
         return $this->hasMany(Applicant::class, 'job_id');
     }
 
+    /** Every ad of this job, including channels removed from it (kept as history). */
+    public function postings(): HasMany
+    {
+        return $this->hasMany(JobPosting::class, 'job_id');
+    }
+
+    public function activePostings(): HasMany
+    {
+        return $this->postings()->whereNull('dropped_at');
+    }
+
+    public function hasAdsOutThere(): bool
+    {
+        return $this->postings()->whereIn('status', [ChannelPostingStatus::LIVE->value, ChannelPostingStatus::REMOVAL_PENDING->value])->exists();
+    }
+
     public function approvalRequests(): MorphMany
     {
         return $this->morphMany(ApprovalRequest::class, 'subject')
@@ -201,6 +220,13 @@ class JobPosition extends BaseJobPosition
         parent::boot();
 
         static::saving(fn (JobPosition $jobPosition) => $jobPosition->assertPostingTransitionIsAllowed());
+
+        // Job ads (Stage 2.3): the same guards are registered on the base
+        // EmployeeJobPosition model in RecruitmentServiceProvider.
+        static::saving(fn (JobPosition $jobPosition) => app(JobPostingLifecycle::class)->assertCompanyChangeIsAllowed($jobPosition));
+        static::deleting(fn (JobPosition $jobPosition) => app(JobPostingLifecycle::class)->guardJobDeletion($jobPosition) ? null : false);
+        static::deleted(fn (JobPosition $jobPosition) => app(JobPostingLifecycle::class)->handleJobDeleted($jobPosition));
+        static::restored(fn (JobPosition $jobPosition) => app(JobPostingLifecycle::class)->handleJobRestored($jobPosition));
 
         static::updated(function ($jobPosition) {
             cache()->forget("job_position_{$jobPosition->id}_employee_count");

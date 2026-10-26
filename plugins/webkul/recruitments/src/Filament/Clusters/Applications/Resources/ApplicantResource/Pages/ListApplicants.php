@@ -8,6 +8,8 @@ use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Group;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,6 +22,7 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResourc
 use Webkul\Recruitment\Filament\Widgets\JobPositionStatsWidget;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Services\CandidateApplicationService;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\TableViews\Filament\Components\PresetView;
@@ -172,14 +175,29 @@ class ListApplicants extends ListRecords
                                 ))
                                 ->required()
                                 ->searchable()
-                                ->preload(),
+                                ->preload()
+                                ->live()
+                                ->afterStateUpdated(fn (Set $set) => $set('job_posting_id', null)),
+                            // Which job ad brought this CV (attribution while CVs are entered by hand).
+                            Select::make('job_posting_id')
+                                ->label('Came from (ad)')
+                                ->options(fn (Get $get): array => JobPosting::optionsForJob((int) $get('job_id'), RecruitmentCompanyScope::companyId()))
+                                ->visible(fn (Get $get): bool => filled($get('job_id')))
+                                ->searchable(),
                         ])->columns(2),
                 ])
                 ->using(function (array $data): Model {
                     $candidate = Candidate::query()->whereKey($data['candidate_id'])->tap(fn (Builder $query) => RecruitmentCompanyScope::ownCompany($query))->firstOrFail();
                     $job = JobPosition::query()->findOrFail($data['job_id']);
+                    $posting = filled($data['job_posting_id'] ?? null)
+                        ? JobPosting::query()
+                            ->whereKey($data['job_posting_id'])
+                            ->where('job_id', $job->id)
+                            ->where('company_id', RecruitmentCompanyScope::companyId())
+                            ->firstOrFail()
+                        : null;
 
-                    $result = app(CandidateApplicationService::class)->applyToJob($candidate, $job, Auth::user());
+                    $result = app(CandidateApplicationService::class)->applyToJob($candidate, $job, Auth::user(), $posting);
                     $this->lastApplicationOutcome = $result['outcome'];
 
                     return $result['applicant'];

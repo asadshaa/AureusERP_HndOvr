@@ -17,10 +17,15 @@ use Webkul\Support\Services\HierarchicalNotificationService;
  * draft -> approval -> published -> paused/closed. Approval reuses the shared
  * ApprovalEngine (request type JobPosition::APPROVAL_REQUEST_TYPE); the
  * approved/rejected outcome is written back by JobPosition::synchronizeApprovalState().
+ * Publishing, pausing, closing and reopening also move the job's ads
+ * (JobPostingLifecycle) in the same transaction.
  */
 class JobOpeningPublicationService
 {
-    public function __construct(protected ApprovalEngine $approvals) {}
+    public function __construct(
+        protected ApprovalEngine $approvals,
+        protected JobPostingLifecycle $postings,
+    ) {}
 
     public function submitForApproval(JobPosition $job, User $actor): ApprovalRequest
     {
@@ -49,54 +54,76 @@ class JobOpeningPublicationService
 
     public function publish(JobPosition $job, User $actor): JobPosition
     {
-        $this->authorize($job, $actor);
+        return $this->transition($job, $actor, function (JobPosition $locked) use ($actor): void {
+            if (! in_array($locked->postingStatus(), [JobPostingStatus::APPROVED, JobPostingStatus::PAUSED], true)) {
+                throw new RuntimeException('A job can only be published after its approval (or resumed from paused).');
+            }
 
-        $current = $job->postingStatus();
-        if (! in_array($current, [JobPostingStatus::APPROVED, JobPostingStatus::PAUSED], true)) {
-            throw new RuntimeException('A job can only be published after its approval (or resumed from paused).');
-        }
+            $locked->update([
+                'posting_status' => JobPostingStatus::PUBLISHED->value,
+                'published_at'   => $locked->published_at ?? now(),
+            ]);
 
-        $job->update([
-            'posting_status' => JobPostingStatus::PUBLISHED->value,
-            'published_at'   => $job->published_at ?? now(),
-        ]);
-
-        return $job->refresh();
+            $this->postings->dispatchAfterCommit($locked, $this->postings->onJobPublished($locked, $actor), $actor);
+        });
     }
 
     public function pause(JobPosition $job, User $actor): JobPosition
     {
-        $this->authorize($job, $actor);
-        $this->assertStatus($job, JobPostingStatus::PUBLISHED, 'Only a published job can be paused.');
+        return $this->transition($job, $actor, function (JobPosition $locked) use ($actor): void {
+            $this->assertStatus($locked, JobPostingStatus::PUBLISHED, 'Only a published job can be paused.');
 
-        $job->update(['posting_status' => JobPostingStatus::PAUSED->value]);
+            $locked->update(['posting_status' => JobPostingStatus::PAUSED->value]);
 
-        return $job->refresh();
+            $this->postings->dispatchAfterCommit($locked, $this->postings->onJobPaused($locked, $actor), $actor);
+        });
     }
 
     public function close(JobPosition $job, User $actor): JobPosition
     {
-        $this->authorize($job, $actor);
+        return $this->transition($job, $actor, function (JobPosition $locked) use ($actor): void {
+            if (! $locked->postingStatus()->canTransitionTo(JobPostingStatus::CLOSED)) {
+                throw new RuntimeException('This job cannot be closed from its current status.');
+            }
 
-        if (! $job->postingStatus()->canTransitionTo(JobPostingStatus::CLOSED)) {
-            throw new RuntimeException('This job cannot be closed from its current status.');
-        }
+            $locked->update(['posting_status' => JobPostingStatus::CLOSED->value]);
 
-        $job->update(['posting_status' => JobPostingStatus::CLOSED->value]);
-
-        return $job->refresh();
+            $this->postings->dispatchAfterCommit($locked, $this->postings->onJobClosed($locked, $actor), $actor);
+        });
     }
 
     /** A closed job goes back to draft and must be approved again before it is republished. */
     public function reopen(JobPosition $job, User $actor): JobPosition
     {
-        $this->authorize($job, $actor);
-        $this->assertStatus($job, JobPostingStatus::CLOSED, 'Only a closed job can be reopened.');
+        return $this->transition($job, $actor, function (JobPosition $locked) use ($actor): void {
+            $this->assertStatus($locked, JobPostingStatus::CLOSED, 'Only a closed job can be reopened.');
 
-        $job->update([
-            'posting_status' => JobPostingStatus::DRAFT->value,
-            'published_at'   => null,
-        ]);
+            $locked->update([
+                'posting_status' => JobPostingStatus::DRAFT->value,
+                'published_at'   => null,
+            ]);
+
+            $this->postings->onJobReopened($locked, $actor);
+        });
+    }
+
+    /**
+     * Runs a status change on a locked copy of the job, together with its ads
+     * (JobPostingLifecycle), in one transaction; returns the caller's instance
+     * refreshed so pages and callers see the new status.
+     *
+     * @param  callable(JobPosition): void  $change
+     */
+    protected function transition(JobPosition $job, User $actor, callable $change): JobPosition
+    {
+        $this->authorize($job, $actor);
+
+        DB::transaction(function () use ($job, $actor, $change): void {
+            $locked = JobPosition::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
+            $this->authorize($locked, $actor);
+
+            $change($locked);
+        });
 
         return $job->refresh();
     }

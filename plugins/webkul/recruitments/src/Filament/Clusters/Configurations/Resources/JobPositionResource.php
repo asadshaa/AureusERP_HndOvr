@@ -30,6 +30,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\QueryBuilder;
 use Filament\Tables\Filters\QueryBuilder\Constraints\DateConstraint;
 use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint;
@@ -45,13 +46,16 @@ use Webkul\Employee\Filament\Resources\DepartmentResource;
 use Webkul\Employee\Models\Department;
 use Webkul\Partner\Filament\Resources\AddressResource;
 use Webkul\Partner\Filament\Resources\IndustryResource;
+use Webkul\Recruitment\Enums\ChannelPostingStatus;
 use Webkul\Recruitment\Enums\JobPostingStatus;
 use Webkul\Recruitment\Filament\Clusters\Configurations;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\CreateJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\EditJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\ListJobPositions;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\ViewJobPosition;
+use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobPostingsRelationManager;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Security\Filament\Resources\CompanyResource;
 use Webkul\Security\Filament\Resources\UserResource;
 
@@ -274,20 +278,8 @@ class JobPositionResource extends Resource
                                             ->label('Published at')
                                             ->dateTime()
                                             ->visible(fn (?JobPosition $record): bool => filled($record?->published_at)),
-                                        Select::make('posting_channels')
-                                            ->label('Source / channels')
-                                            ->options([
-                                                'company_website' => 'Company website',
-                                                'linkedin'        => 'LinkedIn',
-                                                'indeed'          => 'Indeed',
-                                                'referral'        => 'Referral',
-                                                'recruiter'       => 'Recruiter',
-                                                'manual_import'   => 'Manual import',
-                                                'api'             => 'API',
-                                                'other'           => 'Other',
-                                            ])
-                                            ->multiple()
-                                            ->searchable(),
+                                        // Where the job is advertised is managed on the "Job ads" tab
+                                        // (JobPostingsRelationManager), not as labels on the job.
                                     ]),
                             ])
                             ->columnSpan(['lg' => 1]),
@@ -324,9 +316,16 @@ class JobPositionResource extends Resource
                     ->color(fn (?string $state): string => JobPostingStatus::fromStored($state)->getColor())
                     ->badge()
                     ->sortable(),
-                TextColumn::make('posting_channels')
-                    ->label('Channels')
+                TextColumn::make('activePostings.channel')
+                    ->label('Ads')
                     ->badge()
+                    ->formatStateUsing(fn (string $state): string => app(JobPostingChannelRegistry::class)->labelFor($state))
+                    ->toggleable(),
+                TextColumn::make('postings_needing_action_count')
+                    ->label('Ads to act on')
+                    ->counts(['postings as postings_needing_action_count' => fn (Builder $query): Builder => $query->whereIn('status', ChannelPostingStatus::needingActionValues())])
+                    ->badge()
+                    ->color(fn (?int $state): string => $state ? 'warning' : 'gray')
                     ->toggleable(),
                 TextColumn::make('expected_employees')
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.columns.expected-employees'))
@@ -359,6 +358,9 @@ class JobPositionResource extends Resource
             ])
             ->columnToggleFormColumns(2)
             ->filters([
+                Filter::make('ads_need_action')
+                    ->label('Ads need action')
+                    ->query(fn (Builder $query): Builder => $query->whereHas('postings', fn (Builder $postings): Builder => $postings->whereIn('status', ChannelPostingStatus::needingActionValues()))),
                 SelectFilter::make('department')
                     ->relationship('department', 'name')
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.filters.department')),
@@ -455,6 +457,7 @@ class JobPositionResource extends Resource
                 ViewAction::make(),
                 EditAction::make(),
                 DeleteAction::make()
+                    ->failureNotificationTitle('This job has ads that may still be up. Close it and confirm the ads are taken down first.')
                     ->successNotification(
                         Notification::make()
                             ->success()
@@ -631,6 +634,13 @@ class JobPositionResource extends Resource
             'create' => CreateJobPosition::route('/create'),
             'edit'   => EditJobPosition::route('/{record}/edit'),
             'view'   => ViewJobPosition::route('/{record}'),
+        ];
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            JobPostingsRelationManager::class,
         ];
     }
 

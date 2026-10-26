@@ -312,6 +312,7 @@ class JobPositionResource extends Resource
                 ViewAction::make(),
                 EditAction::make(),
                 DeleteAction::make()
+                    ->failureNotificationTitle('This job position could not be deleted.')
                     ->successNotification(
                         Notification::make()
                             ->success()

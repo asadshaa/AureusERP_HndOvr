@@ -31,6 +31,7 @@ class Applicant extends Model
     protected $fillable = [
         'source_id',
         'medium_id',
+        'job_posting_id',
         'external_application_id',
         'source_details',
         'candidate_id',
@@ -187,6 +188,12 @@ class Applicant extends Model
         return $this->belongsToMany(ApplicantCategory::class, 'recruitments_applicant_applicant_categories', 'applicant_id', 'category_id');
     }
 
+    /** The job ad this application came through (first touch). */
+    public function jobPosting(): BelongsTo
+    {
+        return $this->belongsTo(JobPosting::class, 'job_posting_id');
+    }
+
     public function job(): BelongsTo
     {
         return $this->belongsTo(JobPosition::class, 'job_id');
@@ -341,6 +348,8 @@ class Applicant extends Model
      */
     public function assertRelatedRecordsBelongToCompany(): void
     {
+        $this->assertJobPostingMatches();
+
         if (! $this->company_id) {
             return;
         }
@@ -368,6 +377,23 @@ class Applicant extends Model
             if ((int) $relatedCompany !== $companyId) {
                 throw new InvalidArgumentException("The selected {$label} belongs to a different company than this application.");
             }
+        }
+    }
+
+    /**
+     * The ad an application came from must be an ad of this same job and
+     * company, whatever the caller sends (the select is scoped too).
+     */
+    protected function assertJobPostingMatches(): void
+    {
+        if (! $this->job_posting_id || ($this->exists && ! $this->isDirty(['job_posting_id', 'job_id', 'company_id']))) {
+            return;
+        }
+
+        $posting = JobPosting::query()->whereKey($this->job_posting_id)->first(['id', 'company_id', 'job_id']);
+
+        if (! $posting || (int) $posting->company_id !== (int) $this->company_id || (int) $posting->job_id !== (int) $this->job_id) {
+            throw new InvalidArgumentException('The selected posting belongs to a different job or company than this application.');
         }
     }
 }

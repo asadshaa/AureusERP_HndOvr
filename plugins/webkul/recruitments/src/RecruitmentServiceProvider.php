@@ -5,12 +5,17 @@ namespace Webkul\Recruitment;
 use Filament\Panel;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
+use Webkul\Employee\Models\EmployeeJobPosition;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
+use Webkul\Recruitment\Services\JobPostingChannelRegistry;
+use Webkul\Recruitment\Services\JobPostingLifecycle;
+use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Support\Models\Company;
 
 class RecruitmentServiceProvider extends PackageServiceProvider
@@ -40,8 +45,13 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2025_01_14_143102_add_columns_to_employees_job_positions_table',
                 '2025_01_16_081327_create_recruitments_job_position_interviewers_table',
                 '2026_08_25_000013_extend_recruitment_pipeline',
+                '2026_10_26_000001_create_recruitments_job_postings_tables',
+                '2026_10_26_000002_backfill_recruitments_job_postings',
             ])
             ->runsMigrations()
+            ->hasCommands([
+                RemindPostingRemovalsCommand::class,
+            ])
             ->hasDependencies([
                 'employees',
             ])
@@ -69,11 +79,49 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 report($e);
             }
         });
+
+        $this->registerJobPostingGuardsOnBaseJobModel();
+    }
+
+    /**
+     * Jobs are also saved through the employees plugin's EmployeeJobPosition,
+     * whose model events JobPosition::boot() does not see: register the same
+     * job-ad guards there, so deleting a job or moving it to another company
+     * through either model cannot orphan or leak its ads.
+     */
+    protected function registerJobPostingGuardsOnBaseJobModel(): void
+    {
+        $tableExists = null;
+        $ready = function () use (&$tableExists): bool {
+            return $tableExists ??= Schema::hasTable('recruitments_job_postings');
+        };
+
+        EmployeeJobPosition::saving(function (EmployeeJobPosition $job) use ($ready): void {
+            if ($ready()) {
+                app(JobPostingLifecycle::class)->assertCompanyChangeIsAllowed($job);
+            }
+        });
+
+        EmployeeJobPosition::deleting(fn (EmployeeJobPosition $job) => $ready() && ! app(JobPostingLifecycle::class)->guardJobDeletion($job) ? false : null);
+
+        EmployeeJobPosition::deleted(function (EmployeeJobPosition $job) use ($ready): void {
+            if ($ready()) {
+                app(JobPostingLifecycle::class)->handleJobDeleted($job);
+            }
+        });
+
+        EmployeeJobPosition::restored(function (EmployeeJobPosition $job) use ($ready): void {
+            if ($ready()) {
+                app(JobPostingLifecycle::class)->handleJobRestored($job);
+            }
+        });
     }
 
     public function packageRegistered(): void
     {
         $this->app->singleton(ApplicantSourceRegistry::class);
+        $this->app->singleton(JobPostingChannelRegistry::class);
+        $this->app->singleton(JobPostingLinks::class);
 
         Panel::configureUsing(function (Panel $panel): void {
             $panel->plugin(RecruitmentPlugin::make());

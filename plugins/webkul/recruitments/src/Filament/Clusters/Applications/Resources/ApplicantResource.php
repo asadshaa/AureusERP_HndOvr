@@ -61,8 +61,10 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResourc
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\Stage as RecruitmentStage;
 use Webkul\Recruitment\Services\CandidateConversionService;
+use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\Security\Filament\Resources\UserResource;
 
@@ -267,6 +269,11 @@ class ApplicantResource extends Resource
                                                 }
                                             })
                                             ->afterStateUpdated(function (Set $set, Get $get, ?string $state, ?string $old) {
+                                                // An ad belongs to one job: a different job means a different ad.
+                                                if ($state !== $old) {
+                                                    $set('job_posting_id', null);
+                                                }
+
                                                 if (is_null($state)) {
                                                     $set('stage_id', null);
 
@@ -407,6 +414,24 @@ class ApplicantResource extends Resource
                                 Select::make('medium_id')
                                     ->relationship('medium', 'name')
                                     ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.source-and-medium.fields.medium')),
+                                // The job ad this CV came from; the Applicant model guard checks it belongs to this job and company.
+                                Select::make('job_posting_id')
+                                    ->label('Came from (ad)')
+                                    ->options(fn (Get $get, ?Applicant $record): array => JobPosting::optionsForJob((int) $get('job_id'), RecruitmentCompanyScope::companyId(), $record?->job_posting_id))
+                                    ->searchable()
+                                    ->live()
+                                    ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
+                                        // Preview only (read-only, scoped like the options); saving re-checks it in the model.
+                                        $posting = $state ? JobPosting::query()
+                                            ->whereKey($state)
+                                            ->where('job_id', (int) $get('job_id'))
+                                            ->where('company_id', RecruitmentCompanyScope::companyId())
+                                            ->first() : null;
+
+                                        if ($posting && blank($get('source_id'))) {
+                                            $set('source_id', app(JobPostingLinks::class)->peekSourceId($posting));
+                                        }
+                                    }),
                                 TextInput::make('external_application_id')
                                     ->label('External application ID')
                                     ->maxLength(255),
@@ -933,6 +958,11 @@ class ApplicantResource extends Resource
                                             ->icon('heroicon-o-globe-alt')
                                             ->placeholder('—')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.infolist.sections.source-and-medium.entries.medium')),
+                                        TextEntry::make('job_posting')
+                                            ->label('Came from (ad)')
+                                            ->icon('heroicon-o-megaphone')
+                                            ->state(fn (Applicant $record): ?string => $record->jobPosting?->displayName())
+                                            ->placeholder('—'),
                                     ]),
                             ])->columnSpan(1),
                     ])->columnSpanFull(),

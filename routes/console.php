@@ -104,3 +104,14 @@ Schedule::command('hr:prune-attendance-evidence')
     ->dailyAt('02:30')
     ->withoutOverlapping(60)
     ->onOneServer();
+
+/*
+| recruitments:remind-posting-removals closes the ads of jobs closed or
+| deleted outside the normal flow, then reminds recruiters to take down
+| manual job ads (LinkedIn, Rozee.pk, WhatsApp...) of closed jobs and tells
+| HR once when the reminders run out (config/recruitment.php).
+*/
+Schedule::command('recruitments:remind-posting-removals')
+    ->dailyAt('09:00')
+    ->withoutOverlapping(30)
+    ->onOneServer();

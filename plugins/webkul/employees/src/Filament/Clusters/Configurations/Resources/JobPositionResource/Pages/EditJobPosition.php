@@ -39,6 +39,7 @@ class EditJobPosition extends EditRecord
         return [
             ViewAction::make(),
             DeleteAction::make()
+                ->failureNotificationTitle('This job position could not be deleted.')
                 ->successNotification(
                     Notification::make()
                         ->success()

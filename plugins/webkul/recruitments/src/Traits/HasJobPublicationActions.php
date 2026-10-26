@@ -9,6 +9,7 @@ use RuntimeException;
 use Webkul\Recruitment\Enums\JobPostingStatus;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Services\JobOpeningPublicationService;
+use Webkul\Recruitment\Services\JobPostingService;
 
 /**
  * Posting lifecycle buttons for the job opening View/Edit pages. Each button
@@ -25,6 +26,7 @@ trait HasJobPublicationActions
             $this->jobPublicationAction('publish', 'Publish', 'heroicon-o-globe-alt', 'success', [JobPostingStatus::APPROVED, JobPostingStatus::PAUSED], 'Job published', null),
             $this->jobPublicationAction('pause', 'Pause', 'heroicon-o-pause-circle', 'warning', [JobPostingStatus::PUBLISHED], 'Job paused', null),
             $this->jobPublicationAction('close', 'Close job', 'heroicon-o-lock-closed', 'danger', [JobPostingStatus::APPROVED, JobPostingStatus::PUBLISHED, JobPostingStatus::PAUSED], 'Job closed', null)
+                ->modalDescription(fn (JobPosition $record): ?string => app(JobPostingService::class)->closeImpactSummary($record))
                 ->requiresConfirmation(),
             $this->jobPublicationAction('reopen', 'Reopen as draft', 'heroicon-o-arrow-uturn-left', 'gray', [JobPostingStatus::CLOSED], 'Job reopened', 'It must be approved again before it is published.')
                 ->requiresConfirmation(),
@@ -51,6 +53,7 @@ trait HasJobPublicationActions
 
                 Notification::make()->success()->title($successTitle)->body($successBody)->send();
                 $this->refreshFormData(['posting_status', 'published_at']);
+                $this->dispatch('job-postings-changed');
             });
     }
 }
