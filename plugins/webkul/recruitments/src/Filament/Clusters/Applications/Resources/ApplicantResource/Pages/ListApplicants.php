@@ -25,11 +25,13 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Services\CandidateApplicationService;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
+use Webkul\Recruitment\Traits\HasApplicantImportAction;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
 class ListApplicants extends ListRecords
 {
+    use HasApplicantImportAction;
     use HasTableViews;
 
     protected static string $resource = ApplicantResource::class;
@@ -144,6 +146,7 @@ class ListApplicants extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            $this->getApplicantImportAction(),
             CreateAction::make()
                 ->icon('heroicon-o-plus-circle')
                 ->label(__('recruitments::filament/clusters/applications/resources/applicant/pages/list-applicant.header-actions.create-applicant.label'))
