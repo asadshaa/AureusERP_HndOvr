@@ -71,7 +71,6 @@ class LogisticsCompanyAndProductSeeder extends Seeder
     protected function seedCompanies(array $currencies): array
     {
         $pakistan = Country::where('code', 'PK')->first();
-        $uae = Country::where('code', 'AE')->first();
 
         // 1. Truck It In (Pvt) Ltd - Core Freight Tech & Brokerage Platform
         $company1 = Company::find(1);
@@ -111,68 +110,31 @@ class LogisticsCompanyAndProductSeeder extends Seeder
             ]);
         }
 
-        // 2. TII Fleet Logistics (SMC-Pvt) Ltd - Long-haul Freight & Carrier Division
+        // 2. ShipLine - sister company (Pakistan, PKR). Registration, tax and
+        // contact details are left blank until the real values are supplied.
         $company2 = Company::firstOrCreate(
-            ['name' => 'TII Fleet Logistics (SMC-Pvt) Ltd'],
+            ['name' => 'ShipLine'],
             [
-                'company_id'              => 'TII-002',
-                'registration_number'     => '0178491',
-                'tax_id'                  => '5192841-3',
-                'is_sales_tax_registered' => true,
-                'strn'                    => '3277876234567',
-                'email'                   => 'fleet.finance@truckitin.com',
-                'phone'                   => '+92-21-34720199',
-                'street1'                 => 'National Highway Logistics Terminal, Port Qasim',
-                'city'                    => 'Karachi',
-                'country_id'              => $pakistan?->id ?? 177,
-                'currency_id'             => $currencies['PKR']->id ?? 159,
-                'website'                 => 'https://fleet.truckitin.com',
-                'is_active'               => true,
+                'company_id'  => 'SHL-001',
+                'country_id'  => $pakistan?->id ?? 177,
+                'currency_id' => $currencies['PKR']->id ?? 159,
+                'is_active'   => true,
             ]
         );
 
-        // 3. TII Warehousing & Cold Chain (Pvt) Ltd - 3PL Fulfillment & Storage
+        // 3. OpenPort - sister company (Pakistan, PKR). Details pending as above.
         $company3 = Company::firstOrCreate(
-            ['name' => 'TII Warehousing & Cold Chain (Pvt) Ltd'],
+            ['name' => 'OpenPort'],
             [
-                'company_id'              => 'TII-003',
-                'registration_number'     => '0192384',
-                'tax_id'                  => '6394012-9',
-                'is_sales_tax_registered' => true,
-                'strn'                    => '3277876345678',
-                'email'                   => 'warehousing@truckitin.com',
-                'phone'                   => '+92-42-35928811',
-                'street1'                 => 'Plot 48, Sundar Industrial Estate, Raiwind Road',
-                'city'                    => 'Lahore',
-                'country_id'              => $pakistan?->id ?? 177,
-                'currency_id'             => $currencies['PKR']->id ?? 159,
-                'website'                 => 'https://coldchain.truckitin.com',
-                'is_active'               => true,
-            ]
-        );
-
-        // 4. Aureus Global Logistics FZE - Cross-Border Freight & Digital Trade (UAE)
-        $company4 = Company::firstOrCreate(
-            ['name' => 'Aureus Global Logistics FZE'],
-            [
-                'company_id'              => 'AGL-004',
-                'registration_number'     => 'FZE-89211',
-                'tax_id'                  => '100489217300003',
-                'is_sales_tax_registered' => true,
-                'strn'                    => '100489217300003',
-                'email'                   => 'finance@aureuslogistics.ae',
-                'phone'                   => '+971-4-2995500',
-                'street1'                 => 'DAFZA Business Park, Building 4W, Office 302',
-                'city'                    => 'Dubai',
-                'country_id'              => $uae?->id ?? 2,
-                'currency_id'             => $currencies['AED']->id ?? 128,
-                'website'                 => 'https://aureuslogistics.ae',
-                'is_active'               => true,
+                'company_id'  => 'OPP-001',
+                'country_id'  => $pakistan?->id ?? 177,
+                'currency_id' => $currencies['PKR']->id ?? 159,
+                'is_active'   => true,
             ]
         );
 
         // Sync enabled currencies
-        $allCompanies = [$company1, $company2, $company3, $company4];
+        $allCompanies = [$company1, $company2, $company3];
         foreach ($allCompanies as $comp) {
             $syncMap = [];
             foreach ($currencies as $code => $cur) {
@@ -186,10 +148,9 @@ class LogisticsCompanyAndProductSeeder extends Seeder
         }
 
         return [
-            'truckitin'   => $company1,
-            'fleet'       => $company2,
-            'warehousing' => $company3,
-            'global'      => $company4,
+            'truckitin' => $company1,
+            'shipline'  => $company2,
+            'openport'  => $company3,
         ];
     }
 

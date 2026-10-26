@@ -26,24 +26,6 @@ it('seeds all legitimate companies with proper tax and registration profiles', f
             'city'    => 'Karachi',
             'tax_reg' => true,
         ],
-        'TII Fleet Logistics (SMC-Pvt) Ltd' => [
-            'ntn'     => '5192841-3',
-            'strn'    => '3277876234567',
-            'city'    => 'Karachi',
-            'tax_reg' => true,
-        ],
-        'TII Warehousing & Cold Chain (Pvt) Ltd' => [
-            'ntn'     => '6394012-9',
-            'strn'    => '3277876345678',
-            'city'    => 'Lahore',
-            'tax_reg' => true,
-        ],
-        'Aureus Global Logistics FZE' => [
-            'ntn'     => '100489217300003',
-            'strn'    => '100489217300003',
-            'city'    => 'Dubai',
-            'tax_reg' => true,
-        ],
     ];
 
     foreach ($companies as $name => $expected) {
@@ -55,17 +37,25 @@ it('seeds all legitimate companies with proper tax and registration profiles', f
             ->and((bool) $company->is_sales_tax_registered)->toBe($expected['tax_reg'])
             ->and($company->is_active)->toBeTrue();
     }
+
+    // Sister companies: Pakistan / PKR; registration and tax details are filled in later.
+    foreach (['ShipLine', 'OpenPort'] as $name) {
+        $company = Company::where('name', $name)->first();
+        expect($company)->not->toBeNull()
+            ->and($company->country?->code)->toBe('PK')
+            ->and($company->currency?->code)->toBe('PKR')
+            ->and($company->is_active)->toBeTrue();
+    }
 });
 
 it('ensures each company has standard journals and isolated taxes with valid partitions', function () {
     $companies = Company::whereIn('name', [
         'Truck It In (Pvt) Ltd',
-        'TII Fleet Logistics (SMC-Pvt) Ltd',
-        'TII Warehousing & Cold Chain (Pvt) Ltd',
-        'Aureus Global Logistics FZE',
+        'ShipLine',
+        'OpenPort',
     ])->get();
 
-    expect($companies->count())->toBe(4);
+    expect($companies->count())->toBe(3);
 
     foreach ($companies as $company) {
         // Must have Sale and Purchase journals
@@ -123,7 +113,7 @@ it('seeds legitimate freight and procurement products with correct accounts and 
 
 it('scopes taxes by company when selecting products on customer invoices and vendor bills', function () {
     $tii = Company::where('name', 'Truck It In (Pvt) Ltd')->first();
-    $fleet = Company::where('name', 'TII Fleet Logistics (SMC-Pvt) Ltd')->first();
+    $fleet = Company::where('name', 'ShipLine')->first();
 
     $ftl = AccountProduct::where('name', 'Full Truckload (FTL) Freight - Karachi to Lahore (40ft Flatbed)')->first();
 
@@ -132,12 +122,12 @@ it('scopes taxes by company when selecting products on customer invoices and ven
     expect($tiiTaxes->count())->toBeGreaterThanOrEqual(1)
         ->and($tiiTaxes->pluck('company_id')->unique()->all())->toBe([$tii->id]);
 
-    // Query sale taxes for FTL under Company 2 (Fleet)
+    // Query sale taxes for FTL under Company 2 (ShipLine)
     $fleetTaxes = $ftl->productTaxes()->where('accounts_taxes.company_id', $fleet->id)->get();
     expect($fleetTaxes->count())->toBeGreaterThanOrEqual(1)
         ->and($fleetTaxes->pluck('company_id')->unique()->all())->toBe([$fleet->id]);
 
-    // Taxes for TII should not overlap with Fleet taxes
+    // Taxes for TII should not overlap with ShipLine taxes
     $intersect = $tiiTaxes->pluck('id')->intersect($fleetTaxes->pluck('id'));
     expect($intersect->isEmpty())->toBeTrue();
 });
