@@ -34,9 +34,12 @@ use Webkul\Inventory\Filament\Clusters\Configurations\Resources\StorageCategoryR
 use Webkul\Inventory\Filament\Clusters\Configurations\Resources\StorageCategoryResource\RelationManagers\CapacityByProductsRelationManager;
 use Webkul\Inventory\Models\StorageCategory;
 use Webkul\Inventory\Settings\WarehouseSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class StorageCategoryResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = StorageCategory::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-folder';
@@ -49,12 +52,9 @@ class StorageCategoryResource extends Resource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(WarehouseSettings::class)->enable_locations;
     }
 

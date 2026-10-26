@@ -27,11 +27,13 @@ use Webkul\Inventory\Filament\Clusters\Operations\Resources\InternalResource\Pag
 use Webkul\Inventory\Models\InternalTransfer;
 use Webkul\Inventory\Settings\WarehouseSettings;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class InternalResource extends Resource
 {
+    use GatedByFeatureSetting;
     use HasResourcePermissionQuery;
-    
+
     protected static ?string $model = InternalTransfer::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-arrows-right-left';
@@ -44,12 +46,9 @@ class InternalResource extends Resource
 
     protected static ?string $cluster = Operations::class;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(WarehouseSettings::class)->enable_locations;
     }
 

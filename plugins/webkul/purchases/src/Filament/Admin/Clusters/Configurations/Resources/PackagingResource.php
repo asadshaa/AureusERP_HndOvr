@@ -8,9 +8,12 @@ use Webkul\Purchase\Filament\Admin\Clusters\Configurations;
 use Webkul\Purchase\Filament\Admin\Clusters\Configurations\Resources\PackagingResource\Pages\ManagePackagings;
 use Webkul\Purchase\Models\Packaging;
 use Webkul\Purchase\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class PackagingResource extends BasePackagingResource
 {
+    use GatedByFeatureSetting;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-gift';
 
     protected static bool $shouldRegisterNavigation = true;
@@ -23,12 +26,9 @@ class PackagingResource extends BasePackagingResource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(ProductSettings::class)->enable_packagings;
     }
 

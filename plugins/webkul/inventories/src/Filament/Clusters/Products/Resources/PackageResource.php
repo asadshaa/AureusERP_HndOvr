@@ -42,9 +42,12 @@ use Webkul\Inventory\Filament\Clusters\Products\Resources\PackageResource\Pages\
 use Webkul\Inventory\Filament\Clusters\Products\Resources\PackageResource\RelationManagers\ProductsRelationManager;
 use Webkul\Inventory\Models\Package;
 use Webkul\Inventory\Settings\OperationSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class PackageResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Package::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cube';
@@ -55,12 +58,9 @@ class PackageResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(OperationSettings::class)->enable_packages;
     }
 

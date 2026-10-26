@@ -24,9 +24,12 @@ use Webkul\Project\Filament\Clusters\Configurations;
 use Webkul\Project\Filament\Clusters\Configurations\Resources\ProjectStageResource\Pages\ManageProjectStages;
 use Webkul\Project\Models\ProjectStage;
 use Webkul\Project\Settings\TaskSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class ProjectStageResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = ProjectStage::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-squares-2x2';
@@ -40,12 +43,9 @@ class ProjectStageResource extends Resource
         return __('projects::filament/clusters/configurations/resources/project-stage.navigation.title');
     }
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(TaskSettings::class)->enable_project_stages;
     }
 

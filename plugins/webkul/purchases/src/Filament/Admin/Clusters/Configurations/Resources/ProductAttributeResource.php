@@ -11,9 +11,12 @@ use Webkul\Purchase\Filament\Admin\Clusters\Configurations\Resources\ProductAttr
 use Webkul\Purchase\Filament\Admin\Clusters\Configurations\Resources\ProductAttributeResource\Pages\ViewProductAttribute;
 use Webkul\Purchase\Models\Attribute;
 use Webkul\Purchase\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class ProductAttributeResource extends AttributeResource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Attribute::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-swatch';
@@ -26,12 +29,9 @@ class ProductAttributeResource extends AttributeResource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(ProductSettings::class)->enable_variants;
     }
 

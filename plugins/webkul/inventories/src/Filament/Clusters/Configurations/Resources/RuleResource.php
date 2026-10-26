@@ -49,9 +49,12 @@ use Webkul\Inventory\Models\OperationType;
 use Webkul\Inventory\Models\Rule;
 use Webkul\Inventory\Settings\WarehouseSettings;
 use Webkul\Partner\Filament\Resources\PartnerResource;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class RuleResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Rule::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-check';
@@ -64,12 +67,9 @@ class RuleResource extends Resource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(WarehouseSettings::class)->enable_multi_steps_routes;
     }
 

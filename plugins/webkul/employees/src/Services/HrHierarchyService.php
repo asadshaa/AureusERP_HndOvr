@@ -10,10 +10,33 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Security\Models\Team;
 use Webkul\Security\Models\User;
 
+/**
+ * Bound as a scoped (per-request / per-job) service: visibleEmployeeIds() is
+ * asked once per policy check (5+ per row on the Employees list), so its
+ * result is remembered per user and company for the request and forgotten
+ * whenever an employee, department or team is saved or deleted
+ * (EmployeeServiceProvider), so a change made earlier in the same request is
+ * always seen.
+ */
 class HrHierarchyService
 {
+    /** @var array<string, Collection<int, int>> */
+    private array $visibleEmployeeIdsCache = [];
+
     /** @return Collection<int, int> */
     public function visibleEmployeeIds(User $user, int $companyId): Collection
+    {
+        return $this->visibleEmployeeIdsCache[$user->getKey().':'.$companyId] ??= $this->resolveVisibleEmployeeIds($user, $companyId);
+    }
+
+    /** Forget remembered visibility (hierarchy data changed). */
+    public function flushCache(): void
+    {
+        $this->visibleEmployeeIdsCache = [];
+    }
+
+    /** @return Collection<int, int> */
+    private function resolveVisibleEmployeeIds(User $user, int $companyId): Collection
     {
         $this->assertCompanyAccess($user, $companyId);
 

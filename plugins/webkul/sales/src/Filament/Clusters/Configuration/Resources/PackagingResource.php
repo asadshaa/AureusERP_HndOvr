@@ -7,9 +7,12 @@ use Webkul\Product\Settings\ProductSettings;
 use Webkul\Sale\Filament\Clusters\Configuration;
 use Webkul\Sale\Filament\Clusters\Configuration\Resources\PackagingResource\Pages\ManagePackagings;
 use Webkul\Sale\Models\Packaging;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class PackagingResource extends BasePackagingResource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Packaging::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-gift';
@@ -20,12 +23,9 @@ class PackagingResource extends BasePackagingResource
 
     protected static ?string $cluster = Configuration::class;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(ProductSettings::class)->enable_packagings;
     }
 

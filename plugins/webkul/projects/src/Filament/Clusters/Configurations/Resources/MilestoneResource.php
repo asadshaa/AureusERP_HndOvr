@@ -25,9 +25,12 @@ use Webkul\Project\Filament\Resources\ProjectResource\Pages\ManageMilestones;
 use Webkul\Project\Filament\Resources\ProjectResource\RelationManagers\MilestonesRelationManager;
 use Webkul\Project\Models\Milestone;
 use Webkul\Project\Settings\TaskSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class MilestoneResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Milestone::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-flag';
@@ -41,12 +44,9 @@ class MilestoneResource extends Resource
         return __('projects::filament/clusters/configurations/resources/milestone.navigation.title');
     }
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(TaskSettings::class)->enable_milestones;
     }
 

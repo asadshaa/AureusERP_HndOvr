@@ -64,6 +64,7 @@ use Webkul\Purchase\Filament\Admin\Clusters\Orders\Resources\PurchaseAgreementRe
 use Webkul\Purchase\Models\Requisition;
 use Webkul\Purchase\Settings\OrderSettings;
 use Webkul\Purchase\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
 use Webkul\Support\Filament\Infolists\Components\RepeatableEntry;
@@ -72,6 +73,7 @@ use Webkul\Support\Models\Company;
 
 class PurchaseAgreementResource extends Resource
 {
+    use GatedByFeatureSetting;
     use HasCustomFields;
 
     protected static ?string $model = Requisition::class;
@@ -109,12 +111,9 @@ class PurchaseAgreementResource extends Resource
         return __('purchases::filament/admin/clusters/orders/resources/purchase-agreement.navigation.title');
     }
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return static::getOrderSettings()->enable_purchase_agreements;
     }
 

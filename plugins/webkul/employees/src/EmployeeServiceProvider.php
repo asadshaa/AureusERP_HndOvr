@@ -7,12 +7,16 @@ use Illuminate\Support\Facades\Schema;
 use Throwable;
 use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
 use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
+use Webkul\Employee\Models\Department;
+use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
+use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Security\Models\Team;
 use Webkul\Support\Models\Company;
 
 class EmployeeServiceProvider extends PackageServiceProvider
@@ -79,6 +83,12 @@ class EmployeeServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
+        // HrHierarchyService remembers visibility per request; forget it when the hierarchy changes.
+        foreach ([Employee::class, Department::class, Team::class] as $hierarchyModel) {
+            $hierarchyModel::saved(fn () => app(HrHierarchyService::class)->flushCache());
+            $hierarchyModel::deleted(fn () => app(HrHierarchyService::class)->flushCache());
+        }
+
         // A company created after the initial seed must still get its attendance
         // correction workflow, otherwise every correction / missed-day request in
         // that company is refused ("No active approval workflow is configured").
@@ -95,6 +105,8 @@ class EmployeeServiceProvider extends PackageServiceProvider
 
     public function packageRegistered(): void
     {
+        $this->app->scoped(HrHierarchyService::class);
+
         $this->app->tag([
             GpsGeofenceVerifier::class,
             RemoteExemptVerifier::class,

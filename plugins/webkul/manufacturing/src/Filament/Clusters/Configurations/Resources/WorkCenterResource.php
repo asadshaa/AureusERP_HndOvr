@@ -54,12 +54,15 @@ use Webkul\Manufacturing\Models\WorkCenter;
 use Webkul\Manufacturing\Models\WorkCenterTag;
 use Webkul\Manufacturing\Settings\OperationSettings;
 use Webkul\Product\Models\Product;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
 use Webkul\Support\Models\Calendar;
 
 class WorkCenterResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = WorkCenter::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-wrench-screwdriver';
@@ -70,12 +73,9 @@ class WorkCenterResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(OperationSettings::class)->enable_work_orders;
     }
 

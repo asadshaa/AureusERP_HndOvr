@@ -18,9 +18,12 @@ use Webkul\Inventory\Settings\WarehouseSettings;
 use Webkul\Product\Enums\ProductType;
 use Webkul\Product\Filament\Resources\PackagingResource as BasePackagingResource;
 use Webkul\Product\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class PackagingResource extends BasePackagingResource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Packaging::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-gift';
@@ -35,12 +38,9 @@ class PackagingResource extends BasePackagingResource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return static::getProductSettings()->enable_packagings;
     }
 

@@ -47,9 +47,12 @@ use Webkul\Inventory\Filament\Clusters\Products\Resources\LotResource\Pages\View
 use Webkul\Inventory\Filament\Clusters\Products\Resources\ProductResource\Pages\ManageQuantities;
 use Webkul\Inventory\Models\Lot;
 use Webkul\Inventory\Settings\TraceabilitySettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class LotResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Lot::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
@@ -60,12 +63,9 @@ class LotResource extends Resource
 
     protected static ?int $navigationSort = 3;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(TraceabilitySettings::class)->enable_lots_serial_numbers;
     }
 

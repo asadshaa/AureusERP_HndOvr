@@ -44,6 +44,16 @@ echo Clearing stale Laravel caches...
 "!PHP!" artisan optimize:clear
 echo.
 
+REM Rebuild the speed caches (Filament components and icons, routes, events,
+REM views). Config is deliberately NOT cached: a cached config makes tests
+REM ignore phpunit.xml and run against the dev database.
+echo Building speed caches...
+"!PHP!" artisan filament:optimize
+"!PHP!" artisan route:cache
+"!PHP!" artisan event:cache
+"!PHP!" artisan view:cache
+echo.
+
 if not exist "public\build\manifest.json" (
     echo [WARN] public\build\manifest.json missing - the UI may be unstyled.
     echo        One-time fix:   npm install  ^&^&  npm run build

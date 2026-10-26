@@ -55,9 +55,12 @@ use Webkul\Manufacturing\Models\BillOfMaterial;
 use Webkul\Manufacturing\Models\Operation;
 use Webkul\Manufacturing\Settings\OperationSettings;
 use Webkul\Product\Models\ProductAttributeValue;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class OperationResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Operation::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';
@@ -68,12 +71,9 @@ class OperationResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(OperationSettings::class)->enable_work_orders;
     }
 

@@ -53,6 +53,11 @@ if errorlevel 1 (
     echo [ERROR] Cache clear failed - see the message above.
     goto :fail
 )
+REM Rebuild the speed caches (config deliberately not cached: tests would hit the dev DB).
+"!PHP!" artisan filament:optimize
+"!PHP!" artisan route:cache
+"!PHP!" artisan event:cache
+"!PHP!" artisan view:cache
 echo.
 
 REM 5) Check the database is reachable WITHOUT modifying it

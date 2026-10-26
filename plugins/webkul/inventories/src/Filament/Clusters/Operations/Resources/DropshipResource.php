@@ -27,9 +27,12 @@ use Webkul\Inventory\Filament\Clusters\Operations\Resources\DropshipResource\Pag
 use Webkul\Inventory\Filament\Clusters\Operations\Resources\DropshipResource\Pages\ViewDropship;
 use Webkul\Inventory\Models\Dropship;
 use Webkul\Inventory\Settings\LogisticSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class DropshipResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Dropship::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-truck';
@@ -40,12 +43,9 @@ class DropshipResource extends Resource
 
     protected static ?string $cluster = Operations::class;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(LogisticSettings::class)->enable_dropshipping;
     }
 

@@ -28,9 +28,12 @@ use Webkul\Inventory\Filament\Clusters\Configurations\Resources\PackageTypeResou
 use Webkul\Inventory\Filament\Clusters\Configurations\Resources\PackageTypeResource\Pages\ViewPackageType;
 use Webkul\Inventory\Models\PackageType;
 use Webkul\Inventory\Settings\OperationSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class PackageTypeResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = PackageType::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box';
@@ -53,12 +56,9 @@ class PackageTypeResource extends Resource
         return __('inventories::filament/clusters/configurations/resources/package-type.navigation.title');
     }
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(OperationSettings::class)->enable_packages;
     }
 

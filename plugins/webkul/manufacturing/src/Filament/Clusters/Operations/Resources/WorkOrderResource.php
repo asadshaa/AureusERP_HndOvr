@@ -54,6 +54,7 @@ use Webkul\Manufacturing\Models\WorkCenterProductivityLog;
 use Webkul\Manufacturing\Models\WorkCenterProductivityLoss;
 use Webkul\Manufacturing\Models\WorkOrder;
 use Webkul\Manufacturing\Settings\OperationSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn as RepeaterTableColumn;
 use Webkul\Support\Filament\Infolists\Components\RepeatableEntry;
@@ -62,6 +63,8 @@ use Webkul\Support\Models\UOM;
 
 class WorkOrderResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = WorkOrder::class;
 
     protected static ?string $cluster = Operations::class;
@@ -72,12 +75,9 @@ class WorkOrderResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-wrench-screwdriver';
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(OperationSettings::class)->enable_work_orders;
     }
 

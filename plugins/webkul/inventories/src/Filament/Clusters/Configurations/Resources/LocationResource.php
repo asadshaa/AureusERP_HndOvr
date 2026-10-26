@@ -3,8 +3,8 @@
 namespace Webkul\Inventory\Filament\Clusters\Configurations\Resources;
 
 use BackedEnum;
-use Exception;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Exception;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -50,9 +50,12 @@ use Webkul\Inventory\Filament\Clusters\Configurations\Resources\LocationResource
 use Webkul\Inventory\Filament\Clusters\Configurations\Resources\StorageCategoryResource\Pages\ManageLocations;
 use Webkul\Inventory\Models\Location;
 use Webkul\Inventory\Settings\WarehouseSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class LocationResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Location::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map-pin';
@@ -65,12 +68,9 @@ class LocationResource extends Resource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(WarehouseSettings::class)->enable_locations;
     }
 

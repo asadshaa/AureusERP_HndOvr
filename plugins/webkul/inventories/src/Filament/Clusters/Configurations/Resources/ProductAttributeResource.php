@@ -10,9 +10,12 @@ use Webkul\Inventory\Filament\Clusters\Configurations\Resources\ProductAttribute
 use Webkul\Inventory\Models\Attribute;
 use Webkul\Product\Filament\Resources\AttributeResource;
 use Webkul\Product\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class ProductAttributeResource extends AttributeResource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Attribute::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-swatch';
@@ -27,12 +30,9 @@ class ProductAttributeResource extends AttributeResource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(ProductSettings::class)->enable_variants;
     }
 

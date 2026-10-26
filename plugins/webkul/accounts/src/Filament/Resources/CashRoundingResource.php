@@ -24,21 +24,21 @@ use Webkul\Account\Enums\RoundingStrategy;
 use Webkul\Account\Filament\Resources\CashRoundingResource\Pages\ListCashRoundings;
 use Webkul\Account\Models\CashRounding;
 use Webkul\Account\Settings\CustomerInvoiceSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class CashRoundingResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = CashRounding::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-adjustments-horizontal';
 
     protected static bool $shouldRegisterNavigation = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(CustomerInvoiceSettings::class)->group_cash_rounding;
     }
 

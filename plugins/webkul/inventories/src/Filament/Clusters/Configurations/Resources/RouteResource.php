@@ -47,9 +47,12 @@ use Webkul\Inventory\Filament\Clusters\Configurations\Resources\WarehouseResourc
 use Webkul\Inventory\Models\Route;
 use Webkul\Inventory\Settings\WarehouseSettings;
 use Webkul\Product\Settings\ProductSettings;
+use Webkul\Support\Filament\Concerns\GatedByFeatureSetting;
 
 class RouteResource extends Resource
 {
+    use GatedByFeatureSetting;
+
     protected static ?string $model = Route::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-path';
@@ -62,12 +65,9 @@ class RouteResource extends Resource
 
     protected static bool $isGloballySearchable = false;
 
-    public static function isDiscovered(): bool
+    /** Feature toggle, checked per request by GatedByFeatureSetting::canAccess(). */
+    protected static function isFeatureEnabled(): bool
     {
-        if (app()->runningInConsole()) {
-            return true;
-        }
-
         return settings(WarehouseSettings::class)->enable_multi_steps_routes;
     }
 
