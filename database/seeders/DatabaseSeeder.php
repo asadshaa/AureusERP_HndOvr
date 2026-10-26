@@ -9,6 +9,7 @@ use Webkul\Employee\Database\Seeders\SensitiveChangeWorkflowSeeder;
 use Webkul\PluginManager\Database\Seeders\PluginSeeder;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Database\Seeders\RecruitmentWorkflowSeeder;
+use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
 use Webkul\Security\Database\Seeders\DatabaseSeeder as SecurityDatabaseSeeder;
 use Webkul\Support\Database\Seeders\DatabaseSeeder as SupportDatabaseSeeder;
 use Webkul\TimeOff\Database\Seeders\LeaveWorkflowSeeder;
@@ -33,6 +34,7 @@ class DatabaseSeeder extends Seeder
             AttendanceWorkflowSeeder::class,
             RecruitmentWorkflowSeeder::class,
             JobOpeningWorkflowSeeder::class,
+            ScreeningQuestionSeeder::class,
             ClaimsWorkflowSeeder::class,
             SensitiveChangeWorkflowSeeder::class,
             LogisticsCompanyAndProductSeeder::class,

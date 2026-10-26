@@ -12,6 +12,7 @@ use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
+use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Recruitment\Services\JobPostingLifecycle;
@@ -47,6 +48,7 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_08_25_000013_extend_recruitment_pipeline',
                 '2026_10_26_000001_create_recruitments_job_postings_tables',
                 '2026_10_26_000002_backfill_recruitments_job_postings',
+                '2026_10_27_000001_create_recruitments_screening_tables',
             ])
             ->runsMigrations()
             ->hasCommands([
@@ -74,6 +76,10 @@ class RecruitmentServiceProvider extends PackageServiceProvider
             try {
                 if (Schema::hasTable('support_approval_workflows')) {
                     app(JobOpeningWorkflowSeeder::class)->provisionForCompany($company);
+                }
+
+                if (Schema::hasTable('recruitments_screening_questions')) {
+                    app(ScreeningQuestionSeeder::class)->provisionForCompany($company);
                 }
             } catch (Throwable $e) {
                 report($e);

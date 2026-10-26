@@ -4,6 +4,7 @@ namespace Webkul\Recruitment\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
@@ -186,6 +187,12 @@ class Applicant extends Model
     public function categories()
     {
         return $this->belongsToMany(ApplicantCategory::class, 'recruitments_applicant_applicant_categories', 'applicant_id', 'category_id');
+    }
+
+    /** Screening answers, with the questions as they were asked. */
+    public function answers(): HasMany
+    {
+        return $this->hasMany(ApplicantAnswer::class, 'applicant_id');
     }
 
     /** The job ad this application came through (first touch). */

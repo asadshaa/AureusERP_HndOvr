@@ -54,6 +54,7 @@ use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionRes
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\ListJobPositions;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\ViewJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobPostingsRelationManager;
+use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobQuestionsRelationManager;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Security\Filament\Resources\CompanyResource;
@@ -641,6 +642,7 @@ class JobPositionResource extends Resource
     {
         return [
             JobPostingsRelationManager::class,
+            JobQuestionsRelationManager::class,
         ];
     }
 

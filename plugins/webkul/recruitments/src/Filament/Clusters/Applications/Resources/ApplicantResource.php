@@ -16,6 +16,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -38,6 +39,7 @@ use Filament\Tables\Filters\QueryBuilder\Constraints\DateConstraint;
 use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint;
 use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint\Operators\IsRelatedToOperator;
 use Filament\Tables\Filters\QueryBuilder\Constraints\TextConstraint;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Grouping\Group as TableGroup;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Support\Htmlable;
@@ -52,6 +54,7 @@ use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressSteppe
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
 use Webkul\Recruitment\Enums\ApplicationStatus;
 use Webkul\Recruitment\Enums\RecruitmentState as RecruitmentStateEnum;
+use Webkul\Recruitment\Enums\ScreeningStatus;
 use Webkul\Recruitment\Filament\Clusters\Applications;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\EditApplicant;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ListApplicants;
@@ -59,6 +62,7 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ViewApplicant;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\SkillsRelationManager;
 use Webkul\Recruitment\Models\Applicant;
+use Webkul\Recruitment\Models\ApplicantAnswer;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
@@ -482,6 +486,13 @@ class ApplicantResource extends Resource
                     ->placeholder('-')
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('screening_status')
+                    ->label('Screening')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): ?string => ScreeningStatus::tryFrom((string) $state)?->getLabel())
+                    ->color(fn (?string $state): ?string => ScreeningStatus::tryFrom((string) $state)?->getColor())
+                    ->placeholder('Not screened')
+                    ->toggleable(),
                 TextColumn::make('candidate.name')
                     ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.columns.candidate-name'))
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -625,6 +636,9 @@ class ApplicantResource extends Resource
                     ->collapsible(),
             ])
             ->filters([
+                SelectFilter::make('screening_status')
+                    ->label('Screening')
+                    ->options(ScreeningStatus::options()),
                 QueryBuilder::make()
                     ->constraintPickerColumns(2)
                     ->constraints([
@@ -963,6 +977,39 @@ class ApplicantResource extends Resource
                                             ->icon('heroicon-o-megaphone')
                                             ->state(fn (Applicant $record): ?string => $record->jobPosting?->displayName())
                                             ->placeholder('—'),
+                                    ]),
+                                Section::make('Screening')
+                                    ->schema([
+                                        TextEntry::make('screening_status')
+                                            ->label('Result')
+                                            ->badge()
+                                            ->formatStateUsing(fn (?string $state): ?string => ScreeningStatus::tryFrom((string) $state)?->getLabel())
+                                            ->color(fn (?string $state): ?string => ScreeningStatus::tryFrom((string) $state)?->getColor())
+                                            ->placeholder('Not screened'),
+                                        TextEntry::make('screening_override')
+                                            ->label('Accepted anyway')
+                                            ->state(fn (Applicant $record): ?string => ($override = $record->applicant_properties['screening']['override'] ?? null)
+                                                ? "{$override['by_name']}: {$override['reason']}"
+                                                : null)
+                                            ->visible(fn (Applicant $record): bool => isset($record->applicant_properties['screening']['override'])),
+                                        RepeatableEntry::make('screening_answers')
+                                            ->label('Answers')
+                                            ->state(fn (Applicant $record): array => $record->answers()->orderBy('id')->get()
+                                                ->map(fn (ApplicantAnswer $answer): array => [
+                                                    'question' => $answer->question_snapshot['label'] ?? '',
+                                                    'answer'   => $answer->displayAnswer(),
+                                                    'verdict'  => match ($answer->passed) {
+                                                        true    => 'Meets requirement',
+                                                        false   => 'Not qualified: '.$answer->reason,
+                                                        default => '',
+                                                    },
+                                                ])->all())
+                                            ->schema([
+                                                TextEntry::make('question')->hiddenLabel()->weight('bold'),
+                                                TextEntry::make('answer')->hiddenLabel(),
+                                                TextEntry::make('verdict')->hiddenLabel()->placeholder(''),
+                                            ])
+                                            ->placeholder('No answers yet'),
                                     ]),
                             ])->columnSpan(1),
                     ])->columnSpanFull(),

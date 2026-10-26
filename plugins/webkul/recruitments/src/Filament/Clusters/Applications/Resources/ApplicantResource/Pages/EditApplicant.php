@@ -24,6 +24,7 @@ use Webkul\Recruitment\Mail\InterviewerAssignedMail;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\RefuseReason;
 use Webkul\Recruitment\Traits\HandlesEmployeeConversion;
+use Webkul\Recruitment\Traits\HasScreeningActions;
 use Webkul\Security\Models\User;
 use Webkul\Support\Services\EmailService;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
@@ -32,6 +33,7 @@ class EditApplicant extends EditRecord
 {
     use HandlesEmployeeConversion;
     use HasRecordNavigationTabs;
+    use HasScreeningActions;
 
     protected static string $resource = ApplicantResource::class;
 
@@ -55,6 +57,7 @@ class EditApplicant extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            ...$this->getScreeningActions(),
             Action::make('state')
                 ->hiddenLabel()
                 ->icon(function ($record) {

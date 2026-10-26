@@ -134,6 +134,12 @@ class JobPosition extends BaseJobPosition
         return $this->postings()->whereIn('status', [ChannelPostingStatus::LIVE->value, ChannelPostingStatus::REMOVAL_PENDING->value])->exists();
     }
 
+    /** Screening questions asked for this job, in order. */
+    public function questions(): HasMany
+    {
+        return $this->hasMany(JobQuestion::class, 'job_id')->orderBy('sort')->orderBy('id');
+    }
+
     public function approvalRequests(): MorphMany
     {
         return $this->morphMany(ApprovalRequest::class, 'subject')

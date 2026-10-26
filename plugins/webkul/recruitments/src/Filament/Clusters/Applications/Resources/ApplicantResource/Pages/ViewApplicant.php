@@ -19,6 +19,7 @@ use Webkul\Recruitment\Mail\ApplicantRefuseMail;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\RefuseReason;
 use Webkul\Recruitment\Traits\HandlesEmployeeConversion;
+use Webkul\Recruitment\Traits\HasScreeningActions;
 use Webkul\Support\Services\EmailService;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 
@@ -26,12 +27,14 @@ class ViewApplicant extends ViewRecord
 {
     use HandlesEmployeeConversion;
     use HasRecordNavigationTabs;
+    use HasScreeningActions;
 
     protected static string $resource = ApplicantResource::class;
 
     protected function getHeaderActions(): array
     {
         return [
+            ...$this->getScreeningActions(),
             Action::make('state')
                 ->hiddenLabel()
                 ->icon(function ($record) {

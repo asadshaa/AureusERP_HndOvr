@@ -32,6 +32,7 @@ class ApplicantIntakeService
             'candidate_phone'          => ['nullable', 'string', 'max:255'],
             'job_id'                   => ['required', 'integer'],
             'job_posting_id'           => ['nullable', 'integer'],
+            'screening_answers'        => ['nullable', 'array'],
             'stage_id'                 => ['nullable', 'integer'],
             'source_id'                => ['nullable', 'integer', 'exists:utm_sources,id'],
             'medium_id'                => ['nullable', 'integer', 'exists:utm_mediums,id'],
@@ -134,6 +135,11 @@ class ApplicantIntakeService
                 'is_active'              => true,
             ]);
             $application->save();
+
+            // Screening answers sent with the application (careers form, import): judged right away.
+            if (! empty($data['screening_answers'])) {
+                app(ScreeningService::class)->recordAnswers($application, (array) $data['screening_answers'], null, $source);
+            }
 
             return $application->fresh(['candidate', 'job', 'stage']);
         });
