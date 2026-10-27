@@ -17,6 +17,14 @@ trait HasPermissionScope
 
     protected ?string $pivotRelatedKey = 'user_id';
 
+    /**
+     * Memoised schema lookups, keyed by "connection.table.column", so the
+     * permission scope does not hit information_schema on every query build.
+     *
+     * @var array<string, bool>
+     */
+    protected static array $permissionScopeColumnCache = [];
+
     protected function getOwnerColumn(): string
     {
         return $this->ownerColumn;
@@ -88,7 +96,7 @@ trait HasPermissionScope
 
             if (
                 $assignmentColumn &&
-                $this->getConnection()->getSchemaBuilder()->hasColumn($this->getTable(), $assignmentColumn)
+                $this->permissionScopeTableHasColumn($assignmentColumn)
             ) {
                 $subQuery->orWhereIn($assignmentColumn, $userIds);
             }
@@ -106,5 +114,14 @@ trait HasPermissionScope
                 });
             }
         });
+    }
+
+    protected function permissionScopeTableHasColumn(string $column): bool
+    {
+        $cacheKey = $this->getConnection()->getName().'.'.$this->getTable().'.'.$column;
+
+        return static::$permissionScopeColumnCache[$cacheKey] ??= $this->getConnection()
+            ->getSchemaBuilder()
+            ->hasColumn($this->getTable(), $column);
     }
 }

@@ -14,9 +14,9 @@ class ViewJobPosition extends BaseViewJobPosition
 
     protected function getHeaderActions(): array
     {
-        return [
+        return JobPositionResource::actionsForRecordCompany([
             ...$this->getJobPublicationActions(),
             ...parent::getHeaderActions(),
-        ];
+        ], $this->getRecord());
     }
 }

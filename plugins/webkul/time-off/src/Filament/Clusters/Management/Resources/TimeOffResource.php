@@ -28,6 +28,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
+use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\Management;
@@ -41,6 +44,7 @@ use Webkul\TimeOff\Traits\TimeOffHelper;
 
 class TimeOffResource extends Resource
 {
+    use ScopedToMemberCompanies;
     use TimeOffHelper;
 
     protected static ?string $model = Leave::class;
@@ -81,7 +85,7 @@ class TimeOffResource extends Resource
      */
     public static function getNavigationBadge(): ?string
     {
-        $count = static::getEloquentQuery()
+        $count = CurrentCompany::scope(static::getEloquentQuery())
             ->whereIn('state', [State::CONFIRM, State::VALIDATE_ONE])
             ->count();
 
@@ -167,14 +171,22 @@ class TimeOffResource extends Resource
                     ->label(__('time-off::filament/clusters/management/resources/time-off.table.groups.start-to'))
                     ->collapsible(),
             ])
+            ->filters([
+                static::companyFilter(),
+            ])
             ->recordActions([
-                ActivityTableAction::make(),
+                ActivityTableAction::make()
+                    ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)),
                 ActionGroup::make([
                     Action::make('submit_for_approval')
                         ->label('Submit for approval')
                         ->icon('heroicon-o-paper-airplane')
                         ->color('primary')
                         ->visible(function (Leave $record): bool {
+                            if (! static::isActiveCompanyRecord($record)) {
+                                return false;
+                            }
+
                             $canSubmit = (int) $record->employee?->user_id === (int) Auth::id()
                                 || (bool) Auth::user()?->can('hr_approve_leave');
                             $approvalStatus = $record->approvalRequest?->status;
@@ -195,7 +207,8 @@ class TimeOffResource extends Resource
                     Action::make('approve')
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
-                        ->visible(fn (Leave $record): bool => $record->approvalRequest?->status === 'pending'
+                        ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)
+                            && $record->approvalRequest?->status === 'pending'
                             && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
                         ->action(function (Leave $record): void {
                             app(LeaveApprovalService::class)->approve($record, Auth::user());
@@ -215,7 +228,8 @@ class TimeOffResource extends Resource
                         }),
                     Action::make('refuse')
                         ->icon('heroicon-o-x-circle')
-                        ->visible(fn (Leave $record): bool => $record->approvalRequest?->status === 'pending'
+                        ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)
+                            && $record->approvalRequest?->status === 'pending'
                             && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
                         ->color('danger')
                         ->schema([
@@ -253,7 +267,7 @@ class TimeOffResource extends Resource
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
                         ->action(function (Collection $records) {
-                            $deletable = $records->filter(fn (Leave $record) => $record->approvalRequest?->status !== 'pending' && $record->state !== State::VALIDATE_TWO);
+                            $deletable = $records->filter(fn (Leave $record) => static::isActiveCompanyRecord($record) && $record->approvalRequest?->status !== 'pending' && $record->state !== State::VALIDATE_TWO);
                             $skipped = $records->count() - $deletable->count();
 
                             $deletable->each(fn (Leave $record) => $record->delete());
@@ -262,7 +276,7 @@ class TimeOffResource extends Resource
                                 Notification::make()
                                     ->warning()
                                     ->title('Some leave requests could not be deleted')
-                                    ->body("{$skipped} approved or pending leave request(s) were protected and could not be deleted.")
+                                    ->body("{$skipped} approved or pending leave request(s), or requests of another company, were protected and could not be deleted.")
                                     ->send();
                             } else {
                                 Notification::make()
@@ -352,14 +366,14 @@ class TimeOffResource extends Resource
         // every employee's leave requests. Also restrict to the requesting
         // user's HR hierarchy (self + reports + managed department/team),
         // matching the record-level check in LeavePolicy.
+        // A multi-company user sees each of their companies this way; the
+        // Company filter starts on the active one.
         $user = Auth::user();
-        $companyId = (int) $user?->default_company_id;
 
-        return parent::getEloquentQuery()
-            ->where('company_id', $companyId)
+        return CurrentCompany::scopeMemberships(parent::getEloquentQuery())
             ->whereIn(
                 'employee_id',
-                $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : [],
+                $user instanceof User ? app(HrHierarchyService::class)->visibleEmployeeIdsAcrossMemberships($user) : [],
             );
     }
 }

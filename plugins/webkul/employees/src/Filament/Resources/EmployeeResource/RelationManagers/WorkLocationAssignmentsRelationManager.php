@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * Additional, temporary or approved-remote-day workplaces for an employee,
@@ -81,6 +82,7 @@ class WorkLocationAssignmentsRelationManager extends RelationManager
 
         return $user !== null
             && $employee instanceof Employee
+            && (int) $employee->company_id === CurrentCompany::id()
             && $user->can('update_employee_employee')
             && app(HrHierarchyService::class)->canManage($user, $employee);
     }

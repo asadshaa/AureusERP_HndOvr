@@ -141,6 +141,26 @@ class CurrentCompany
             ->when($includeShared, fn (Builder $q) => $q->orWhereNull($qualified)));
     }
 
+    /**
+     * Restrict a query to any of the user's companies (optionally also rows
+     * with no company). Lists that let a multi-company user look across
+     * their companies use this; changes stay limited to the active company.
+     * Signed out or a member of no company: no rows.
+     */
+    public static function scopeMemberships(Builder $query, bool $includeShared = false, string $column = 'company_id', ?User $user = null): Builder
+    {
+        $companyIds = static::membershipIds($user);
+        $qualified = $query->qualifyColumn($column);
+
+        if ($companyIds === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(fn (Builder $inner) => $inner
+            ->whereIn($qualified, $companyIds)
+            ->when($includeShared, fn (Builder $q) => $q->orWhereNull($qualified)));
+    }
+
     /** Someone who is not a group owner can only put a user in one of their own companies. */
     public static function canAssignCompany(int $companyId, ?User $actor = null): bool
     {

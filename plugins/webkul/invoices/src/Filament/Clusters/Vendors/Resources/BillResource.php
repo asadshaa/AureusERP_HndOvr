@@ -28,7 +28,12 @@ class BillResource extends BaseBillResource
 
     protected static bool $shouldRegisterNavigation = true;
 
-    protected static bool $isGloballySearchable = true;
+    /**
+     * The Accounting plugin's resource (a hard dependency of this plugin) is
+     * the canonical globally searchable one; searching both returned every
+     * record twice.
+     */
+    protected static bool $isGloballySearchable = false;
 
     protected static ?int $navigationSort = 1;
 

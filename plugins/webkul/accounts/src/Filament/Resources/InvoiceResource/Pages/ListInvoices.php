@@ -27,6 +27,74 @@ class ListInvoices extends ListRecords
         return '15s';
     }
 
+    /**
+     * Filament's default hydrates every filtered record and runs the
+     * selectability callback in PHP whenever one is set; this counts in SQL
+     * instead, through the resource's equivalent scope.
+     */
+    public function getAllSelectableTableRecordsCount(): int
+    {
+        if (! $this->selectsAllTableRecordsInSql()) {
+            return parent::getAllSelectableTableRecordsCount();
+        }
+
+        return $this->getSelectableTableRecordsQuery()->count();
+    }
+
+    /**
+     * @return array<string>
+     */
+    public function getAllSelectableTableRecordKeys(): array
+    {
+        if (! $this->selectsAllTableRecordsInSql()) {
+            return parent::getAllSelectableTableRecordKeys();
+        }
+
+        return $this->pluckSelectableTableRecordKeys($this->getSelectableTableRecordsQuery());
+    }
+
+    /**
+     * @return array<string>
+     */
+    public function getGroupedSelectableTableRecordKeys(?string $group): array
+    {
+        if (! $this->selectsAllTableRecordsInSql()) {
+            return parent::getGroupedSelectableTableRecordKeys($group);
+        }
+
+        $query = $this->getSelectableTableRecordsQuery();
+
+        $this->getTableGrouping()->scopeQueryByKey($query, $group);
+
+        return $this->pluckSelectableTableRecordKeys($query);
+    }
+
+    protected function selectsAllTableRecordsInSql(): bool
+    {
+        $table = $this->getTable();
+
+        return $table->hasQuery()
+            && $table->checksIfRecordIsSelectable()
+            && (! $table->selectsCurrentPageOnly())
+            && method_exists(static::getResource(), 'scopeSelectableTableRecords');
+    }
+
+    protected function getSelectableTableRecordsQuery(): Builder
+    {
+        return static::getResource()::scopeSelectableTableRecords($this->getFilteredTableQuery());
+    }
+
+    /**
+     * @return array<string>
+     */
+    protected function pluckSelectableTableRecordKeys(Builder $query): array
+    {
+        return $query->toBase()
+            ->pluck($query->getModel()->getQualifiedKeyName())
+            ->map(fn (mixed $key): string => (string) $key)
+            ->all();
+    }
+
     public function getPresetTableViews(): array
     {
         return [

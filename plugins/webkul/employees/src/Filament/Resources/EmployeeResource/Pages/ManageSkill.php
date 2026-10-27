@@ -5,10 +5,12 @@ namespace Webkul\Employee\Filament\Resources\EmployeeResource\Pages;
 use Filament\Resources\Pages\ManageRelatedRecords;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
 use Webkul\Employee\Traits\Resources\Employee\EmployeeSkillRelation;
+use Webkul\Security\Filament\Concerns\OnlyForActiveCompanyRecords;
 
 class ManageSkill extends ManageRelatedRecords
 {
     use EmployeeSkillRelation;
+    use OnlyForActiveCompanyRecords;
 
     protected static string $resource = EmployeeResource::class;
 

@@ -15,7 +15,7 @@ class ViewDepartment extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
+        return DepartmentResource::actionsForRecordCompany([
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getRecord()->activityPlans()),
@@ -27,6 +27,6 @@ class ViewDepartment extends ViewRecord
                         ->title(__('employees::filament/resources/department/pages/view-department.header-actions.delete.notification.title'))
                         ->body(__('employees::filament/resources/department/pages/view-department.header-actions.delete.notification.body')),
                 ),
-        ];
+        ], $this->getRecord());
     }
 }

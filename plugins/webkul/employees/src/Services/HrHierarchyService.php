@@ -9,6 +9,7 @@ use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
 use Webkul\Security\Models\Team;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * Bound as a scoped (per-request / per-job) service: visibleEmployeeIds() is
@@ -27,6 +28,21 @@ class HrHierarchyService
     public function visibleEmployeeIds(User $user, int $companyId): Collection
     {
         return $this->visibleEmployeeIdsCache[$user->getKey().':'.$companyId] ??= $this->resolveVisibleEmployeeIds($user, $companyId);
+    }
+
+    /**
+     * visibleEmployeeIds() over every company the user belongs to, for lists
+     * that let a multi-company user look across their companies.
+     *
+     * @return Collection<int, int>
+     */
+    public function visibleEmployeeIdsAcrossMemberships(User $user): Collection
+    {
+        return collect(CurrentCompany::membershipIds($user))
+            ->flatMap(fn (int $companyId): Collection => $this->visibleEmployeeIds($user, $companyId))
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
     }
 
     /** Forget remembered visibility (hierarchy data changed). */
@@ -173,7 +189,7 @@ class HrHierarchyService
 
     private function assertCompanyAccess(User $user, int $companyId): void
     {
-        if ((int) $user->default_company_id !== $companyId && ! $user->allowedCompanies()->whereKey($companyId)->exists()) {
+        if (! CurrentCompany::canAccess($companyId, $user)) {
             throw new RuntimeException('The user does not have access to this company.');
         }
     }

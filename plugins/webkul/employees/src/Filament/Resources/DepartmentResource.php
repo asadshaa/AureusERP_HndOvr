@@ -47,11 +47,14 @@ use Webkul\Employee\Filament\Resources\DepartmentResource\Pages\ManageEmployee;
 use Webkul\Employee\Filament\Resources\DepartmentResource\Pages\ViewDepartment;
 use Webkul\Employee\Models\Department;
 use Webkul\Field\Filament\Traits\HasCustomFields;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 
 class DepartmentResource extends Resource
 {
     use HasCustomFields;
+    use ScopedToMemberCompanies;
 
     protected static ?string $model = Department::class;
 
@@ -213,6 +216,7 @@ class DepartmentResource extends Resource
             ])
             ->filtersFormColumns(2)
             ->filters(static::mergeCustomTableFilters([
+                static::companyFilter(),
                 QueryBuilder::make()
                     ->constraintPickerColumns(2)
                     ->constraints([
@@ -238,6 +242,7 @@ class DepartmentResource extends Resource
                             ->selectable(
                                 IsRelatedToOperator::make()
                                     ->titleAttribute('name')
+                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereKey(CurrentCompany::membershipIds()))
                                     ->label(__('employees::filament/resources/department.table.filters.company-name'))
                                     ->searchable()
                                     ->multiple()
@@ -251,7 +256,8 @@ class DepartmentResource extends Resource
             ]))
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()
+                    ->authorizationTooltip(static::switchCompanyTooltip()),
                 DeleteAction::make()
                     ->successNotification(
                         Notification::make()
@@ -301,11 +307,6 @@ class DepartmentResource extends Resource
                         ),
                 ]),
             ]);
-    }
-
-    public static function getEloquentQuery(): Builder
-    {
-        return parent::getEloquentQuery()->where('company_id', Auth::user()?->default_company_id);
     }
 
     public static function infolist(Schema $schema): Schema

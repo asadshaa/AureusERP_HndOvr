@@ -21,7 +21,7 @@ class ViewCandidate extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
+        return CandidateResource::actionsForRecordCompany([
             Action::make('gotoEmployee')
                 ->tooltip(__('recruitments::filament/clusters/applications/resources/candidate/pages/view-candidate.goto-employee-tooltip'))
                 ->visible(fn ($record) => $record->employee_id)
@@ -44,6 +44,6 @@ class ViewCandidate extends ViewRecord
                         ->title(__('recruitments::filament/clusters/applications/resources/candidate/pages/view-candidate.header-actions.delete.notification.title'))
                         ->body(__('recruitments::filament/clusters/applications/resources/candidate/pages/view-candidate.header-actions.delete.notification.body'))
                 ),
-        ];
+        ], $this->getRecord(), ['downloadCv']);
     }
 }

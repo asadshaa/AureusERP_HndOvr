@@ -57,11 +57,15 @@ use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionRes
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobQuestionsRelationManager;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
 use Webkul\Security\Filament\Resources\CompanyResource;
 use Webkul\Security\Filament\Resources\UserResource;
+use Webkul\Security\Services\CurrentCompany;
 
 class JobPositionResource extends Resource
 {
+    use ScopedToMemberCompanies;
+
     protected static ?string $model = JobPosition::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-briefcase';
@@ -363,13 +367,12 @@ class JobPositionResource extends Resource
                     ->label('Ads need action')
                     ->query(fn (Builder $query): Builder => $query->whereHas('postings', fn (Builder $postings): Builder => $postings->whereIn('status', ChannelPostingStatus::needingActionValues()))),
                 SelectFilter::make('department')
-                    ->relationship('department', 'name')
+                    ->relationship('department', 'name', modifyQueryUsing: fn (Builder $query): Builder => CurrentCompany::scopeMemberships($query))
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.filters.department')),
                 SelectFilter::make('employmentType')
                     ->relationship('employmentType', 'name')
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.filters.employment-type')),
-                SelectFilter::make('company')
-                    ->relationship('company', 'name')
+                static::companyFilter()
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.filters.company')),
                 TernaryFilter::make('is_active')
                     ->label(__('recruitments::filament/clusters/configurations/resources/job-position.table.filters.status')),
@@ -456,7 +459,8 @@ class JobPositionResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()
+                    ->authorizationTooltip(static::switchCompanyTooltip()),
                 DeleteAction::make()
                     ->failureNotificationTitle('This job has ads that may still be up. Close it and confirm the ads are taken down first.')
                     ->successNotification(
@@ -644,11 +648,5 @@ class JobPositionResource extends Resource
             JobPostingsRelationManager::class,
             JobQuestionsRelationManager::class,
         ];
-    }
-
-    public static function getEloquentQuery(): Builder
-    {
-        return parent::getEloquentQuery()
-            ->where('company_id', Auth::user()?->default_company_id);
     }
 }

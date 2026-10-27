@@ -118,6 +118,38 @@ class InvoiceResource extends Resource
         ];
     }
 
+    /**
+     * Eager-load the partner shown in getGlobalSearchResultDetails() and keep
+     * results newest first now that getEloquentQuery() no longer orders.
+     */
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        $query = parent::getGlobalSearchEloquentQuery();
+
+        return $query
+            ->with('partner:id,name')
+            ->orderByDesc($query->getModel()->getQualifiedKeyName());
+    }
+
+    /**
+     * SQL equivalent of the table's checkIfRecordIsSelectableUsing() callback,
+     * so "select all" can count and collect keys without hydrating every
+     * record. The delete policy only checks a permission (it never inspects
+     * the record), so evaluating it once against the query's model is exact.
+     * Keep this in sync with the callback in table().
+     */
+    public static function scopeSelectableTableRecords(Builder $query): Builder
+    {
+        if (! static::can('delete', $query->getModel())) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $query): void {
+            $query->whereNull($query->qualifyColumn('state'))
+                ->orWhere($query->qualifyColumn('state'), '!=', MoveState::POSTED);
+        });
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema
@@ -528,7 +560,6 @@ class InvoiceResource extends Resource
                     ->sortable(),
                 TextColumn::make('amount_untaxed_in_currency_signed')
                     ->label(__('accounts::filament/resources/invoice.table.columns.tax-excluded'))
-                    ->searchable()
                     ->placeholder('-')
                     ->sortable()
                     ->money(fn ($record) => $record->currency?->name)
@@ -536,7 +567,6 @@ class InvoiceResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: false),
                 TextColumn::make('amount_tax_signed')
                     ->label(__('accounts::filament/resources/invoice.table.columns.tax'))
-                    ->searchable()
                     ->placeholder('-')
                     ->sortable()
                     ->money(fn ($record) => $record->currency?->name)
@@ -544,7 +574,6 @@ class InvoiceResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: false),
                 TextColumn::make('amount_total_in_currency_signed')
                     ->label(__('accounts::filament/resources/invoice.table.columns.total'))
-                    ->searchable()
                     ->placeholder('-')
                     ->sortable()
                     ->summarize(Sum::make()->label(__('accounts::filament/resources/invoice.table.total')))
@@ -552,7 +581,6 @@ class InvoiceResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: false),
                 TextColumn::make('amount_residual_signed')
                     ->label(__('accounts::filament/resources/invoice.table.columns.amount-due'))
-                    ->searchable()
                     ->placeholder('-')
                     ->sortable()
                     ->summarize(Sum::make()->label(__('accounts::filament/resources/invoice.table.summarizers.total')))
@@ -565,7 +593,6 @@ class InvoiceResource extends Resource
                     ->icon(fn (PaymentState $state) => $state->getIcon())
                     ->formatStateUsing(fn (PaymentState $state) => $state->getLabel())
                     ->badge()
-                    ->searchable()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: false),
                 IconColumn::make('checked')
@@ -579,7 +606,6 @@ class InvoiceResource extends Resource
                     ->date()
                     ->placeholder('-')
                     ->label(__('accounts::filament/resources/invoice.table.columns.accounting-date'))
-                    ->searchable()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('invoice_origin')
@@ -1816,8 +1842,7 @@ class InvoiceResource extends Resource
             ->where('company_id', Auth::user()?->default_company_id)
             ->when(Str::contains(static::class, 'InvoiceResource'), function (Builder $query) {
                 $query->where('move_type', MoveType::OUT_INVOICE);
-            })
-            ->orderByDesc('id');
+            });
     }
 
     protected static function disableTypeField($component): void

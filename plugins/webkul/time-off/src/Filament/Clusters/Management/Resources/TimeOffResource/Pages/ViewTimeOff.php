@@ -24,7 +24,7 @@ class ViewTimeOff extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
+        return TimeOffResource::actionsForRecordCompany([
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getRecord()->activityPlans()),
@@ -36,6 +36,6 @@ class ViewTimeOff extends ViewRecord
                         ->title(__('time-off::filament/clusters/management/resources/time-off/pages/view-time-off.header-actions.delete.notification.title'))
                         ->body(__('time-off::filament/clusters/management/resources/time-off/pages/view-time-off.header-actions.delete.notification.body'))
                 ),
-        ];
+        ], $this->getRecord());
     }
 }

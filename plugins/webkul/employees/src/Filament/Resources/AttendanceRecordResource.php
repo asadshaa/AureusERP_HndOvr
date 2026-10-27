@@ -42,10 +42,15 @@ use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
+use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 
 class AttendanceRecordResource extends Resource
 {
+    use ScopedToMemberCompanies;
+
     protected static ?string $model = AttendanceRecord::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-clock';
@@ -254,15 +259,10 @@ class AttendanceRecordResource extends Resource
                 ->formatStateUsing(fn (?string $state): ?string => AttendanceVerificationStatus::tryFrom((string) $state)?->getLabel())
                 ->color(fn (?string $state): ?string => AttendanceVerificationStatus::tryFrom((string) $state)?->getColor()),
         ])->filters([
+            static::companyFilter(),
             SelectFilter::make('employee_id')
                 ->label('Employee')
-                ->relationship('employee', 'name', modifyQueryUsing: function (Builder $query): Builder {
-                    $user = Auth::user();
-                    $companyId = (int) $user?->default_company_id;
-                    $visible = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
-
-                    return $query->where('company_id', $companyId)->whereIn('id', $visible);
-                })
+                ->relationship('employee', 'name', modifyQueryUsing: fn (Builder $query): Builder => self::listableEmployees($query))
                 ->searchable()
                 ->preload(),
             SelectFilter::make('status')->options([
@@ -293,7 +293,7 @@ class AttendanceRecordResource extends Resource
                 ->label('Approve')
                 ->icon('heroicon-o-check-circle')
                 ->color('success')
-                ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record))
+                ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record) && static::isActiveCompanyRecord($record))
                 ->schema([Textarea::make('note')->label('Review note')->required()])
                 ->action(fn (AttendanceRecord $record, array $data) => self::attempt(
                     fn () => app(GeofencedAttendanceService::class)->reviewVerification($record, Auth::user(), true, (string) $data['note']),
@@ -303,7 +303,7 @@ class AttendanceRecordResource extends Resource
                 ->label('Reject')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record))
+                ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record) && static::isActiveCompanyRecord($record))
                 ->schema([Textarea::make('note')->label('Review note')->required()])
                 ->action(fn (AttendanceRecord $record, array $data) => self::attempt(
                     fn () => app(GeofencedAttendanceService::class)->reviewVerification($record, Auth::user(), false, (string) $data['note']),
@@ -313,8 +313,9 @@ class AttendanceRecordResource extends Resource
                 ->label('Request Time Change')
                 ->icon('heroicon-o-clock')
                 ->color('warning')
-                ->visible(fn (AttendanceRecord $record): bool => (int) $record->employee?->user_id === (int) Auth::id()
-                    || (bool) Auth::user()?->can(HrPermissions::ManageAttendance))
+                ->visible(fn (AttendanceRecord $record): bool => static::isActiveCompanyRecord($record)
+                    && ((int) $record->employee?->user_id === (int) Auth::id()
+                        || (bool) Auth::user()?->can(HrPermissions::ManageAttendance)))
                 ->schema([
                     DateTimePicker::make('requested_check_in')->seconds(false)
                         ->default(fn (AttendanceRecord $record) => $record->check_in),
@@ -342,6 +343,7 @@ class AttendanceRecordResource extends Resource
                 }),
             EditAction::make()
                 ->visible(fn (AttendanceRecord $record): bool => ! self::isOwnEvidenceBacked($record))
+                ->authorizationTooltip(static::switchCompanyTooltip())
                 ->using(function (AttendanceRecord $record, array $data, EditAction $action): AttendanceRecord {
                     try {
                         return self::applyEdit($record, $data);
@@ -360,6 +362,7 @@ class AttendanceRecordResource extends Resource
                 ->icon('heroicon-o-trash')
                 ->color('danger')
                 ->visible(fn (AttendanceRecord $record): bool => self::isEvidenceBacked($record)
+                    && static::isActiveCompanyRecord($record)
                     && ! self::isOwnEvidenceBacked($record)
                     && (bool) Auth::user()?->can(HrPermissions::ManageAttendance))
                 ->requiresConfirmation()
@@ -416,17 +419,9 @@ class AttendanceRecordResource extends Resource
                         Select::make('employee_id')
                             ->label('Employee')
                             ->placeholder('All Employees (or select specific)')
-                            ->options(function () {
-                                $user = Auth::user();
-                                $companyId = (int) $user?->default_company_id;
-                                $visible = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
-
-                                return Employee::query()
-                                    ->where('company_id', $companyId)
-                                    ->whereIn('id', $visible)
-                                    ->orderBy('name')
-                                    ->pluck('name', 'id');
-                            })
+                            ->options(fn () => self::listableEmployees(Employee::query())
+                                ->orderBy('name')
+                                ->pluck('name', 'id'))
                             ->searchable()
                             ->preload(),
                         DatePicker::make('from_date')
@@ -543,7 +538,7 @@ class AttendanceRecordResource extends Resource
                             $skippedCount = 0;
 
                             foreach ($records as $record) {
-                                if (! self::canReviewRecord($record)) {
+                                if (! self::canReviewRecord($record) || ! static::isActiveCompanyRecord($record)) {
                                     $skippedCount++;
 
                                     continue;
@@ -589,7 +584,7 @@ class AttendanceRecordResource extends Resource
                             $skippedCount = 0;
 
                             foreach ($records as $record) {
-                                if (! self::canReviewRecord($record)) {
+                                if (! self::canReviewRecord($record) || ! static::isActiveCompanyRecord($record)) {
                                     $skippedCount++;
 
                                     continue;
@@ -627,17 +622,26 @@ class AttendanceRecordResource extends Resource
      * every employee's attendance records. Attendance is personal data;
      * scope to the requesting user's HR hierarchy, same as the other
      * employee-data lists. Users granted hr_view_all_records still see
-     * everything, via HrHierarchyService's own bypass.
+     * everything, via HrHierarchyService's own bypass. A multi-company user
+     * sees each of their companies this way; the Company filter starts on
+     * the active one.
      */
     public static function getEloquentQuery(): Builder
     {
         $user = Auth::user();
-        $companyId = (int) $user?->default_company_id;
-        $visible = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
+        $visible = $user instanceof User ? app(HrHierarchyService::class)->visibleEmployeeIdsAcrossMemberships($user) : collect();
 
-        return parent::getEloquentQuery()
-            ->where('company_id', $companyId)
+        return CurrentCompany::scopeMemberships(parent::getEloquentQuery())
             ->whereIn('employee_id', $visible);
+    }
+
+    /** Employees whose attendance the list may show (the Employee filter and export pickers follow the list). */
+    private static function listableEmployees(Builder $query): Builder
+    {
+        $user = Auth::user();
+        $visible = $user instanceof User ? app(HrHierarchyService::class)->visibleEmployeeIdsAcrossMemberships($user) : collect();
+
+        return CurrentCompany::scopeMemberships($query)->whereIn($query->qualifyColumn('id'), $visible);
     }
 
     public static function canViewAny(): bool
@@ -654,12 +658,12 @@ class AttendanceRecordResource extends Resource
 
     public static function canEdit(Model $record): bool
     {
-        return (bool) Auth::user()?->can(HrPermissions::ManageAttendance);
+        return static::isActiveCompanyRecord($record) && (bool) Auth::user()?->can(HrPermissions::ManageAttendance);
     }
 
     public static function canDelete(Model $record): bool
     {
-        return (bool) Auth::user()?->can(HrPermissions::ManageAttendance);
+        return static::isActiveCompanyRecord($record) && (bool) Auth::user()?->can(HrPermissions::ManageAttendance);
     }
 
     public static function getPages(): array

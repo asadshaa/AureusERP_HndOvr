@@ -85,6 +85,7 @@ use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Field\Filament\Traits\HasCustomFields;
 use Webkul\Security\Enums\PermissionType;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
@@ -96,6 +97,7 @@ use Webkul\Support\Services\ApprovalEngine;
 class EmployeeResource extends Resource
 {
     use HasCustomFields;
+    use ScopedToMemberCompanies;
 
     protected static ?string $model = Employee::class;
 
@@ -1026,6 +1028,7 @@ class EmployeeResource extends Resource
             ])
             ->filtersFormColumns(3)
             ->filters([
+                static::companyFilter(),
                 SelectFilter::make('skills')
                     ->relationship('skills.skill', 'name')
                     ->searchable()
@@ -1430,13 +1433,16 @@ class EmployeeResource extends Resource
             ->persistSortInSession()
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()
+                    ->authorizationTooltip(static::switchCompanyTooltip()),
                 ActionGroup::make([
-                    ActivityTableAction::make(),
+                    ActivityTableAction::make()
+                        ->visible(fn (Employee $record): bool => static::isActiveCompanyRecord($record)),
                     Action::make('request_sensitive_change')
                         ->label('Request sensitive change')
                         ->icon('heroicon-o-shield-check')
-                        ->visible(fn (): bool => Auth::user()?->can('hr_manage_sensitive_employee_data') ?? false)
+                        ->visible(fn (Employee $record): bool => static::isActiveCompanyRecord($record)
+                            && (Auth::user()?->can('hr_manage_sensitive_employee_data') ?? false))
                         ->fillForm(fn (Employee $record): array => [
                             'identification_id'  => $record->identification_id,
                             'passport_id'        => $record->passport_id,
@@ -1492,7 +1498,7 @@ class EmployeeResource extends Resource
                             // one at a time. Re-check per record so bulk delete is never more
                             // permissive than deleting the same record individually would be.
                             $selectedCount = $records->count();
-                            $authorized = $records->filter(fn (Model $record) => Auth::user()?->can('delete', $record));
+                            $authorized = $records->filter(fn (Model $record) => static::canDelete($record));
                             $skipped = $selectedCount - $authorized->count();
 
                             try {
@@ -1519,7 +1525,7 @@ class EmployeeResource extends Resource
                         ->action(function (Collection $records) {
                             // Same per-record re-check as DeleteBulkAction above, for forceDelete().
                             $selectedCount = $records->count();
-                            $authorized = $records->filter(fn (Model $record) => Auth::user()?->can('forceDelete', $record));
+                            $authorized = $records->filter(fn (Model $record) => static::canForceDelete($record));
                             $skipped = $selectedCount - $authorized->count();
 
                             try {
@@ -1547,17 +1553,19 @@ class EmployeeResource extends Resource
             ->modifyQueryUsing(fn (Builder $query) => $query->with(['categories']));
     }
 
+    /**
+     * Employees of every company the user belongs to that their HR hierarchy
+     * lets them see; the Company filter starts on the active company.
+     */
     public static function getEloquentQuery(): Builder
     {
         $user = Auth::user();
-        $companyId = (int) CurrentCompany::id();
-        if (! $user || $companyId <= 0) {
+        if (! $user instanceof User || CurrentCompany::id() === null) {
             return parent::getEloquentQuery()->whereRaw('1 = 0');
         }
 
-        return parent::getEloquentQuery()
-            ->where('company_id', $companyId)
-            ->whereIn('id', app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId));
+        return CurrentCompany::scopeMemberships(parent::getEloquentQuery())
+            ->whereIn('id', app(HrHierarchyService::class)->visibleEmployeeIdsAcrossMemberships($user));
     }
 
     public static function infolist(Schema $schema): Schema

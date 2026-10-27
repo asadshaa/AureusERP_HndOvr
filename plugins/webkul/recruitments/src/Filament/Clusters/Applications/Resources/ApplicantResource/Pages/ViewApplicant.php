@@ -33,7 +33,7 @@ class ViewApplicant extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
+        return ApplicantResource::actionsForRecordCompany([
             ...$this->getScreeningActions(),
             Action::make('state')
                 ->hiddenLabel()
@@ -173,7 +173,7 @@ class ViewApplicant extends ViewRecord
                         ->send();
                 }),
 
-        ];
+        ], $this->getRecord());
     }
 
     private function prepareApplicantRefuseNotificationPayload(array $data): array

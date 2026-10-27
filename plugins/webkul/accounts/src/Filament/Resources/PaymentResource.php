@@ -73,6 +73,19 @@ class PaymentResource extends Resource
         ];
     }
 
+    /**
+     * Eager-load the partner shown in getGlobalSearchResultDetails() and keep
+     * results newest first now that getEloquentQuery() no longer orders.
+     */
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        $query = parent::getGlobalSearchEloquentQuery();
+
+        return $query
+            ->with('partner:id,name')
+            ->orderByDesc($query->getModel()->getQualifiedKeyName());
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema
@@ -632,7 +645,6 @@ class PaymentResource extends Resource
         return parent::getEloquentQuery()
             // Company isolation: without this, one company's payments show up in
             // every other company's list.
-            ->where('company_id', Auth::user()?->default_company_id)
-            ->orderByDesc('id');
+            ->where('company_id', Auth::user()?->default_company_id);
     }
 }

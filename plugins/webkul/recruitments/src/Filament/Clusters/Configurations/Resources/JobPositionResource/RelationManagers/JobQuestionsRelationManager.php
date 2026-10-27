@@ -21,6 +21,7 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobQuestion;
 use Webkul\Recruitment\Models\ScreeningQuestion;
 use Webkul\Recruitment\Services\ScreeningService;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * "Screening questions" tab on a job: the questions applicants answer for this
@@ -103,9 +104,11 @@ class JobQuestionsRelationManager extends RelationManager
             ]);
     }
 
+    /** Another member company's job is view-only (switch company to change its questions). */
     protected function canManage(): bool
     {
-        return ScreeningService::canManageQuestions(Auth::user(), $this->job()->company_id);
+        return (int) $this->job()->company_id === CurrentCompany::id()
+            && ScreeningService::canManageQuestions(Auth::user(), $this->job()->company_id);
     }
 
     protected function job(): JobPosition

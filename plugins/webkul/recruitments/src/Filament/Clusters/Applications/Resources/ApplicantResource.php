@@ -70,10 +70,13 @@ use Webkul\Recruitment\Models\Stage as RecruitmentStage;
 use Webkul\Recruitment\Services\CandidateConversionService;
 use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
 use Webkul\Security\Filament\Resources\UserResource;
 
 class ApplicantResource extends Resource
 {
+    use ScopedToMemberCompanies;
+
     protected static ?string $model = Applicant::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-user-group';
@@ -636,6 +639,7 @@ class ApplicantResource extends Resource
                     ->collapsible(),
             ])
             ->filters([
+                static::companyFilter(),
                 SelectFilter::make('screening_status')
                     ->label('Screening')
                     ->options(ScreeningStatus::options()),
@@ -725,14 +729,16 @@ class ApplicantResource extends Resource
             ->filtersFormColumns(2)
             ->filtersLayout(FiltersLayout::Dropdown)
             ->recordActions([
-                ActivityTableAction::make(),
+                ActivityTableAction::make()
+                    ->visible(fn (Applicant $record): bool => static::isActiveCompanyRecord($record)),
                 ActionGroup::make([
                     Action::make('convert_to_employee')
                         ->label('Convert to employee')
                         ->icon('heroicon-o-user-plus')
                         ->color('success')
                         ->requiresConfirmation()
-                        ->visible(fn (Applicant $record): bool => $record->candidate?->employee_id === null
+                        ->visible(fn (Applicant $record): bool => static::isActiveCompanyRecord($record)
+                            && $record->candidate?->employee_id === null
                             && $record->refuse_reason_id === null
                             && (Auth::user()?->can(HrPermissions::ConvertCandidates) ?? false))
                         ->action(function (Applicant $record): void {
@@ -786,11 +792,6 @@ class ApplicantResource extends Resource
                         ->orWhereNull('state');
                 });
             });
-    }
-
-    public static function getEloquentQuery(): Builder
-    {
-        return parent::getEloquentQuery()->where('company_id', Auth::user()?->default_company_id);
     }
 
     public static function infolist(Schema $schema): Schema

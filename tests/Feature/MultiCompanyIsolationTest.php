@@ -15,6 +15,7 @@ use Livewire\Livewire;
 use Spatie\Permission\PermissionRegistrar;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
+use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ListEmployees;
 use Webkul\Employee\Models\Employee;
 use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Filament\Resources\UserResource;
@@ -123,18 +124,22 @@ it('switches company through the topbar endpoint only to the user\'s own compani
     expect($user->refresh()->default_company_id)->toBe($this->openPort->id);
 });
 
-it('lists only the active company\'s employees', function () {
-    $hr = companyMember($this->shipLine, [$this->openPort], 'hr_view_all_records');
+it('lists the active company\'s employees by default, and never a non-member company\'s', function () {
+    Filament::setCurrentPanel('admin');
+    $hr = companyMember($this->shipLine, [$this->openPort], 'hr_view_all_records', 'view_any_employee_employee', 'view_employee_employee');
     $ours = companyEmployee($this->shipLine);
     $theirs = companyEmployee($this->openPort);
+    $stranger = companyEmployee(Company::factory()->create(['is_active' => true]));
     Auth::login($hr);
 
-    expect(EmployeeResource::getEloquentQuery()->pluck('id')->all())->toContain($ours->id)->not->toContain($theirs->id);
+    // Batch 3: the base query covers every member company; the Company filter starts on the active one.
+    expect(EmployeeResource::getEloquentQuery()->pluck('id')->all())->toContain($ours->id, $theirs->id)->not->toContain($stranger->id);
+    Livewire::test(ListEmployees::class)->assertCanSeeTableRecords([$ours])->assertCanNotSeeTableRecords([$theirs, $stranger]);
 
     CurrentCompany::switchTo($this->openPort->id, $hr);
     Auth::login($hr->refresh());
 
-    expect(EmployeeResource::getEloquentQuery()->pluck('id')->all())->toContain($theirs->id)->not->toContain($ours->id);
+    Livewire::test(ListEmployees::class)->assertCanSeeTableRecords([$theirs])->assertCanNotSeeTableRecords([$ours, $stranger]);
 });
 
 it('lists only the active company\'s users', function () {

@@ -5,11 +5,13 @@ namespace Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateR
 use Filament\Resources\Pages\ManageRelatedRecords;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource;
 use Webkul\Recruitment\Traits\CandidateSkillRelation;
+use Webkul\Security\Filament\Concerns\OnlyForActiveCompanyRecords;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 
 class ManageSkill extends ManageRelatedRecords
 {
     use CandidateSkillRelation, HasRecordNavigationTabs;
+    use OnlyForActiveCompanyRecords;
 
     protected static string $resource = CandidateResource::class;
 

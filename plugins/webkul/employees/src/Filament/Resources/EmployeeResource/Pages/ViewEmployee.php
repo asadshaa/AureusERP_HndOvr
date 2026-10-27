@@ -15,7 +15,7 @@ class ViewEmployee extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
+        return EmployeeResource::actionsForRecordCompany([
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getActivityPlans()),
@@ -26,7 +26,7 @@ class ViewEmployee extends ViewRecord
                         ->title(__('employees::filament/resources/employee/pages/view-employee.header-actions.delete.notification.title'))
                         ->body(__('employees::filament/resources/employee/pages/view-employee.header-actions.delete.notification.body')),
                 ),
-        ];
+        ], $this->getRecord());
     }
 
     private function getActivityPlans(): mixed

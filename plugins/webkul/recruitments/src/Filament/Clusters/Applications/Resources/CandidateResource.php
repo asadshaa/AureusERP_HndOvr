@@ -49,9 +49,13 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\CandidateResource\RelationManagers\SkillsRelationManager;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
+use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
+use Webkul\Security\Services\CurrentCompany;
 
 class CandidateResource extends Resource
 {
+    use ScopedToMemberCompanies;
+
     protected static ?string $model = Candidate::class;
 
     /** CVs live on the private disk and are only handed out through downloadCvAction(). */
@@ -282,6 +286,7 @@ class CandidateResource extends Resource
             ])
             ->filtersFormColumns(2)
             ->filters([
+                static::companyFilter(),
                 QueryBuilder::make()
                     ->constraintPickerColumns(1)
                     ->constraints([
@@ -292,6 +297,7 @@ class CandidateResource extends Resource
                             ->selectable(
                                 IsRelatedToOperator::make()
                                     ->titleAttribute('name')
+                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereKey(CurrentCompany::membershipIds()))
                                     ->searchable()
                                     ->multiple()
                                     ->preload(),
@@ -337,9 +343,11 @@ class CandidateResource extends Resource
                     ->collapsible(),
             ])
             ->recordActions([
-                ActivityTableAction::make(),
+                ActivityTableAction::make()
+                    ->visible(fn (Candidate $record): bool => static::isActiveCompanyRecord($record)),
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()
+                    ->authorizationTooltip(static::switchCompanyTooltip()),
                 DeleteAction::make()
                     ->successNotification(
                         Notification::make()
@@ -370,11 +378,6 @@ class CandidateResource extends Resource
                     ),
             ])
             ->defaultSort('created_at', 'desc');
-    }
-
-    public static function getEloquentQuery(): Builder
-    {
-        return parent::getEloquentQuery()->where('company_id', Auth::user()?->default_company_id);
     }
 
     public static function infolist(Schema $schema): Schema

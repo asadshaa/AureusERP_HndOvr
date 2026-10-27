@@ -152,7 +152,7 @@ class Candidate extends Model
     private function handlePartnerCreation(self $candidate)
     {
         $partner = $candidate->partner()->create([
-            'creator_id' => Auth::user()->id ?? $candidate->id,
+            'creator_id' => Auth::id() ?? $candidate->creator_id,
             'sub_type'   => 'partner',
             'company_id' => $candidate->company_id,
             'phone'      => $candidate->phone,
@@ -169,7 +169,7 @@ class Candidate extends Model
         $partner = Partner::updateOrCreate(
             ['id' => $candidate->partner_id],
             [
-                'creator_id' => Auth::user()->id ?? $candidate->id,
+                'creator_id' => Auth::id() ?? $candidate->creator_id,
                 'sub_type'   => 'partner',
                 'company_id' => $candidate->company_id,
                 'phone'      => $candidate->phone,

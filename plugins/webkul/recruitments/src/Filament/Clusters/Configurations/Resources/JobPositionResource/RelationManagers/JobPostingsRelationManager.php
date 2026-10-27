@@ -35,6 +35,7 @@ use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Recruitment\Services\JobPostingService;
 use Webkul\Recruitment\Support\JobPostingChannel;
 use Webkul\Recruitment\Support\JobPostingText;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * "Job ads" tab on a job opening: the channels the job is advertised on and,
@@ -240,7 +241,7 @@ class JobPostingsRelationManager extends RelationManager
                 in_array($record->status, [ChannelPostingStatus::TO_POST, ChannelPostingStatus::FAILED, ChannelPostingStatus::LIVE], true)
                 || ($record->status === ChannelPostingStatus::REMOVAL_PENDING && $this->job()->postingStatus() === JobPostingStatus::PUBLISHED)
             ))
-            ->authorize(fn (JobPosting $record): bool => Gate::allows('update', $record))
+            ->authorize(fn (JobPosting $record): bool => $this->canUpdatePosting($record))
             ->fillForm(fn (JobPosting $record): array => ['live_url' => $record->live_url, 'posted_at' => $record->posted_at ?? now()])
             ->schema(fn (JobPosting $record): array => [
                 TextInput::make('live_url')
@@ -281,7 +282,7 @@ class JobPostingsRelationManager extends RelationManager
             ->icon('heroicon-o-exclamation-triangle')
             ->color('warning')
             ->visible(fn (JobPosting $record): bool => $record->isManual() && $record->status === ChannelPostingStatus::TO_POST)
-            ->authorize(fn (JobPosting $record): bool => Gate::allows('update', $record))
+            ->authorize(fn (JobPosting $record): bool => $this->canUpdatePosting($record))
             ->schema([
                 Textarea::make('message')->label('What went wrong?')->required()->maxLength(1000),
             ])
@@ -301,7 +302,7 @@ class JobPostingsRelationManager extends RelationManager
                 && $record->posted_at === null
                 && $record->dropped_at === null
                 && $this->job()->postingStatus() === JobPostingStatus::CLOSED)
-            ->authorize(fn (JobPosting $record): bool => Gate::allows('update', $record))
+            ->authorize(fn (JobPosting $record): bool => $this->canUpdatePosting($record))
             ->schema([
                 TextInput::make('live_url')->label('Link to the ad (optional)')->url()->maxLength(2048),
             ])
@@ -347,7 +348,7 @@ class JobPostingsRelationManager extends RelationManager
             ->label($label)
             ->icon($icon)
             ->visible($visible)
-            ->authorize(fn (JobPosting $record): bool => Gate::allows('update', $record))
+            ->authorize(fn (JobPosting $record): bool => $this->canUpdatePosting($record))
             ->action(function (JobPosting $record) use ($method, $label): void {
                 $this->run(fn () => app(JobPostingService::class)->{$method}($record, Auth::user()), $label.': done');
             });
@@ -421,9 +422,20 @@ class JobPostingsRelationManager extends RelationManager
         return $this->postTexts[$record->getKey()] ??= app(JobPostingService::class)->postText($record, Auth::user());
     }
 
+    /** Ads of another member company's job are view-only (switch company to change them). */
     protected function canManage(): bool
     {
-        return (bool) Auth::user()?->can('create', [JobPosting::class, $this->job()]);
+        return $this->isActiveCompanyJob() && (bool) Auth::user()?->can('create', [JobPosting::class, $this->job()]);
+    }
+
+    protected function canUpdatePosting(JobPosting $record): bool
+    {
+        return $this->isActiveCompanyJob() && Gate::allows('update', $record);
+    }
+
+    protected function isActiveCompanyJob(): bool
+    {
+        return (int) $this->job()->company_id === CurrentCompany::id();
     }
 
     protected function job(): JobPosition
