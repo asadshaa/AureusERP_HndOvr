@@ -4,14 +4,21 @@ namespace Webkul\Recruitment\Services;
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Webkul\Recruitment\Enums\ChannelPostingStatus;
+use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
+use Webkul\Recruitment\Models\WebsiteConnection;
+use Webkul\Recruitment\Services\Website\CompanyWebsitePublisher;
 use Webkul\Support\Models\UTMSource;
 
 /**
  * Tracked apply links: every job ad gets an unguessable token so the CV it
- * brings in is attributed to that ad. Until the Stage 3 careers route exists
- * and Aureus is reachable over public HTTPS, links are generated but reported
- * as not live, so they never end up in ad text.
+ * brings in is attributed to that ad. When the ad's company has its careers
+ * website connected and the job is live there, the link is the website job
+ * page with "?ref={token}" (automation plan §6 A3). Otherwise it points at the
+ * Aureus careers route, which only counts as live once that route exists and
+ * Aureus is reachable over public HTTPS. A link that is not live is never put
+ * into ad text (localhost, private and .test hosts never count).
  */
 class JobPostingLinks
 {
@@ -37,6 +44,12 @@ class JobPostingLinks
      */
     public function applyUrl(JobPosting $posting): string
     {
+        $websiteUrl = $this->websiteJobUrl($posting);
+
+        if ($websiteUrl !== null) {
+            return $this->withRef($websiteUrl, (string) $posting->token);
+        }
+
         $path = Route::has(self::APPLY_ROUTE)
             ? route(self::APPLY_ROUTE, ['token' => $posting->token], absolute: false)
             : str_replace('{token}', (string) $posting->token, (string) config('recruitment.careers.apply_path'));
@@ -44,14 +57,56 @@ class JobPostingLinks
         return $this->baseUrl().'/'.ltrim($path, '/');
     }
 
-    /** Links can be handed to candidates: the careers route exists and the base URL is public HTTPS. */
-    public function linksAreLive(): bool
+    /**
+     * Links can be handed to candidates: for an ad whose job is live on its
+     * company website, when that page is public HTTPS; otherwise when the
+     * Aureus careers route exists and the base URL is public HTTPS.
+     */
+    public function linksAreLive(?JobPosting $posting = null): bool
     {
+        $websiteUrl = $posting ? $this->websiteJobUrl($posting) : null;
+
+        if ($websiteUrl !== null) {
+            return $this->isPublicHttps($websiteUrl);
+        }
+
         if (! Route::has(self::APPLY_ROUTE)) {
             return false;
         }
 
-        $parts = parse_url($this->baseUrl());
+        return $this->isPublicHttps($this->baseUrl());
+    }
+
+    /**
+     * The job's page on its company website, when the company's connection is
+     * switched on and the job's "Company website" ad is live with its address.
+     */
+    public function websiteJobUrl(JobPosting $posting): ?string
+    {
+        if (! $posting->company_id || ! WebsiteConnection::activeFor((int) $posting->company_id)) {
+            return null;
+        }
+
+        $website = $posting->channel === CompanyWebsitePublisher::CHANNEL && (string) $posting->placement_key === ''
+            ? $posting
+            : JobPosting::query()
+                ->where('job_id', $posting->job_id)
+                ->where('company_id', $posting->company_id)
+                ->where('channel', CompanyWebsitePublisher::CHANNEL)
+                ->where('placement_key', '')
+                ->first();
+
+        if (! $website || $website->dropped_at !== null || $website->status !== ChannelPostingStatus::LIVE || blank($website->live_url)) {
+            return null;
+        }
+
+        return (string) $website->live_url;
+    }
+
+    /** Public HTTPS: never localhost, a private or reserved IP, or a .localhost/.test/.local/.internal name. */
+    public function isPublicHttps(string $url): bool
+    {
+        $parts = parse_url($url);
         $host = strtolower((string) ($parts['host'] ?? ''));
 
         if (($parts['scheme'] ?? null) !== 'https' || $host === '') {
@@ -75,13 +130,28 @@ class JobPostingLinks
         return true;
     }
 
-    public function notLiveReason(): ?string
+    public function notLiveReason(?JobPosition $job = null): ?string
     {
+        if ($job && $job->company_id && WebsiteConnection::activeFor((int) $job->company_id)) {
+            $website = JobPosting::query()
+                ->where('job_id', $job->getKey())
+                ->where('channel', CompanyWebsitePublisher::CHANNEL)
+                ->where('placement_key', '')
+                ->first();
+            $url = $website ? $this->websiteJobUrl($website) : null;
+
+            if ($url === null) {
+                return 'Apply links become active once this job is live on the company website: add the "Company website" channel and publish the job.';
+            }
+
+            return $this->isPublicHttps($url) ? null : "Apply links are not active: the website job page {$url} is not a public HTTPS address.";
+        }
+
         if ($this->linksAreLive()) {
             return null;
         }
 
-        return "Apply links are not active yet: Aureus is only reachable at {$this->baseUrl()} and the careers page is not built (Stage 3).";
+        return "Apply links are not active yet: connect the company's careers website (Recruitment → Configurations → Careers website), or put Aureus online over HTTPS (it is only reachable at {$this->baseUrl()}).";
     }
 
     public function careersHost(): ?string
@@ -152,6 +222,14 @@ class JobPostingLinks
     {
         return (int) (UTMSource::query()->where('name', $name)->orderBy('id')->value('id')
             ?? UTMSource::query()->create(['name' => $name])->id);
+    }
+
+    /** Adds ?ref={token} (or &ref=) to the website job URL, dropping any #fragment. */
+    protected function withRef(string $url, string $token): string
+    {
+        $url = Str::before($url, '#');
+
+        return $url.(str_contains($url, '?') ? '&' : '?').'ref='.rawurlencode($token);
     }
 
     protected function baseUrl(): string

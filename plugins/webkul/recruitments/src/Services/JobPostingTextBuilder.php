@@ -62,7 +62,7 @@ class JobPostingTextBuilder
 
     public function applyLine(JobPosting $posting): string
     {
-        if ($this->links->linksAreLive()) {
+        if ($this->links->linksAreLive($posting)) {
             return 'Apply here: '.$this->links->applyUrl($posting);
         }
 

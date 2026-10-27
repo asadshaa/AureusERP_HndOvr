@@ -174,7 +174,7 @@ class JobPostingService
                 'live_url'             => $liveUrl,
                 'posted_at'            => $locked->posted_at ?? ($postedAt ?? now()),
                 'posted_by'            => $locked->posted_by ?? $actor->id,
-                'apply_url'            => $firstTime ? ($this->links->linksAreLive() ? $this->links->applyUrl($locked) : null) : $locked->apply_url,
+                'apply_url'            => $firstTime ? ($this->links->linksAreLive($locked) ? $this->links->applyUrl($locked) : null) : $locked->apply_url,
                 'last_error'           => null,
                 'last_error_at'        => null,
                 'removal_requested_at' => null,

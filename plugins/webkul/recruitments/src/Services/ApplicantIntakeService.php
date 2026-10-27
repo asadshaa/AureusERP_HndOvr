@@ -12,6 +12,7 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Security\Models\User;
+use Webkul\Support\Models\Company;
 
 class ApplicantIntakeService
 {
@@ -23,8 +24,52 @@ class ApplicantIntakeService
     /** @param array<string, mixed> $payload */
     public function import(string $source, array $payload, User $actor): Applicant
     {
+        $data = $this->normalizeAndValidate($source, $payload);
+
+        $companyId = (int) ($data['company_id'] ?? $actor->default_company_id);
+        if (
+            (int) $actor->default_company_id !== $companyId
+            && ! $actor->allowedCompanies()->whereKey($companyId)->exists()
+        ) {
+            throw new RuntimeException('The applicant import company is outside the user’s allowed companies.');
+        }
+
+        return $this->store($source, $data, $companyId, $actor);
+    }
+
+    /**
+     * System path for an integration that runs without a signed-in user (the
+     * careers website pull, automation plan §6 A4). The company is the one the
+     * integration belongs to (its website connection), never the payload's: a
+     * payload naming another company is refused, and the job, ad and stage
+     * must belong to that company exactly as on the user path.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function importForCompany(string $source, array $payload, int $companyId): Applicant
+    {
+        $data = $this->normalizeAndValidate($source, $payload);
+
+        if (isset($data['company_id']) && (int) $data['company_id'] !== $companyId) {
+            throw new RuntimeException('The application names a different company than the integration it came through.');
+        }
+
+        if (! Company::query()->whereKey($companyId)->where('is_active', true)->exists()) {
+            throw new RuntimeException('The company of this integration is archived or does not exist.');
+        }
+
+        return $this->store($source, $data, $companyId, null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function normalizeAndValidate(string $source, array $payload): array
+    {
         $data = $this->sources->resolve($source)->normalize($payload);
-        $data = Validator::make($data, [
+
+        return Validator::make($data, [
             'company_id'               => ['nullable', 'integer'],
             'external_application_id'  => ['required', 'string', 'max:255'],
             'candidate_name'           => ['required', 'string', 'max:255'],
@@ -40,15 +85,11 @@ class ApplicantIntakeService
             'resume_path'              => ['nullable', 'string', 'max:2048'],
             'portfolio_url'            => ['nullable', 'url', 'max:2048'],
         ])->validate();
+    }
 
-        $companyId = (int) ($data['company_id'] ?? $actor->default_company_id);
-        if (
-            (int) $actor->default_company_id !== $companyId
-            && ! $actor->allowedCompanies()->whereKey($companyId)->exists()
-        ) {
-            throw new RuntimeException('The applicant import company is outside the user’s allowed companies.');
-        }
-
+    /** @param array<string, mixed> $data validated */
+    protected function store(string $source, array $data, int $companyId, ?User $actor): Applicant
+    {
         $job = JobPosition::query()
             ->whereKey($data['job_id'])
             ->where('company_id', $companyId)
@@ -125,7 +166,7 @@ class ApplicantIntakeService
                 'medium_id'              => $data['medium_id'] ?? null,
                 'external_application_id'=> $data['external_application_id'],
                 'source_details'         => $data['source_details'],
-                'creator_id'             => $actor->id,
+                'creator_id'             => $actor?->id ?? $application->creator_id,
                 'create_date'            => $application->create_date ?? now()->toDateString(),
                 'applicant_properties'   => [
                     ...(array) $application->applicant_properties,

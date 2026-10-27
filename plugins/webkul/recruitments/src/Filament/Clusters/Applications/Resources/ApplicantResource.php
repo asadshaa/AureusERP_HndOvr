@@ -61,6 +61,7 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ManageSkill;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ViewApplicant;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\SkillsRelationManager;
+use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\ApplicantAnswer;
 use Webkul\Recruitment\Models\Candidate;
@@ -445,7 +446,7 @@ class ApplicantResource extends Resource
                                 TextInput::make('source_details')
                                     ->label('Source / channel details')
                                     ->maxLength(255),
-                                TextInput::make('screening_score')->numeric()->minValue(0)->maxValue(100),
+                                TextInput::make('screening_score')->label('CV score')->helperText('Set by the CV analyser; you can adjust it. Re-analysing the CV replaces it.')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('interview_score')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('assessment_score')->numeric()->minValue(0)->maxValue(100),
                                 Select::make('offer_status')->options([
@@ -496,6 +497,7 @@ class ApplicantResource extends Resource
                     ->color(fn (?string $state): ?string => ScreeningStatus::tryFrom((string) $state)?->getColor())
                     ->placeholder('Not screened')
                     ->toggleable(),
+                CvAnalysisComponents::scoreColumn(),
                 TextColumn::make('candidate.name')
                     ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.columns.candidate-name'))
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -643,6 +645,7 @@ class ApplicantResource extends Resource
                 SelectFilter::make('screening_status')
                     ->label('Screening')
                     ->options(ScreeningStatus::options()),
+                ...CvAnalysisComponents::filters(),
                 QueryBuilder::make()
                     ->constraintPickerColumns(2)
                     ->constraints([
@@ -763,6 +766,7 @@ class ApplicantResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    CvAnalysisComponents::bulkAnalyseAction(),
                     DeleteBulkAction::make()
                         ->successNotification(
                             Notification::make()
@@ -1012,6 +1016,7 @@ class ApplicantResource extends Resource
                                             ])
                                             ->placeholder('No answers yet'),
                                     ]),
+                                CvAnalysisComponents::infolistSection(),
                             ])->columnSpan(1),
                     ])->columnSpanFull(),
             ]);

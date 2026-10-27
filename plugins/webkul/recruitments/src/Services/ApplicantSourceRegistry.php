@@ -4,6 +4,7 @@ namespace Webkul\Recruitment\Services;
 
 use InvalidArgumentException;
 use Webkul\Recruitment\Contracts\ApplicantSourceAdapter;
+use Webkul\Recruitment\Services\SourceAdapters\CompanyWebsiteApplicantSourceAdapter;
 use Webkul\Recruitment\Services\SourceAdapters\FileImportApplicantSourceAdapter;
 use Webkul\Recruitment\Services\SourceAdapters\GenericApiApplicantSourceAdapter;
 use Webkul\Recruitment\Services\SourceAdapters\ManualApplicantSourceAdapter;
@@ -18,6 +19,7 @@ class ApplicantSourceRegistry
         $this->register(new ManualApplicantSourceAdapter);
         $this->register(new GenericApiApplicantSourceAdapter);
         $this->register(new FileImportApplicantSourceAdapter);
+        $this->register(new CompanyWebsiteApplicantSourceAdapter);
     }
 
     public function register(ApplicantSourceAdapter $adapter): void

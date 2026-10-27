@@ -15,6 +15,7 @@ use Webkul\Chatter\Filament\Actions\ChatterAction;
 use Webkul\Recruitment\Enums\ApplicationStatus;
 use Webkul\Recruitment\Enums\RecruitmentState;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
+use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Mail\ApplicantRefuseMail;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\RefuseReason;
@@ -35,6 +36,7 @@ class ViewApplicant extends ViewRecord
     {
         return ApplicantResource::actionsForRecordCompany([
             ...$this->getScreeningActions(),
+            CvAnalysisComponents::analyseAction(),
             Action::make('state')
                 ->hiddenLabel()
                 ->icon(function ($record) {

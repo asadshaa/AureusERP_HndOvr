@@ -55,6 +55,7 @@ use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionRes
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\Pages\ViewJobPosition;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobPostingsRelationManager;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\JobPositionResource\RelationManagers\JobQuestionsRelationManager;
+use Webkul\Recruitment\Filament\Schemas\JobWebsiteFields;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
@@ -228,6 +229,7 @@ class JobPositionResource extends Resource
                                             ->label(__('recruitments::filament/clusters/configurations/resources/job-position.form.sections.job-description.fields.job-requirements'))
                                             ->columnSpanFull(),
                                     ]),
+                                JobWebsiteFields::formSection(),
                             ])
                             ->columnSpan(['lg' => 2]),
                         Group::make()
@@ -575,6 +577,7 @@ class JobPositionResource extends Resource
                                             ->html()
                                             ->columnSpanFull(),
                                     ]),
+                                JobWebsiteFields::infolistSection(),
                             ])->columnSpan(2),
                         Group::make([
                             Section::make()

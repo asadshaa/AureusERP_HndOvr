@@ -18,6 +18,7 @@ use Webkul\Chatter\Filament\Actions\ChatterAction;
 use Webkul\Recruitment\Enums\ApplicationStatus;
 use Webkul\Recruitment\Enums\RecruitmentState;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
+use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Mail\ApplicantRefuseMail;
 use Webkul\Recruitment\Mail\ApplicationConfirmMail;
 use Webkul\Recruitment\Mail\InterviewerAssignedMail;
@@ -58,6 +59,7 @@ class EditApplicant extends EditRecord
     {
         return [
             ...$this->getScreeningActions(),
+            CvAnalysisComponents::analyseAction(),
             Action::make('state')
                 ->hiddenLabel()
                 ->icon(function ($record) {

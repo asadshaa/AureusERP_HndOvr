@@ -121,10 +121,10 @@ class JobPostingChannelRegistry
         return [
             new JobPostingChannel(
                 key: 'careers_site',
-                label: 'Aureus careers page',
+                label: 'Company website',
                 tier: ChannelTier::AUTOMATIC,
                 utmSourceName: 'Careers page',
-                unavailableReason: 'Goes live with the Aureus careers page (Stage 3) once Aureus is online over HTTPS.',
+                unavailableReason: 'Goes live on the company careers page once the website is connected (Recruitment → Configurations → Careers website).',
                 sort: 10,
             ),
             new JobPostingChannel(
@@ -133,7 +133,7 @@ class JobPostingChannelRegistry
                 tier: ChannelTier::AUTOMATIC,
                 utmSourceName: 'Google for Jobs',
                 requires: ['careers_site'],
-                unavailableReason: 'Goes live with the careers page and the Google Indexing API (Stage 3.6).',
+                unavailableReason: 'Goes live with the job\'s page on the company website (Google reads the job data there).',
                 sort: 20,
             ),
             new JobPostingChannel(
@@ -141,8 +141,9 @@ class JobPostingChannelRegistry
                 label: 'Indeed (XML feed)',
                 tier: ChannelTier::FEED,
                 utmSourceName: 'Indeed',
+                requires: ['careers_site'],
                 conflictsWith: ['indeed'],
-                unavailableReason: 'Needs the Aureus job feed (Stage 5.1) registered with Indeed.',
+                unavailableReason: 'Goes live with the job\'s page on the company website, through the website\'s Indeed feed (register the feed with Indeed once).',
                 sort: 30,
             ),
             new JobPostingChannel(

@@ -43,11 +43,21 @@ class Candidate extends Model
         'availability_date',
         'candidate_properties',
         'is_active',
+        'cv_text',
+        'cv_text_source',
+        'cv_text_fingerprint',
+        'cv_text_extracted_at',
+    ];
+
+    /** The CV's extracted text is personal data: never serialised by default. */
+    protected $hidden = [
+        'cv_text',
     ];
 
     protected $casts = [
         'candidate_properties' => 'array',
         'is_active'            => 'boolean',
+        'cv_text_extracted_at' => 'datetime',
     ];
 
     public function getLogAttributeLabels(): array

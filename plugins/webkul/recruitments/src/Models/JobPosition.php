@@ -14,10 +14,13 @@ use Webkul\Employee\Models\Skill;
 use Webkul\Partner\Models\Industry;
 use Webkul\Partner\Models\Partner;
 use Webkul\Recruitment\Enums\ChannelPostingStatus;
+use Webkul\Recruitment\Enums\JobLocationType;
 use Webkul\Recruitment\Enums\JobPostingStatus;
 use Webkul\Recruitment\Services\JobPostingLifecycle;
+use Webkul\Recruitment\Services\JobPublicProfile;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
+use Webkul\Support\Models\Currency;
 
 class JobPosition extends BaseJobPosition
 {
@@ -33,14 +36,37 @@ class JobPosition extends BaseJobPosition
             'no_of_hired_employee',
             'date_from',
             'date_to',
+            'public_title',
+            'slug',
+            'location_type',
+            'valid_through',
+            'salary_min',
+            'salary_max',
+            'salary_currency_id',
+            'salary_period',
+            'salary_visible',
+            'min_experience_years',
+            'screening_keywords',
         ]);
 
         $this->mergeCasts([
-            'date_from' => 'datetime',
-            'date_to'   => 'datetime',
+            'date_from'            => 'datetime',
+            'date_to'              => 'datetime',
+            'location_type'        => JobLocationType::class,
+            'valid_through'        => 'date',
+            'salary_min'           => 'decimal:2',
+            'salary_max'           => 'decimal:2',
+            'salary_visible'       => 'boolean',
+            'min_experience_years' => 'integer',
+            'screening_keywords'   => 'array',
         ]);
 
         parent::__construct($attributes);
+    }
+
+    public function salaryCurrency(): BelongsTo
+    {
+        return $this->belongsTo(Currency::class, 'salary_currency_id');
     }
 
     public function address(): BelongsTo
@@ -226,6 +252,7 @@ class JobPosition extends BaseJobPosition
         parent::boot();
 
         static::saving(fn (JobPosition $jobPosition) => $jobPosition->assertPostingTransitionIsAllowed());
+        static::saving(fn (JobPosition $jobPosition) => app(JobPublicProfile::class)->prepareForSave($jobPosition));
 
         // Job ads (Stage 2.3): the same guards are registered on the base
         // EmployeeJobPosition model in RecruitmentServiceProvider.

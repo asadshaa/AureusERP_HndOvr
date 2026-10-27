@@ -10,13 +10,24 @@ use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Recruitment\Console\Commands\AnalyseCvsCommand;
+use Webkul\Recruitment\Console\Commands\PullWebsiteApplicationsCommand;
 use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
+use Webkul\Recruitment\Jobs\AnalyseApplicantCv;
+use Webkul\Recruitment\Models\Applicant;
+use Webkul\Recruitment\Models\Candidate;
+use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPostingEvent;
+use Webkul\Recruitment\Models\JobQuestion;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Recruitment\Services\JobPostingLifecycle;
 use Webkul\Recruitment\Services\JobPostingLinks;
+use Webkul\Recruitment\Services\Website\CompanyWebsitePublisher;
+use Webkul\Recruitment\Services\Website\WebsiteDerivedChannelPublisher;
+use Webkul\Recruitment\Services\Website\WebsiteListingRefresher;
 use Webkul\Support\Models\Company;
 
 class RecruitmentServiceProvider extends PackageServiceProvider
@@ -49,10 +60,14 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_10_26_000001_create_recruitments_job_postings_tables',
                 '2026_10_26_000002_backfill_recruitments_job_postings',
                 '2026_10_27_000001_create_recruitments_screening_tables',
+                '2026_10_28_000001_add_public_job_fields_to_job_positions',
+                '2026_10_29_000001_create_recruitments_website_tables',
             ])
             ->runsMigrations()
             ->hasCommands([
                 RemindPostingRemovalsCommand::class,
+                AnalyseCvsCommand::class,
+                PullWebsiteApplicationsCommand::class,
             ])
             ->hasDependencies([
                 'employees',
@@ -87,6 +102,79 @@ class RecruitmentServiceProvider extends PackageServiceProvider
         });
 
         $this->registerJobPostingGuardsOnBaseJobModel();
+        $this->registerCvAnalysisTriggers();
+        $this->registerWebsitePublishers();
+    }
+
+    /**
+     * Company careers website (automation plan A3): the "Company website"
+     * channel lists jobs through the company's WordPress connection; Google
+     * for Jobs and the Indeed feed follow that listing. Edits of a listed job
+     * (or of its screening questions) are pushed again after commit.
+     */
+    protected function registerWebsitePublishers(): void
+    {
+        $registry = $this->app->make(JobPostingChannelRegistry::class);
+        $registry->registerPublisher($this->app->make(CompanyWebsitePublisher::class));
+        $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::GOOGLE));
+        $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::INDEED_FEED));
+
+        JobPostingEvent::created(fn (JobPostingEvent $event) => WebsiteDerivedChannelPublisher::followWebsiteListing($event));
+
+        $tableExists = null;
+        $ready = function () use (&$tableExists): bool {
+            return $tableExists ??= Schema::hasTable('recruitments_job_postings');
+        };
+
+        JobPosition::updated(function (JobPosition $job) use ($ready): void {
+            if ($ready()) {
+                WebsiteListingRefresher::jobUpdated($job);
+            }
+        });
+
+        EmployeeJobPosition::updated(function (EmployeeJobPosition $job) use ($ready): void {
+            if ($ready()) {
+                WebsiteListingRefresher::jobUpdated($job);
+            }
+        });
+
+        JobQuestion::saved(fn (JobQuestion $question) => WebsiteListingRefresher::questionChanged($question));
+        JobQuestion::deleted(fn (JobQuestion $question) => WebsiteListingRefresher::questionChanged($question));
+    }
+
+    /**
+     * CV analyser (automation plan A5): score a new application, an application
+     * moved to another job, and every application of a candidate whose CV
+     * changed. Queued after commit; the analyser saves quietly, so this never
+     * loops.
+     */
+    protected function registerCvAnalysisTriggers(): void
+    {
+        $enabled = fn (): bool => (bool) config('recruitment.cv_analysis.enabled') && (bool) config('recruitment.cv_analysis.auto');
+
+        Applicant::created(function (Applicant $applicant) use ($enabled): void {
+            if ($enabled() && $applicant->job_id) {
+                AnalyseApplicantCv::dispatch($applicant->id);
+            }
+        });
+
+        Applicant::updated(function (Applicant $applicant) use ($enabled): void {
+            if ($enabled() && $applicant->job_id && $applicant->wasChanged('job_id')) {
+                AnalyseApplicantCv::dispatch($applicant->id);
+            }
+        });
+
+        Candidate::updated(function (Candidate $candidate) use ($enabled): void {
+            if (! $enabled() || ! $candidate->wasChanged('resume_path')) {
+                return;
+            }
+
+            Applicant::query()
+                ->where('candidate_id', $candidate->id)
+                ->whereNotNull('job_id')
+                ->pluck('id')
+                ->each(fn ($applicantId) => AnalyseApplicantCv::dispatch((int) $applicantId));
+        });
     }
 
     /**

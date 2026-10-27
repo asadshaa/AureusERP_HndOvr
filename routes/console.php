@@ -115,3 +115,16 @@ Schedule::command('recruitments:remind-posting-removals')
     ->dailyAt('09:00')
     ->withoutOverlapping(30)
     ->onOneServer();
+
+/*
+| recruitments:pull-website-applications imports the new applications of each
+| switched-on company careers website (Recruitment > Configurations > Careers
+| website) and acknowledges them. Idempotent, so an overlap or a re-run never
+| imports twice; failures wait on the Website intake page. withoutOverlapping(10):
+| a slow website (10 s timeout per call, 2 retries) may need longer than one
+| 5-minute tick.
+*/
+Schedule::command('recruitments:pull-website-applications')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer();

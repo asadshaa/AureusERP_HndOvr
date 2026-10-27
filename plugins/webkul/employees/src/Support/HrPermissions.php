@@ -32,6 +32,9 @@ final class HrPermissions
     /** Edit the screening question library and each job's screening questions. */
     public const ManageScreeningQuestions = 'hr_manage_screening_questions';
 
+    /** Connect the company careers website and handle its failed application imports (Recruitment automation A3/A4). */
+    public const ManageRecruitmentIntegrations = 'hr_manage_recruitment_integrations';
+
     public const ViewAnalytics = 'page_employees_hr_analytics';
 
     /**
@@ -76,6 +79,7 @@ final class HrPermissions
             self::ConvertCandidates,
             self::ManageJobPostings,
             self::ManageScreeningQuestions,
+            self::ManageRecruitmentIntegrations,
             self::ViewAnalytics,
             self::ViewAttendance,
             self::ViewPerformance,
@@ -210,6 +214,7 @@ final class HrPermissions
             self::ManageAttendanceGeofences,
             self::ManageJobPostings,
             self::ManageScreeningQuestions,
+            self::ManageRecruitmentIntegrations,
             'view_any_employee_department', 'view_employee_department', 'create_employee_department', 'update_employee_department', 'delete_employee_department',
             'view_any_recruitment_department', 'view_recruitment_department', 'create_recruitment_department', 'update_recruitment_department',
             'view_any_employee_job::position', 'view_employee_job::position', 'create_employee_job::position', 'update_employee_job::position', 'delete_employee_job::position',

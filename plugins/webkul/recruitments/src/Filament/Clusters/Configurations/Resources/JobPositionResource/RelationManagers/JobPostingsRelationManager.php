@@ -75,7 +75,7 @@ class JobPostingsRelationManager extends RelationManager
                 ->withCount(['applicants', 'applicants as hired_count' => fn (Builder $applicants): Builder => $applicants->whereNotNull('date_closed')])
                 ->orderByRaw("FIELD(status, 'removal_pending', 'to_post', 'failed', 'live', 'waiting', 'planned', 'closed')")
                 ->orderBy('id'))
-            ->description($links->notLiveReason())
+            ->description(fn (): ?string => $links->notLiveReason($this->job()))
             ->emptyStateHeading('No channels yet')
             ->emptyStateDescription('Add the websites and groups this job should be advertised on.')
             ->columns([
@@ -108,7 +108,7 @@ class JobPostingsRelationManager extends RelationManager
                     ->description(fn (JobPosting $record): ?string => $record->postedBy?->name),
                 TextColumn::make('apply_link')
                     ->label('Apply link')
-                    ->state(fn (JobPosting $record): string => $links->applyUrl($record).($links->linksAreLive() ? '' : ' (not active yet)'))
+                    ->state(fn (JobPosting $record): string => $links->applyUrl($record).($links->linksAreLive($record) ? '' : ' (not active yet)'))
                     ->copyable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -216,7 +216,7 @@ class JobPostingsRelationManager extends RelationManager
                 && in_array($record->status, [ChannelPostingStatus::TO_POST, ChannelPostingStatus::LIVE, ChannelPostingStatus::FAILED], true))
             ->authorize(fn (JobPosting $record): bool => Gate::allows('view', $record))
             ->modalHeading(fn (JobPosting $record): string => "Post for {$record->displayName()}")
-            ->modalDescription(fn (): ?string => app(JobPostingLinks::class)->notLiveReason())
+            ->modalDescription(fn (JobPosting $record): ?string => app(JobPostingLinks::class)->linksAreLive($record) ? null : app(JobPostingLinks::class)->notLiveReason($this->job()))
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Close')
             ->schema(fn (JobPosting $record): array => [
