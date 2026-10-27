@@ -7,10 +7,12 @@ use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Throwable;
 use Webkul\Chatter\Mail\FollowerMail;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Services\EmailService;
 
 class FollowerAction extends Action
@@ -76,17 +78,18 @@ class FollowerAction extends Action
                             ->preload()
                             ->live()
                             ->searchable()
-                            ->options(fn (): array => Partner::query()->orderBy('name')->limit(50)->pluck('name', 'id')->toArray())
+                            ->options(fn (): array => static::followerCandidates()->orderBy('name')->limit(50)->pluck('name', 'id')->toArray())
                             ->getSearchResultsUsing(function (string $search) {
-                                return Partner::query()
-                                    ->when($search, fn ($q) => $q->where('name', 'like', "%{$search}%")
-                                        ->orWhere('email', 'like', "%{$search}%"))
+                                return static::followerCandidates()
+                                    ->when($search, fn ($q) => $q->where(fn ($inner) => $inner
+                                        ->where('name', 'like', "%{$search}%")
+                                        ->orWhere('email', 'like', "%{$search}%")))
                                     ->limit(50)
                                     ->pluck('name', 'id')
                                     ->toArray();
                             })
                             ->getOptionLabelsUsing(function (array $values) {
-                                return Partner::query()
+                                return static::followerCandidates()
                                     ->whereIn('id', $values)
                                     ->pluck('name', 'id')
                                     ->toArray();
@@ -128,7 +131,7 @@ class FollowerAction extends Action
 
                 try {
                     collect($data['partners'] ?? [])->each(function ($partnerId) use ($record, $data, &$missingEmailPartners, &$partner) {
-                        $partner = Partner::findOrFail($partnerId);
+                        $partner = static::followerCandidates()->findOrFail($partnerId);
 
                         $record->addFollower($partner);
 
@@ -197,6 +200,24 @@ class FollowerAction extends Action
                     ->label(__('chatter::filament/resources/actions/chatter/follower-action.setup.submit-action-title'))
                     ->icon('heroicon-m-user-plus')
             );
+    }
+
+    /**
+     * Partners that may follow a record: the active company's, shared ones
+     * (no company), and those of users who belong to the active company.
+     */
+    public static function followerCandidates(): Builder
+    {
+        $companyId = CurrentCompany::id();
+
+        if ($companyId === null) {
+            return Partner::query()->whereRaw('1 = 0');
+        }
+
+        return Partner::query()->where(fn (Builder $query) => $query
+            ->where('company_id', $companyId)
+            ->orWhereNull('company_id')
+            ->orWhereHas('user', fn (Builder $users) => CurrentCompany::scopeUsersOf($users, $companyId)));
     }
 
     private function notifyFollower(Model $record, Partner $partner, array $data): void

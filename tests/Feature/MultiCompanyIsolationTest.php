@@ -82,6 +82,19 @@ it('counts only active companies the user belongs to, and switches only among th
     expect(fn () => CurrentCompany::switchTo(Company::factory()->create()->id, $user))->toThrow(RuntimeException::class);
 });
 
+it('makes the group owner a member of every active company', function () {
+    $owner = companyMember($this->shipLine, [], CurrentCompany::MANAGE_MEMBERSHIPS);
+    $archived = Company::factory()->create(['is_active' => true]);
+    $archived->delete();
+    CurrentCompany::flush();
+
+    expect(CurrentCompany::membershipIds($owner))->toContain($this->shipLine->id, $this->openPort->id)
+        ->not->toContain($archived->id);
+
+    CurrentCompany::switchTo($this->openPort->id, $owner);
+    expect($owner->refresh()->default_company_id)->toBe($this->openPort->id);
+});
+
 it('moves a user off an archived company and refuses users with no company', function () {
     $user = companyMember($this->shipLine, [$this->openPort]);
     $this->shipLine->delete();
@@ -197,7 +210,7 @@ it('sets memberships, the active company and group-owner access from the command
     CurrentCompany::flush();
 
     expect($user->default_company_id)->toBe($this->openPort->id)
-        ->and(CurrentCompany::membershipIds($user))->toEqualCanonicalizing([$this->shipLine->id, $this->openPort->id])
+        ->and($user->allowedCompanies()->pluck('companies.id')->all())->toBe([$this->shipLine->id])
         ->and(CurrentCompany::isGroupOwner($user))->toBeTrue();
 
     $this->artisan('erp:company-access', ['email' => $user->email, '--companies' => ['No Such Company']])->assertFailed();

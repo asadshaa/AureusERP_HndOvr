@@ -34,6 +34,7 @@ use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\TimeOff\Enums\AllocationType;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\Management;
@@ -136,8 +137,7 @@ class AllocationResource extends Resource
                                             ->relationship(
                                                 'holidayStatus',
                                                 'name',
-                                                modifyQueryUsing: fn (Builder $query): Builder => $query
-                                                    ->where('company_id', Auth::user()?->default_company_id),
+                                                modifyQueryUsing: fn (Builder $query): Builder => CurrentCompany::scope($query, includeShared: true),
                                             )
                                             ->searchable()
                                             ->preload()

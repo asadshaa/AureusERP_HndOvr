@@ -13,7 +13,6 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
-use Illuminate\Support\Facades\Auth;
 use Webkul\Accounting\Data\Coa\CoaWarning;
 use Webkul\Accounting\Filament\Clusters\Configuration;
 use Webkul\Accounting\Services\Coa\CoaHeaderDetector;
@@ -22,6 +21,7 @@ use Webkul\Accounting\Services\Coa\CoaSheetParser;
 use Webkul\Accounting\Services\Coa\CoaSheetReader;
 use Webkul\Accounting\Services\Coa\CoaUploadException;
 use Webkul\Accounting\Services\Coa\CoaUploadPathResolver;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
 
@@ -74,7 +74,7 @@ class ImportChartOfAccounts extends Page implements HasForms
     public function mount(): void
     {
         $this->form->fill([
-            'company_id'      => Auth::user()?->default_company_id,
+            'company_id'      => CurrentCompany::id(),
             'mode'            => 'structure_only',
             'opening_date'    => now()->startOfMonth()->subDay()->toDateString(),
             'movement_date'   => now()->toDateString(),
@@ -102,8 +102,8 @@ class ImportChartOfAccounts extends Page implements HasForms
                 ->schema([
                     Select::make('company_id')
                         ->label('Company')
-                        ->options(fn () => Company::query()->pluck('name', 'id'))
-                        ->default(Auth::user()?->default_company_id)
+                        ->options(fn () => Company::query()->whereKey(CurrentCompany::membershipIds())->pluck('name', 'id'))
+                        ->default(fn (): ?int => CurrentCompany::id())
                         ->required()
                         ->disabled()
                         ->dehydrated(),
@@ -230,8 +230,16 @@ class ImportChartOfAccounts extends Page implements HasForms
     public function import(): void
     {
         try {
+            $companyId = (int) ($this->data['company_id'] ?? 0);
+
+            if (! CurrentCompany::canAccess($companyId)) {
+                Notification::make()->danger()->title('Import refused')->body('You do not belong to the selected company.')->send();
+
+                return;
+            }
+
             $source = $this->resolveSheetData();
-            $company = Company::findOrFail($this->data['company_id']);
+            $company = Company::findOrFail($companyId);
 
             $batch = app(CoaImportService::class)->import(
                 rows: $source['rows'],

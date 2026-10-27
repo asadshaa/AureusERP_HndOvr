@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Filament\Resources\ApprovalWorkflowResource\Pages\CreateApprovalWorkflow;
 use Webkul\Support\Filament\Resources\ApprovalWorkflowResource\Pages\EditApprovalWorkflow;
@@ -96,12 +97,7 @@ class ApprovalWorkflowResource extends Resource
                         Select::make('approver_user_id')
                             ->label('Specific approver')
                             ->searchable()
-                            ->options(fn (): array => User::query()
-                                ->where('default_company_id', $companyId)
-                                ->where('is_active', true)
-                                ->limit(100)
-                                ->pluck('name', 'id')
-                                ->all()),
+                            ->options(fn (): array => static::approverUserOptions($companyId)),
                         Select::make('approver_role_id')
                             ->label('Approver role')
                             ->searchable()
@@ -125,6 +121,28 @@ class ApprovalWorkflowResource extends Resource
                     ->defaultItems(1),
             ]),
         ]);
+    }
+
+    /**
+     * Active users who belong to the workflow's company (default or allowed),
+     * the same rule the approval engine applies.
+     *
+     * @return array<int, string>
+     */
+    public static function approverUserOptions(?int $companyId = null): array
+    {
+        $companyId = $companyId ?: CurrentCompany::id();
+
+        if (! $companyId) {
+            return [];
+        }
+
+        return CurrentCompany::scopeUsersOf(User::query(), $companyId)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->limit(100)
+            ->pluck('name', 'id')
+            ->all();
     }
 
     public static function table(Table $table): Table

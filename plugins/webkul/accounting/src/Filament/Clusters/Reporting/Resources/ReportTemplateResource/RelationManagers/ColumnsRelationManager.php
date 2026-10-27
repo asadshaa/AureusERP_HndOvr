@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\RelationManagers;
 
+use Closure;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -16,6 +17,8 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Webkul\Accounting\Enums\ColumnType;
+use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Support\Models\Company;
 
 class ColumnsRelationManager extends RelationManager
@@ -33,7 +36,8 @@ class ColumnsRelationManager extends RelationManager
      */
     public function isReadOnly(): bool
     {
-        return ! $this->getOwnerRecord()->isDraft();
+        return ! $this->getOwnerRecord()->isDraft()
+            || ! ReportTemplateResource::canEdit($this->getOwnerRecord());
     }
 
     public function form(Schema $schema): Schema
@@ -68,7 +72,8 @@ class ColumnsRelationManager extends RelationManager
                         Select::make('company_id')
                             ->label(__('accounting::filament/clusters/reporting/resources/report-template.columns.form.fields.company'))
                             ->helperText(__('accounting::filament/clusters/reporting/resources/report-template.columns.form.fields.company-help'))
-                            ->options(fn () => Company::query()->pluck('name', 'id'))
+                            ->options(fn () => SelectableCompanies::scope(Company::query())->pluck('name', 'id'))
+                            ->rule(fn (): Closure => SelectableCompanies::rule())
                             ->searchable()
                             ->nullable(),
                         Toggle::make('is_consolidated')

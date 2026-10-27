@@ -14,10 +14,18 @@ use Webkul\Product\Filament\Resources\ProductResource\Schemas\ProductInfolist;
 use Webkul\Product\Filament\Resources\ProductResource\Support\ProductSchemaRegistry;
 use Webkul\Product\Filament\Resources\ProductResource\Tables\ProductsTable;
 use Webkul\Product\Models\Product;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\Support\Models\UOM;
 
 class ProductResource extends Resource
 {
+    use ScopedToActiveCompany {
+        getEloquentQuery as companyScopedQuery;
+    }
+
+    /** Products with no company are shared by every company; only a group owner may change them. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = Product::class;
 
     protected static bool $shouldRegisterNavigation = false;
@@ -58,7 +66,7 @@ class ProductResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()
+        return static::companyScopedQuery()
             ->with(array_merge(['uom', 'uomPO'], ProductSchemaRegistry::eagerLoads()));
     }
 

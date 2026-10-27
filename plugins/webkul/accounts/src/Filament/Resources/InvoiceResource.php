@@ -3,6 +3,7 @@
 namespace Webkul\Account\Filament\Resources;
 
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -83,6 +84,8 @@ use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
 use Webkul\Product\Settings\ProductSettings;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
@@ -166,7 +169,8 @@ class InvoiceResource extends Resource
                                             ->relationship(
                                                 'partner',
                                                 'name',
-                                                fn (Builder $query) => $query->orderBy('id')->withTrashed(),
+                                                // Same strict scope as PartnerResource: active company's partners only.
+                                                fn (Builder $query) => CurrentCompany::scope($query->orderBy('id')->withTrashed()),
                                             )
                                             ->required()
                                             ->searchable()
@@ -374,7 +378,8 @@ class InvoiceResource extends Resource
                                     ->schema([
                                         Select::make('company_id')
                                             ->label(__('accounts::filament/resources/invoice.form.tabs.other-information.fieldset.accounting.fields.company'))
-                                            ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => $query->withTrashed())
+                                            ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => SelectableCompanies::scope($query->withTrashed()))
+                                            ->rule(fn (): Closure => SelectableCompanies::rule())
                                             ->getOptionLabelFromRecordUsing(function ($record): string {
                                                 return $record->name.($record->trashed() ? ' (Deleted)' : '');
                                             })
@@ -385,7 +390,7 @@ class InvoiceResource extends Resource
                                             ->preload()
                                             ->reactive()
                                             ->afterStateUpdated(fn (callable $set, $state) => $set('currency_id', Company::find($state)?->currency_id))
-                                            ->default(Auth::user()->default_company_id)
+                                            ->default(fn (): ?int => CurrentCompany::id())
                                             ->live()
                                             ->afterStateUpdated(function (Get $get, Set $set) {
                                                 $company = Company::find($get('company_id'));

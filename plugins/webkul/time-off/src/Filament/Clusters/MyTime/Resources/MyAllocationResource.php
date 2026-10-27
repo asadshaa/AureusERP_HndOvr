@@ -3,7 +3,6 @@
 namespace Webkul\TimeOff\Filament\Clusters\MyTime\Resources;
 
 use BackedEnum;
-use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -30,6 +29,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\TimeOff\Enums\AllocationType;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\MyTime;
@@ -100,7 +100,7 @@ class MyAllocationResource extends Resource
                                     ->schema([
                                         Select::make('holiday_status_id')
                                             ->label(__('time-off::filament/clusters/my-time/resources/my-allocation.form.fields.time-off-type'))
-                                            ->relationship('holidayStatus', 'name')
+                                            ->relationship('holidayStatus', 'name', modifyQueryUsing: fn (Builder $query): Builder => CurrentCompany::scope($query->where('is_active', true), includeShared: true))
                                             ->searchable()
                                             ->preload()
                                             ->required(),

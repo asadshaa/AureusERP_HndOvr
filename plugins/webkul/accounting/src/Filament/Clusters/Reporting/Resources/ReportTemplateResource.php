@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Filament\Clusters\Reporting\Resources;
 
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -32,10 +33,18 @@ use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResour
 use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\RelationManagers\LinesRelationManager;
 use Webkul\Accounting\Models\ReportTemplate;
 use Webkul\Accounting\Services\ReportTemplateVersioningService;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Support\Models\Company;
 
 class ReportTemplateResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Templates with no company are available to every company; only a group owner may change them. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = ReportTemplate::class;
 
     protected static bool $shouldRegisterNavigation = true;
@@ -101,9 +110,13 @@ class ReportTemplateResource extends Resource
                                     ->required(),
                                 Select::make('company_id')
                                     ->label(__('accounting::filament/clusters/reporting/resources/report-template.form.fields.company'))
-                                    ->options(fn () => Company::query()->pluck('name', 'id'))
+                                    ->options(fn () => SelectableCompanies::scope(Company::query())->pluck('name', 'id'))
+                                    ->default(fn (): ?int => CurrentCompany::id())
+                                    ->rule(fn (): Closure => SelectableCompanies::rule())
                                     ->searchable()
                                     ->nullable()
+                                    // Only a group owner may make a template shared by all companies.
+                                    ->required(fn (): bool => ! CurrentCompany::isGroupOwner())
                                     ->helperText(__('accounting::filament/clusters/reporting/resources/report-template.form.fields.company-help')),
                             ]),
                         Textarea::make('description')
@@ -172,7 +185,7 @@ class ReportTemplateResource extends Resource
                     ->options(LayoutType::options()),
                 SelectFilter::make('company_id')
                     ->label(__('accounting::filament/clusters/reporting/resources/report-template.table.filters.company'))
-                    ->options(fn () => Company::query()->pluck('name', 'id')),
+                    ->options(fn () => SelectableCompanies::scope(Company::query())->pluck('name', 'id')),
             ])
             ->recordActions([
                 EditAction::make(),
@@ -186,7 +199,8 @@ class ReportTemplateResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->authorizeIndividualRecords(fn (ReportTemplate $record): bool => static::companyAllowsChange($record)),
                 ]),
             ])
             ->defaultSort('sort');
@@ -201,6 +215,7 @@ class ReportTemplateResource extends Resource
             ->requiresConfirmation()
             ->modalDescription(__('accounting::filament/clusters/reporting/resources/report-template.actions.publish.confirm'))
             ->visible(fn (ReportTemplate $record) => $record->isDraft())
+            ->authorize(fn (ReportTemplate $record): bool => static::companyAllowsChange($record))
             ->action(function (ReportTemplate $record) {
                 $errors = app(ReportTemplateVersioningService::class)->publish($record);
 
@@ -230,6 +245,7 @@ class ReportTemplateResource extends Resource
             ->color('info')
             ->requiresConfirmation()
             ->modalDescription(__('accounting::filament/clusters/reporting/resources/report-template.actions.new-version.confirm'))
+            ->authorize(fn (ReportTemplate $record): bool => static::companyAllowsChange($record))
             ->action(function (ReportTemplate $record) {
                 $draft = app(ReportTemplateVersioningService::class)->newDraftVersion($record);
 
@@ -250,6 +266,7 @@ class ReportTemplateResource extends Resource
             ->color('gray')
             ->requiresConfirmation()
             ->visible(fn (ReportTemplate $record) => $record->statusEnum() === TemplateStatus::PUBLISHED)
+            ->authorize(fn (ReportTemplate $record): bool => static::companyAllowsChange($record))
             ->action(function (ReportTemplate $record) {
                 app(ReportTemplateVersioningService::class)->archive($record);
 

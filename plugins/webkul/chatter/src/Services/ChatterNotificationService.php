@@ -14,6 +14,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Partner\Models\Partner;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveAllocation;
 
@@ -201,7 +202,13 @@ class ChatterNotificationService
             return [];
         }
 
-        $users = User::with('partner')
+        $companyId = $this->resolveRecordCompanyId($message, $record);
+
+        if ($companyId === null) {
+            return [];
+        }
+
+        $users = CurrentCompany::scopeUsersOf(User::with('partner'), $companyId)
             ->whereIn('id', $mentionedIds)
             ->when($causerUserId, fn ($query) => $query->where('id', '!=', $causerUserId))
             ->get();
@@ -251,7 +258,7 @@ class ChatterNotificationService
     {
         $excludedIds = array_filter($excludedIds);
 
-        return $record->followers()
+        $users = $record->followers()
             ->with('partner.user')
             ->get()
             ->map(fn ($follower) => $follower->partner?->user)
@@ -259,6 +266,28 @@ class ChatterNotificationService
             ->reject(fn (User $user) => in_array((int) $user->id, array_map('intval', $excludedIds), true))
             ->unique('id')
             ->values();
+
+        $companyId = $record->getAttribute('company_id') ? (int) $record->getAttribute('company_id') : null;
+
+        if ($companyId === null || $users->isEmpty()) {
+            return $users;
+        }
+
+        $memberIds = CurrentCompany::scopeUsersOf(User::query(), $companyId)
+            ->whereIn('id', $users->pluck('id'))
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
+        return $users->filter(fn (User $user): bool => in_array((int) $user->id, $memberIds, true))->values();
+    }
+
+    /** The company a chattered record belongs to: its own, else the message's, else the active company. */
+    protected function resolveRecordCompanyId(Message $message, Model $record): ?int
+    {
+        $companyId = $record->getAttribute('company_id') ?: $message->company_id ?: CurrentCompany::id();
+
+        return $companyId ? (int) $companyId : null;
     }
 
     protected function resolveTypeMeta(Message $message): array

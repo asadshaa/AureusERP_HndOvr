@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\RelationManagers;
 
+use Closure;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -18,6 +19,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Webkul\Account\Models\Account;
 use Webkul\Accounting\Enums\FormulaOperandType;
 use Webkul\Accounting\Enums\FormulaOperator;
@@ -25,7 +27,10 @@ use Webkul\Accounting\Enums\FormulaPurpose;
 use Webkul\Accounting\Enums\LineType;
 use Webkul\Accounting\Enums\ValueBasis;
 use Webkul\Accounting\Enums\ValueSource;
+use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource;
 use Webkul\Accounting\Models\ReportLine;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Support\Models\Company;
 
 class LinesRelationManager extends RelationManager
@@ -39,11 +44,28 @@ class LinesRelationManager extends RelationManager
 
     /**
      * Published and archived versions are immutable; their structure is
-     * browsable but not editable.
+     * browsable but not editable. Shared (no company) templates can only be
+     * changed by a group owner.
      */
     public function isReadOnly(): bool
     {
-        return ! $this->getOwnerRecord()->isDraft();
+        return ! $this->getOwnerRecord()->isDraft()
+            || ! ReportTemplateResource::canEdit($this->getOwnerRecord());
+    }
+
+    /**
+     * The active company's chart of accounts, labelled "code name".
+     *
+     * @return array<int, string>
+     */
+    protected function accountOptions(): array
+    {
+        return Account::query()
+            ->whereHas('companies', fn (Builder $query) => $query->where('companies.id', CurrentCompany::id()))
+            ->orderBy('code')
+            ->get()
+            ->mapWithKeys(fn (Account $account) => [$account->id => trim(($account->code ? $account->code.' ' : '').$account->name)])
+            ->all();
     }
 
     public function form(Schema $schema): Schema
@@ -96,7 +118,8 @@ class LinesRelationManager extends RelationManager
                                 Select::make('company_id')
                                     ->label(__('accounting::filament/clusters/reporting/resources/report-template.lines.form.fields.company'))
                                     ->helperText(__('accounting::filament/clusters/reporting/resources/report-template.lines.form.fields.company-help'))
-                                    ->options(fn () => Company::query()->pluck('name', 'id'))
+                                    ->options(fn () => SelectableCompanies::scope(Company::query())->pluck('name', 'id'))
+                                    ->rule(fn (): Closure => SelectableCompanies::rule())
                                     ->searchable()
                                     ->nullable(),
                                 Select::make('sign')
@@ -136,9 +159,7 @@ class LinesRelationManager extends RelationManager
                             ->schema([
                                 Select::make('account_id')
                                     ->label(__('accounting::filament/clusters/reporting/resources/report-template.lines.form.fields.account'))
-                                    ->options(fn () => Account::query()->orderBy('code')->get()->mapWithKeys(
-                                        fn ($account) => [$account->id => trim(($account->code ? $account->code.' ' : '').$account->name)],
-                                    ))
+                                    ->options(fn (): array => $this->accountOptions())
                                     ->searchable()
                                     ->required(),
                                 Select::make('sign')
@@ -210,7 +231,8 @@ class LinesRelationManager extends RelationManager
                                     ->required(),
                                 Select::make('company_id')
                                     ->label(__('accounting::filament/clusters/reporting/resources/report-template.lines.form.fields.company'))
-                                    ->options(fn () => Company::query()->pluck('name', 'id'))
+                                    ->options(fn () => SelectableCompanies::scope(Company::query())->pluck('name', 'id'))
+                                    ->rule(fn (): Closure => SelectableCompanies::rule())
                                     ->searchable()
                                     ->nullable(),
                             ])

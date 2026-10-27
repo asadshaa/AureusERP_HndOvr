@@ -41,7 +41,7 @@ class CompanyAccess extends Command
             return self::FAILURE;
         }
 
-        $companyOptions = collect($this->option('companies'))->flatMap(fn (string $value) => explode(',', $value))->map('trim')->filter();
+        $companyOptions = collect($this->option('companies'))->flatMap(fn (string $value) => explode(',', $value))->map(fn (string $value): string => trim($value))->filter();
 
         if ($companyOptions->isEmpty() && ! $this->option('group-owner') && ! $this->option('revoke-group-owner')) {
             $this->showAccess($user);

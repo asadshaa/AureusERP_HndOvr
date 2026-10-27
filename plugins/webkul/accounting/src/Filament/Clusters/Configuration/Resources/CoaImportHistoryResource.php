@@ -10,14 +10,17 @@ use Illuminate\Database\Eloquent\Model;
 use Webkul\Accounting\Filament\Clusters\Configuration;
 use Webkul\Accounting\Filament\Clusters\Configuration\Resources\CoaImportHistoryResource\Pages\ListCoaImportBatches;
 use Webkul\Accounting\Models\CoaImportBatch;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 
 /**
  * Read-only history of Chart-of-Accounts imports: what was imported, when, by
  * whom, in which mode, with the row counts and a downloadable warning/error
- * report per batch.
+ * report per batch. Only the active company's imports are listed.
  */
 class CoaImportHistoryResource extends Resource
 {
+    use ScopedToActiveCompany;
+
     protected static ?string $model = CoaImportBatch::class;
 
     protected static bool $shouldRegisterNavigation = true;

@@ -10,6 +10,7 @@ use Webkul\Accounting\Enums\TemplateStatus;
 use Webkul\Accounting\Filament\Clusters\Reporting;
 use Webkul\Accounting\Models\ReportTemplate;
 use Webkul\Accounting\Services\ReportTemplateValidator;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * The live Finance review board: every unmapped account line, unresolved
@@ -57,7 +58,7 @@ class ReportMappingReview extends Page
     {
         $validator = app(ReportTemplateValidator::class);
 
-        return ReportTemplate::query()
+        return CurrentCompany::scope(ReportTemplate::query(), includeShared: true)
             ->where('status', '!=', TemplateStatus::ARCHIVED->value)
             ->orderBy('sort')
             ->get()

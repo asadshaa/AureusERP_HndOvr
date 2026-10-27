@@ -7,25 +7,42 @@ use Filament\Forms\Components\RichEditor\RichContentRenderer;
 use Throwable;
 use Webkul\Security\Filament\Resources\UserResource;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 
 class ChatterMentions
 {
     public static function provider(): MentionProvider
     {
         return MentionProvider::make('@')
-            ->getSearchResultsUsing(fn (string $search): array => User::query()
-                ->where('is_active', true)
-                ->where('name', 'like', "%{$search}%")
-                ->orderBy('name')
-                ->limit(10)
-                ->pluck('name', 'id')
-                ->all())
+            ->getSearchResultsUsing(fn (string $search): array => static::searchUsers($search))
             ->getLabelsUsing(fn (array $ids): array => User::query()
                 ->whereIn('id', $ids)
                 ->pluck('name', 'id')
                 ->all())
             ->extraAttributes(['class' => 'fi-chatter-mention font-medium'])
             ->url(fn (string $id): ?string => static::userUrl($id));
+    }
+
+    /**
+     * Active users of the active company (default or allowed) matching the search.
+     *
+     * @return array<int, string>
+     */
+    public static function searchUsers(string $search): array
+    {
+        $companyId = CurrentCompany::id();
+
+        if ($companyId === null) {
+            return [];
+        }
+
+        return CurrentCompany::scopeUsersOf(User::query(), $companyId)
+            ->where('is_active', true)
+            ->where('name', 'like', "%{$search}%")
+            ->orderBy('name')
+            ->limit(10)
+            ->pluck('name', 'id')
+            ->all();
     }
 
     public static function render(?string $body): string

@@ -3,6 +3,7 @@
 namespace Webkul\Account\Filament\Resources;
 
 use BackedEnum;
+use Closure;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -26,6 +27,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\CreateFiscalPosition;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\EditFiscalPosition;
@@ -33,6 +35,8 @@ use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\ListFiscalPos
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\ManageFiscalPositionTax;
 use Webkul\Account\Filament\Resources\FiscalPositionResource\Pages\ViewFiscalPosition;
 use Webkul\Account\Models\FiscalPosition;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
 use Webkul\Support\Filament\Infolists\Components\RepeatableEntry;
@@ -40,6 +44,8 @@ use Webkul\Support\Filament\Infolists\Components\Repeater\TableColumn as Infolis
 
 class FiscalPositionResource extends Resource
 {
+    use ScopedToActiveCompany;
+
     protected static ?string $model = FiscalPosition::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-uturn-left';
@@ -79,7 +85,8 @@ class FiscalPositionResource extends Resource
                                     ->label(__('accounts::filament/resources/fiscal-position.form.fields.zip-to'))
                                     ->required(),
                                 Select::make('company_id')
-                                    ->relationship('company', 'name')
+                                    ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => SelectableCompanies::scope($query))
+                                    ->rule(fn (): Closure => SelectableCompanies::rule())
                                     ->searchable()
                                     ->preload()
                                     ->label(__('accounts::filament/resources/fiscal-position.form.fields.company'))

@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Filament\Clusters\Accounting\Resources;
 
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -75,6 +76,8 @@ use Webkul\Accounting\Models\JournalEntry;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Security\Traits\HasResourcePermissionQuery;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
@@ -192,7 +195,7 @@ class JournalEntryResource extends Resource
                                             ->relationship(
                                                 'journal',
                                                 'name',
-                                                modifyQueryUsing: fn (Builder $query) => $query->where('type', JournalType::GENERAL),
+                                                modifyQueryUsing: fn (Builder $query) => CurrentCompany::scope($query->where('type', JournalType::GENERAL)),
                                             )
                                             ->searchable()
                                             ->preload()
@@ -217,7 +220,8 @@ class JournalEntryResource extends Resource
                             ->schema([
                                 Select::make('company_id')
                                     ->label(__('accounting::filament/clusters/accounting/resources/journal-entry.form.tabs.other-information.fields.company'))
-                                    ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => $query->withTrashed())
+                                    ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => SelectableCompanies::scope($query->withTrashed()))
+                                    ->rule(fn (): Closure => SelectableCompanies::rule())
                                     ->getOptionLabelFromRecordUsing(function ($record): string {
                                         return $record->name.($record->trashed() ? ' (Deleted)' : '');
                                     })
@@ -228,7 +232,7 @@ class JournalEntryResource extends Resource
                                     ->preload()
                                     ->reactive()
                                     ->afterStateUpdated(fn (callable $set, $state) => $set('currency_id', Company::find($state)?->currency_id))
-                                    ->default(Auth::user()->default_company_id)
+                                    ->default(fn (): ?int => CurrentCompany::id())
                                     ->live()
                                     ->afterStateUpdated(function (Get $get, Set $set) {
                                         $company = Company::find($get('company_id'));
@@ -774,7 +778,7 @@ class JournalEntryResource extends Resource
                     ->disabled(fn ($record) => in_array($record?->parent_state, [MoveState::POSTED, MoveState::CANCEL])),
                 Select::make('partner_id')
                     ->label(__('accounting::filament/clusters/accounting/resources/journal-entry.form.tabs.lines.repeater.fields.partner'))
-                    ->relationship('partner', 'name')
+                    ->relationship('partner', 'name', modifyQueryUsing: fn (Builder $query) => CurrentCompany::scope($query))
                     ->searchable()
                     ->wrapOptionLabels(false)
                     ->preload()

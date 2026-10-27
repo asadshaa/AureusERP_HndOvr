@@ -4,12 +4,14 @@ namespace Webkul\Accounting\Filament\Clusters\Reporting\Pages;
 
 use BezhanSalleh\FilamentShield\Traits\HasPageShield;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Webkul\Accounting\Enums\ValueSource;
 use Webkul\Accounting\Filament\Clusters\Reporting;
 use Webkul\Accounting\Models\ReportLine;
 use Webkul\Accounting\Services\ReportValueProviderRegistry;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * Read-only registry view: which external value providers are registered in
@@ -56,7 +58,8 @@ class ExternalProviders extends Page
     {
         $registry = app(ReportValueProviderRegistry::class);
 
-        $lines = ReportLine::query()
+        $lines = CurrentCompany::scope(ReportLine::query(), includeShared: true)
+            ->whereHas('template', fn (Builder $template) => CurrentCompany::scope($template, includeShared: true))
             ->where('value_source', ValueSource::EXTERNAL->value)
             ->with('template')
             ->orderBy('report_template_id')

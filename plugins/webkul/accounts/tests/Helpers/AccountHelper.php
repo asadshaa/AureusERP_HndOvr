@@ -119,9 +119,11 @@ class AccountHelper
         ]);
     }
 
+    /** A partner of the shared seeded company (invoice/bill forms only offer the active company's partners). */
     public static function partner(): Partner
     {
         return Partner::factory()->create([
+            'company_id'                     => static::company()->id,
             'property_account_receivable_id' => static::account('receivable')->id,
             'property_account_payable_id'    => static::account('payable')->id,
         ]);

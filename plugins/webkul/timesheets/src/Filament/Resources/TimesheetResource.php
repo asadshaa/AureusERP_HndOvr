@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Timesheet\Filament\Resources\TimesheetResource\Pages\ManageTimesheets;
@@ -235,22 +236,22 @@ class TimesheetResource extends Resource
                     }),
                 SelectFilter::make('user_id')
                     ->label(__('timesheets::filament/resources/timesheet.table.filters.employee'))
-                    ->relationship('user', 'name')
+                    ->relationship('user', 'name', modifyQueryUsing: fn (Builder $query): Builder => static::scopeFilterOptions($query, 'user'))
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('project_id')
                     ->label(__('timesheets::filament/resources/timesheet.table.filters.project'))
-                    ->relationship('project', 'name')
+                    ->relationship('project', 'name', modifyQueryUsing: fn (Builder $query): Builder => static::scopeFilterOptions($query, 'project'))
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('task_id')
                     ->label(__('timesheets::filament/resources/timesheet.table.filters.task'))
-                    ->relationship('task', 'title')
+                    ->relationship('task', 'title', modifyQueryUsing: fn (Builder $query): Builder => static::scopeFilterOptions($query, 'task'))
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('creator_id')
                     ->label(__('timesheets::filament/resources/timesheet.table.filters.creator'))
-                    ->relationship('creator', 'name')
+                    ->relationship('creator', 'name', modifyQueryUsing: fn (Builder $query): Builder => static::scopeFilterOptions($query, 'user'))
                     ->searchable()
                     ->preload(),
             ])
@@ -314,6 +315,20 @@ class TimesheetResource extends Resource
                         ),
                 ]),
             ]);
+    }
+
+    /** Limit a filter's user, project or task options to the active company. */
+    public static function scopeFilterOptions(Builder $query, string $relation): Builder
+    {
+        $companyId = CurrentCompany::id();
+
+        if ($companyId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $relation === 'user'
+            ? CurrentCompany::scopeUsersOf($query, $companyId)
+            : CurrentCompany::scope($query);
     }
 
     public static function getPages(): array

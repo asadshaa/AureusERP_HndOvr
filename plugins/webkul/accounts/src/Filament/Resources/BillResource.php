@@ -3,6 +3,7 @@
 namespace Webkul\Account\Filament\Resources;
 
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -82,6 +83,8 @@ use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Field\Filament\Forms\Components\ProgressStepper as FormProgressStepper;
 use Webkul\Field\Filament\Infolists\Components\ProgressStepper as InfolistProgressStepper;
 use Webkul\Product\Settings\ProductSettings;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Security\Services\SelectableCompanies;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
 use Webkul\Support\Filament\Infolists\Components\RepeatableEntry;
@@ -161,7 +164,8 @@ class BillResource extends Resource
                                             ->relationship(
                                                 'partner',
                                                 'name',
-                                                fn (Builder $query) => $query->orderBy('id')->withTrashed(),
+                                                // Same strict scope as PartnerResource: active company's partners only.
+                                                fn (Builder $query) => CurrentCompany::scope($query->orderBy('id')->withTrashed()),
                                             )
                                             ->required()
                                             ->searchable()
@@ -329,7 +333,8 @@ class BillResource extends Resource
                                     ->schema([
                                         Select::make('company_id')
                                             ->label(__('accounts::filament/resources/bill.form.tabs.other-information.fieldset.accounting.fields.company'))
-                                            ->relationship('company', 'name')
+                                            ->relationship('company', 'name', modifyQueryUsing: fn (Builder $query) => SelectableCompanies::scope($query))
+                                            ->rule(fn (): Closure => SelectableCompanies::rule())
                                             ->searchable()
                                             ->preload()
                                             ->live()
@@ -340,7 +345,7 @@ class BillResource extends Resource
                                                     $set('currency_id', $company->currency_id);
                                                 }
                                             })
-                                            ->default(Auth::user()->default_company_id),
+                                            ->default(fn (): ?int => CurrentCompany::id()),
                                         Select::make('invoice_incoterm_id')
                                             ->label(__('accounts::filament/resources/bill.form.tabs.other-information.fieldset.accounting.fields.incoterm'))
                                             ->relationship('invoiceIncoterm', 'name')

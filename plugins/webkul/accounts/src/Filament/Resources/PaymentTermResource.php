@@ -46,6 +46,7 @@ use Webkul\Account\Filament\Resources\PaymentTermResource\Pages\ManagePaymentDue
 use Webkul\Account\Filament\Resources\PaymentTermResource\Pages\ViewPaymentTerm;
 use Webkul\Account\Filament\Resources\PaymentTermResource\RelationManagers\PaymentDueTermRelationManager;
 use Webkul\Account\Models\PaymentTerm;
+use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
 use Webkul\Support\Filament\Forms\Components\Repeater;
 use Webkul\Support\Filament\Forms\Components\Repeater\TableColumn;
 use Webkul\Support\Filament\Infolists\Components\RepeatableEntry;
@@ -53,6 +54,11 @@ use Webkul\Support\Filament\Infolists\Components\Repeater\TableColumn as Infolis
 
 class PaymentTermResource extends Resource
 {
+    use ScopedToActiveCompany;
+
+    /** Seeded terms (Immediate, 30 days, ...) have no company and are shared by all. */
+    protected static bool $includeSharedRecords = true;
+
     protected static ?string $model = PaymentTerm::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-currency-dollar';

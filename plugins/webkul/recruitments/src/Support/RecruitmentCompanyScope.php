@@ -3,7 +3,7 @@
 namespace Webkul\Recruitment\Support;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Auth;
+use Webkul\Security\Services\CurrentCompany;
 
 /**
  * One place for "only the current company" in Recruitment form selects, so
@@ -16,9 +16,7 @@ class RecruitmentCompanyScope
 {
     public static function companyId(): ?int
     {
-        $companyId = Auth::user()?->default_company_id;
-
-        return $companyId ? (int) $companyId : null;
+        return CurrentCompany::id();
     }
 
     /** Records that belong to the current company. */

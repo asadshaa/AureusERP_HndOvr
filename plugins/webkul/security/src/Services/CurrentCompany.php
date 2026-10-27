@@ -15,9 +15,9 @@ use Webkul\Support\Models\Company;
  * default company (archived companies never count). The active company is
  * users.default_company_id — the value the ~430 existing company filters
  * already read — and can only be switched to one of the user's companies.
- * A "group owner" (permission security_manage_company_memberships) may
- * manage other users' company memberships; nobody else can grant access to a
- * company.
+ * A "group owner" (permission security_manage_company_memberships) is the
+ * super admin over all companies: a member of every active company, and the
+ * only one who may manage other users' company memberships.
  */
 class CurrentCompany
 {
@@ -45,7 +45,12 @@ class CurrentCompany
         return in_array((int) $user->default_company_id, static::membershipIds($user), true) ? (int) $user->default_company_id : null;
     }
 
-    /** @return array<int, int> the (non-archived) companies the user belongs to */
+    /**
+     * The (non-archived) companies the user belongs to. A group owner (the
+     * super admin over all companies) belongs to every active company.
+     *
+     * @return array<int, int>
+     */
     public static function membershipIds(?User $user = null): array
     {
         $user ??= static::user();
@@ -55,9 +60,9 @@ class CurrentCompany
         }
 
         return static::cache()[$user->getKey()] ??= Company::query()
-            ->where(fn (Builder $query) => $query
+            ->unless(static::isGroupOwner($user), fn (Builder $query) => $query->where(fn (Builder $inner) => $inner
                 ->whereKey($user->default_company_id)
-                ->orWhereIn('id', $user->allowedCompanies()->select('companies.id')))
+                ->orWhereIn('id', $user->allowedCompanies()->select('companies.id'))))
             ->orderBy('id')
             ->pluck('id')
             ->map(fn ($id): int => (int) $id)
