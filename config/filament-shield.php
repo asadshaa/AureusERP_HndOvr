@@ -4,6 +4,7 @@ use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
 use Filament\Pages\Dashboard;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
+use Webkul\Recruitment\Filament\Clusters\Applications\Resources\InterviewResource;
 
 return [
 
@@ -176,7 +177,12 @@ return [
 
     'resources' => [
         'subject' => 'model',
-        'manage'  => [],
+        'manage'  => [
+            // Interviews are only listed (view_any = every interview of the
+            // company, view = open one); scheduling and feedback follow the
+            // application's own rights (InterviewPolicy / InterviewService).
+            InterviewResource::class => ['view_any', 'view'],
+        ],
         'exclude' => [
             RoleResource::class,
         ],

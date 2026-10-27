@@ -13,6 +13,7 @@ use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Recruitment\Console\Commands\AnalyseCvsCommand;
 use Webkul\Recruitment\Console\Commands\PullWebsiteApplicationsCommand;
 use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
+use Webkul\Recruitment\Console\Commands\SendInterviewRemindersCommand;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
 use Webkul\Recruitment\Jobs\AnalyseApplicantCv;
@@ -22,12 +23,15 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPostingEvent;
 use Webkul\Recruitment\Models\JobQuestion;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
+use Webkul\Recruitment\Services\InterviewService;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Recruitment\Services\JobPostingLifecycle;
 use Webkul\Recruitment\Services\JobPostingLinks;
+use Webkul\Recruitment\Services\RecruitmentMailer;
 use Webkul\Recruitment\Services\Website\CompanyWebsitePublisher;
 use Webkul\Recruitment\Services\Website\WebsiteDerivedChannelPublisher;
 use Webkul\Recruitment\Services\Website\WebsiteListingRefresher;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 
 class RecruitmentServiceProvider extends PackageServiceProvider
@@ -62,12 +66,14 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_10_27_000001_create_recruitments_screening_tables',
                 '2026_10_28_000001_add_public_job_fields_to_job_positions',
                 '2026_10_29_000001_create_recruitments_website_tables',
+                '2026_10_30_000001_create_recruitments_interviews_tables',
             ])
             ->runsMigrations()
             ->hasCommands([
                 RemindPostingRemovalsCommand::class,
                 AnalyseCvsCommand::class,
                 PullWebsiteApplicationsCommand::class,
+                SendInterviewRemindersCommand::class,
             ])
             ->hasDependencies([
                 'employees',
@@ -104,6 +110,8 @@ class RecruitmentServiceProvider extends PackageServiceProvider
         $this->registerJobPostingGuardsOnBaseJobModel();
         $this->registerCvAnalysisTriggers();
         $this->registerWebsitePublishers();
+        $this->registerApplicationConfirmationTrigger();
+        $this->registerInterviewClosureTrigger();
     }
 
     /**
@@ -140,6 +148,51 @@ class RecruitmentServiceProvider extends PackageServiceProvider
 
         JobQuestion::saved(fn (JobQuestion $question) => WebsiteListingRefresher::questionChanged($question));
         JobQuestion::deleted(fn (JobQuestion $question) => WebsiteListingRefresher::questionChanged($question));
+    }
+
+    /**
+     * Stage 2.3: refusing or archiving an application, from any screen,
+     * cancels its upcoming interviews (interviewers get the cancellation; the
+     * candidate is not emailed). Needs a signed-in user allowed to change the
+     * application; otherwise the interviews stay for HR to cancel by hand.
+     */
+    protected function registerInterviewClosureTrigger(): void
+    {
+        Applicant::updated(function (Applicant $applicant): void {
+            $refused = $applicant->wasChanged('refuse_reason_id') && $applicant->refuse_reason_id;
+            $archived = $applicant->wasChanged('is_active') && ! $applicant->is_active;
+            $actor = CurrentCompany::user();
+
+            if ((! $refused && ! $archived) || ! $actor || ! Schema::hasTable('recruitments_interviews')) {
+                return;
+            }
+
+            try {
+                app(InterviewService::class)->cancelForClosedApplication($applicant, $refused ? __('The application was refused.') : __('The application was archived.'), $actor);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
+    }
+
+    /**
+     * Stage 2.6: an application that arrives through one of the configured
+     * intake sources (the careers website by default; not bulk imports) gets
+     * the queued "application received" email once.
+     */
+    protected function registerApplicationConfirmationTrigger(): void
+    {
+        Applicant::created(function (Applicant $applicant): void {
+            $source = $applicant->applicant_properties['source_provenance']['adapter'] ?? null;
+
+            if ($source && in_array($source, (array) config('recruitment.mail.confirm_sources', []), true)) {
+                try {
+                    app(RecruitmentMailer::class)->confirmApplication($applicant);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            }
+        });
     }
 
     /**

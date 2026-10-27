@@ -19,9 +19,9 @@ use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Mail\ApplicantRefuseMail;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\RefuseReason;
+use Webkul\Recruitment\Services\RecruitmentMailer;
 use Webkul\Recruitment\Traits\HandlesEmployeeConversion;
 use Webkul\Recruitment\Traits\HasScreeningActions;
-use Webkul\Support\Services\EmailService;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 
 class ViewApplicant extends ViewRecord
@@ -147,10 +147,11 @@ class ViewApplicant extends ViewRecord
                     if (isset($data['notify']) && $data['notify']) {
                         $data = $this->prepareApplicantRefuseNotificationPayload($data);
 
-                        app(EmailService::class)->send(
-                            mailClass: ApplicantRefuseMail::class,
-                            view: "recruitments::mails.{$refuseReason?->template}",
-                            payload: $data
+                        app(RecruitmentMailer::class)->queue(
+                            ApplicantRefuseMail::class,
+                            "recruitments::mails.{$refuseReason?->template}",
+                            $data,
+                            $record->company_id,
                         );
                     }
 

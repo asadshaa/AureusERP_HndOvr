@@ -195,6 +195,12 @@ class Applicant extends Model
         return $this->hasMany(ApplicantAnswer::class, 'applicant_id');
     }
 
+    /** Scheduled interviews of this application (Stage 2.3), with their feedback. */
+    public function interviews(): HasMany
+    {
+        return $this->hasMany(Interview::class, 'applicant_id');
+    }
+
     /** The job ad this application came through (first touch). */
     public function jobPosting(): BelongsTo
     {

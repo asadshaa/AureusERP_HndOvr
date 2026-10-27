@@ -82,6 +82,28 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Recruitment emails (queued)
+    |--------------------------------------------------------------------------
+    |
+    | Candidate and interviewer emails are queued (a queue worker must run)
+    | and sent from the company, not from the recruiter's personal address:
+    | "sender" = company (the company's email, else the app's MAIL_FROM),
+    | app (always MAIL_FROM) or user (the recruiter, as before). Replies go to
+    | the recruiter. "from_address" overrides the address for every company.
+    | "confirm_sources": intake sources that send the "application received"
+    | email automatically (bulk imports from job boards do not).
+    |
+    */
+
+    'mail' => [
+        'sender'          => env('RECRUITMENT_MAIL_SENDER', 'company'),
+        'from_address'    => env('RECRUITMENT_MAIL_FROM'),
+        'confirm_sources' => ['company_website'],
+        'queue'           => env('RECRUITMENT_MAIL_QUEUE'),
+    ],
+
     'cv_analysis' => [
         'enabled'             => (bool) env('RECRUITMENT_CV_ANALYSIS', true),
         'auto'                => (bool) env('RECRUITMENT_CV_ANALYSIS_AUTO', true),
@@ -96,6 +118,24 @@ return [
             'not willing to relocate', 'unwilling to relocate', 'not open to relocation', 'unable to relocate',
             'cannot relocate', 'can not relocate', 'no relocation',
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Interviews (Stage 2.3)
+    |--------------------------------------------------------------------------
+    |
+    | Interview times are stored in UTC and entered/shown in "timezone"
+    | (default Asia/Karachi; all three companies are in Pakistan). recruitments:interview-reminders
+    | (hourly) emails the candidate and interviewers "reminder_hours" before
+    | an interview, once, and asks each interviewer for feedback once the
+    | interview has ended.
+    |
+    */
+
+    'interviews' => [
+        'timezone'       => env('RECRUITMENT_INTERVIEW_TIMEZONE', 'Asia/Karachi'),
+        'reminder_hours' => (int) env('RECRUITMENT_INTERVIEW_REMINDER_HOURS', 24),
     ],
 
 ];

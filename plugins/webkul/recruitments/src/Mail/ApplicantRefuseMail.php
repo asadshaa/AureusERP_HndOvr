@@ -35,6 +35,9 @@ class ApplicantRefuseMail extends Mailable
         return new Envelope(
             subject: $this->payload['subject'],
             from: new Address($this->payload['from']['address'], '"'.addslashes($this->payload['from']['name']).'"'),
+            replyTo: isset($this->payload['reply_to']['address'])
+                ? [new Address($this->payload['reply_to']['address'], $this->payload['reply_to']['name'] ?? null)]
+                : [],
         );
     }
 

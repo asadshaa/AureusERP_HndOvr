@@ -44,7 +44,7 @@ class ApplicantChartWidget extends ChartWidget
             'hr_ops_manager',
         ])
         || (int) $user->id === 1
-        || $user->can('view_any_applicant');
+        || $user->can('view_any_recruitment_applicant');
     }
 
     protected static function getPagePermission(): ?string
@@ -59,7 +59,7 @@ class ApplicantChartWidget extends ChartWidget
 
     protected function getData(): array
     {
-        $query = Applicant::query()
+        $query = Applicant::withTrashed()
             ->where('company_id', Auth::user()?->default_company_id);
 
         if ($this->pageFilters['selectedJobs'] ?? null) {

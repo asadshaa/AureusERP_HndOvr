@@ -128,3 +128,15 @@ Schedule::command('recruitments:pull-website-applications')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)
     ->onOneServer();
+
+/*
+| recruitments:interview-reminders emails the candidate and the interviewers
+| once, about 24 hours before an interview (recruitment.interviews.reminder_hours),
+| and asks each interviewer once for feedback after the interview. Every
+| email is claimed atomically before it is queued, so an overlap or a re-run
+| never sends twice.
+*/
+Schedule::command('recruitments:interview-reminders')
+    ->hourly()
+    ->withoutOverlapping(30)
+    ->onOneServer();

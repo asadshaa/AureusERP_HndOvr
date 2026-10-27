@@ -20,14 +20,13 @@ use Webkul\Recruitment\Enums\RecruitmentState;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
 use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Mail\ApplicantRefuseMail;
-use Webkul\Recruitment\Mail\ApplicationConfirmMail;
 use Webkul\Recruitment\Mail\InterviewerAssignedMail;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\RefuseReason;
+use Webkul\Recruitment\Services\RecruitmentMailer;
 use Webkul\Recruitment\Traits\HandlesEmployeeConversion;
 use Webkul\Recruitment\Traits\HasScreeningActions;
 use Webkul\Security\Models\User;
-use Webkul\Support\Services\EmailService;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 
 class EditApplicant extends EditRecord
@@ -179,10 +178,11 @@ class EditApplicant extends EditRecord
                     if (isset($data['notify']) && $data['notify']) {
                         $data = $this->prepareApplicantRefuseNotificationPayload($data);
 
-                        app(EmailService::class)->send(
-                            mailClass: ApplicantRefuseMail::class,
-                            view: "recruitments::mails.{$refuseReason?->template}",
-                            payload: $data
+                        app(RecruitmentMailer::class)->queue(
+                            ApplicantRefuseMail::class,
+                            "recruitments::mails.{$refuseReason?->template}",
+                            $data,
+                            $record->company_id,
                         );
                     }
 
@@ -232,13 +232,14 @@ class EditApplicant extends EditRecord
 
     protected function sendApplicationConfirmationNotification(): void
     {
-        $data = $this->prepareCandidateNotificationPayload();
+        // Queued, and only once per application (also when it came in through intake).
+        if (! app(RecruitmentMailer::class)->confirmApplication($this->record)) {
+            return;
+        }
 
-        app(EmailService::class)->send(
-            mailClass: ApplicationConfirmMail::class,
-            view: $viewName = 'recruitments::mails.application-confirm',
-            payload: $data
-        );
+        $data = $this->prepareCandidateNotificationPayload();
+        $data['from'] = app(RecruitmentMailer::class)->from($this->record->company, Auth::user());
+        $viewName = 'recruitments::mails.application-confirm';
 
         $messageData = [
             'from' => [
@@ -267,10 +268,11 @@ class EditApplicant extends EditRecord
                 if ($interviewer) {
                     $data = $this->prepareInterviewerNotificationPayload($interviewer);
 
-                    app(EmailService::class)->send(
-                        mailClass: InterviewerAssignedMail::class,
-                        view: 'recruitments::mails.interviewer-assigned',
-                        payload: $data
+                    app(RecruitmentMailer::class)->queue(
+                        InterviewerAssignedMail::class,
+                        'recruitments::mails.interviewer-assigned',
+                        $data,
+                        $this->record->company_id,
                     );
                 }
             }

@@ -60,6 +60,7 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ListApplicants;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ManageSkill;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ViewApplicant;
+use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\InterviewsRelationManager;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\SkillsRelationManager;
 use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
 use Webkul\Recruitment\Models\Applicant;
@@ -447,7 +448,7 @@ class ApplicantResource extends Resource
                                     ->label('Source / channel details')
                                     ->maxLength(255),
                                 TextInput::make('screening_score')->label('CV score')->helperText('Set by the CV analyser; you can adjust it. Re-analysing the CV replaces it.')->numeric()->minValue(0)->maxValue(100),
-                                TextInput::make('interview_score')->numeric()->minValue(0)->maxValue(100),
+                                TextInput::make('interview_score')->helperText('Set from interview feedback (average rating x 20); you can adjust it. New feedback recalculates it.')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('assessment_score')->numeric()->minValue(0)->maxValue(100),
                                 Select::make('offer_status')->options([
                                     'draft'    => 'Draft', 'sent' => 'Sent', 'accepted' => 'Accepted',
@@ -1016,6 +1017,17 @@ class ApplicantResource extends Resource
                                             ])
                                             ->placeholder('No answers yet'),
                                     ]),
+                                Section::make('Interviews')
+                                    ->schema([
+                                        TextEntry::make('interview_score')
+                                            ->label('Interview score (average rating x 20)')
+                                            ->formatStateUsing(fn ($state): ?string => $state === null ? null : rtrim(rtrim(number_format((float) $state, 2, '.', ''), '0'), '.').' / 100')
+                                            ->placeholder('No feedback yet'),
+                                        TextEntry::make('next_interview')
+                                            ->label('Next interview')
+                                            ->state(fn (Applicant $record): ?string => $record->interviews()->upcoming()->orderBy('starts_at')->first()?->whenLabel())
+                                            ->placeholder('None scheduled'),
+                                    ]),
                                 CvAnalysisComponents::infolistSection(),
                             ])->columnSpan(1),
                     ])->columnSpanFull(),
@@ -1034,6 +1046,7 @@ class ApplicantResource extends Resource
     public static function getRelations(): array
     {
         return [
+            InterviewsRelationManager::class,
             RelationGroup::make('Manage Skills', [
                 SkillsRelationManager::class,
             ])
