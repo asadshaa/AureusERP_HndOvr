@@ -48,8 +48,9 @@ class BarcodeServiceProvider extends PackageServiceProvider
 
         FilamentAsset::register(assets: [
             Css::make('barcode', __DIR__.'/../resources/dist/barcode.css'),
-            Js::make('barcode', __DIR__.'/../resources/dist/barcode.js'),
-            Js::make('html5-qrcode', __DIR__.'/../resources/dist/html5-qrcode.min.js'),
+            // Only the scanner screens need these (the camera library is ~375 KB): they load them with @assets.
+            Js::make('barcode', __DIR__.'/../resources/dist/barcode.js')->loadedOnRequest(),
+            Js::make('html5-qrcode', __DIR__.'/../resources/dist/html5-qrcode.min.js')->loadedOnRequest(),
         ], package: 'barcode');
     }
 

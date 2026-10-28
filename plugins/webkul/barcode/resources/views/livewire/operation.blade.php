@@ -1,3 +1,8 @@
+@assets
+<script src="{{ \Filament\Support\Facades\FilamentAsset::getScriptSrc('html5-qrcode', 'barcode') }}"></script>
+<script src="{{ \Filament\Support\Facades\FilamentAsset::getScriptSrc('barcode', 'barcode') }}"></script>
+@endassets
+
 @php
     $editingMoveLine = $editingMoveLineId ? $operation->moveLines->firstWhere('id', $editingMoveLineId) : null;
     $allMoveLinesCounted = $moveLines->isNotEmpty()

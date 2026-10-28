@@ -1,3 +1,8 @@
+@assets
+<script src="{{ \Filament\Support\Facades\FilamentAsset::getScriptSrc('html5-qrcode', 'barcode') }}"></script>
+<script src="{{ \Filament\Support\Facades\FilamentAsset::getScriptSrc('barcode', 'barcode') }}"></script>
+@endassets
+
 <div>
     <main class="min-h-screen p-2" x-data="barcodeScanner('search', 'openOperation')">
         @unless (\Webkul\Barcode\Support\NativeApp::usesNativeNavigation())
