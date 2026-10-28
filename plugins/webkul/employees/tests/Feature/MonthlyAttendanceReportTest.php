@@ -395,3 +395,15 @@ it('shows the page to HR and streams the Excel download', function () {
 
     expect(AttendanceReport::canAccess())->toBeFalse();
 });
+
+it('counts punches to the minute, dropping seconds like the sheet', function () {
+    $company = marCompany();
+    $employee = marEmployee($company);
+    marPunch($employee, '2026-08-03', '10:20:45', '17:34:10');
+
+    $rows = marRows($this->report->forEmployee($employee, $company->id, '2026-08'));
+
+    expect(marHm($rows['2026-08-03']['inside_seconds']))->toBe('7:14')
+        ->and(marHm($rows['2026-08-03']['final_seconds']))->toBe('7:14')
+        ->and($rows['2026-08-03']['late'])->toBeTrue();
+});

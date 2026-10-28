@@ -447,7 +447,10 @@ class MonthlyAttendanceReport
             ->each(function (AttendanceRecord $record) use (&$result, $timezone): void {
                 $date = $record->attendance_date->toDateString();
                 $midnight = CarbonImmutable::parse($date, $timezone)->startOfDay();
-                $seconds = fn ($moment): ?int => $moment ? (int) $midnight->diffInSeconds(CarbonImmutable::parse($moment)->setTimezone($timezone), false) : null;
+                // Punches count to the minute (seconds dropped), as in HR's sheet: 10:20:45 → 10:20.
+                $seconds = fn ($moment): ?int => $moment
+                    ? (int) floor($midnight->diffInSeconds(CarbonImmutable::parse($moment)->setTimezone($timezone), false) / 60) * 60
+                    : null;
 
                 $in = $seconds($record->check_in);
                 $out = $seconds($record->check_out);
