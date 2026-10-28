@@ -12,7 +12,10 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use RuntimeException;
+use Webkul\Recruitment\Enums\ScreeningStatus;
+use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource;
 use Webkul\Recruitment\Filament\Clusters\Configurations;
+use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\IntakeFailure;
 use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\WebsiteConnection;
@@ -192,8 +195,61 @@ class WebsiteIntake extends Page implements HasTable
         }
 
         $failed = $result->error !== null || $result->busy || $result->counts[WebsiteIntakeResult::FAILED] > 0;
-        $notification = Notification::make()->title($failed ? 'Done, with problems' : 'Done')->body(e($result->summary()));
+        $created = $result->created->loadMissing(['candidate', 'job']);
+        $lines = $created->take(5)->map(fn (Applicant $applicant): string => e(($applicant->candidate?->name ?? 'Applicant').' — '.($applicant->job?->name ?? 'no job')));
+
+        if ($result->counts[WebsiteIntakeResult::ALREADY_APPLIED] > 0) {
+            $lines->push(e($result->counts[WebsiteIntakeResult::ALREADY_APPLIED].' had already applied to the same job (one application per person per job), so no new application was made.'));
+        }
+
+        $title = match (true) {
+            $created->isNotEmpty() => $created->count().' new application'.($created->count() === 1 ? '' : 's').' imported',
+            $failed                => 'Done, with problems',
+            default                => 'No new applications',
+        };
+
+        $notification = Notification::make()
+            ->title($title)
+            ->body($lines->isNotEmpty() ? $lines->implode('<br>').'<br><span style="opacity:.7">'.e($result->summary()).'</span>' : e($result->summary()))
+            ->actions($created->take(3)->map(fn (Applicant $applicant) => Action::make('open'.$applicant->id)
+                ->label('Open '.($applicant->candidate?->name ?? 'applicant'))
+                ->url(ApplicantResource::getUrl('view', ['record' => $applicant]))
+                ->button())
+                ->all())
+            ->persistent();
 
         ($failed ? $notification->warning() : $notification->success())->send();
+    }
+
+    /**
+     * The latest applications imported from the careers website, so HR can see
+     * what arrived (the table above lists only what could not be imported).
+     *
+     * @return array<string, mixed>
+     */
+    protected function getViewData(): array
+    {
+        $companyId = (int) CurrentCompany::id();
+
+        return [
+            'recent' => Applicant::query()
+                ->where('company_id', $companyId)
+                ->where('applicant_properties->source_provenance->adapter', 'company_website')
+                ->with(['candidate', 'job', 'jobPosting'])
+                ->latest('id')
+                ->limit(15)
+                ->get()
+                ->map(fn (Applicant $applicant): array => [
+                    'url'       => ApplicantResource::getUrl('view', ['record' => $applicant]),
+                    'name'      => $applicant->candidate?->name ?? 'Applicant',
+                    'email'     => $applicant->candidate?->email_from,
+                    'job'       => $applicant->job?->name ?? '—',
+                    'via'       => $applicant->jobPosting?->displayName() ?? 'Company website',
+                    'received'  => $applicant->created_at?->diffForHumans(),
+                    'cv'        => filled($applicant->candidate?->resume_path),
+                    'screening' => ScreeningStatus::tryFrom((string) $applicant->screening_status)?->getLabel(),
+                    'score'     => $applicant->screening_score !== null ? (int) round((float) $applicant->screening_score) : null,
+                ]),
+        ];
     }
 }

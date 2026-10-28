@@ -3,6 +3,7 @@
 namespace Webkul\Recruitment;
 
 use Filament\Panel;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 use Webkul\Employee\Models\EmployeeJobPosition;
@@ -16,12 +17,15 @@ use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
 use Webkul\Recruitment\Console\Commands\SendInterviewRemindersCommand;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
+use Webkul\Recruitment\Enums\ChannelPostingStatus;
 use Webkul\Recruitment\Jobs\AnalyseApplicantCv;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\JobPostingEvent;
 use Webkul\Recruitment\Models\JobQuestion;
+use Webkul\Recruitment\Models\WebsiteConnection;
 use Webkul\Recruitment\Services\ApplicantSourceRegistry;
 use Webkul\Recruitment\Services\InterviewService;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
@@ -126,6 +130,26 @@ class RecruitmentServiceProvider extends PackageServiceProvider
         $registry->registerPublisher($this->app->make(CompanyWebsitePublisher::class));
         $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::GOOGLE));
         $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::INDEED_FEED));
+
+        // Ads added before the company had a website connection wait for it: send them once it is switched on.
+        WebsiteConnection::saved(function (WebsiteConnection $connection): void {
+            if (! $connection->is_active || ! ($connection->wasRecentlyCreated || $connection->wasChanged(['is_active', 'base_url', 'username', 'app_password']))) {
+                return;
+            }
+
+            DB::afterCommit(function () use ($connection): void {
+                $waiting = JobPosting::query()
+                    ->where('channel', 'careers_site')
+                    ->where('status', ChannelPostingStatus::WAITING->value)
+                    ->whereHas('job', fn ($query) => $query->where('company_id', $connection->company_id))
+                    ->pluck('id')
+                    ->all();
+
+                if ($waiting !== []) {
+                    app(JobPostingLifecycle::class)->syncPublishers($waiting);
+                }
+            });
+        });
 
         JobPostingEvent::created(fn (JobPostingEvent $event) => WebsiteDerivedChannelPublisher::followWebsiteListing($event));
 

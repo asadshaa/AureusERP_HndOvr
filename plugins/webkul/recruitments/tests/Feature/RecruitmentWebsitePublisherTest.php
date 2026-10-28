@@ -418,3 +418,18 @@ it('reports a redirect instead of following it with the password', function () {
         ->and($connection->refresh()->last_error)->toContain('redirected');
     Http::assertSentCount(1);
 });
+
+it('sends website ads that were waiting as soon as the company switches its website connection on', function () {
+    $f = jobPostingFixture();
+    $site = (new FakeWordPressSite)->install();
+
+    jobPostingAdd($f, ['careers_site']);
+    jobPostingPublish($f);
+    expect(jobPostingFor($f['job'], 'careers_site')->status)->toBe(ChannelPostingStatus::WAITING);
+
+    websiteConnectionFor($f['company']);
+
+    $careers = jobPostingFor($f['job'], 'careers_site');
+    expect($careers->status)->toBe(ChannelPostingStatus::LIVE)
+        ->and($site->jobs)->toHaveKey($careers->token);
+});

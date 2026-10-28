@@ -245,7 +245,7 @@ it('records a CV that is not a PDF or Word file as a failure, tries it a few tim
     Livewire::test(WebsiteIntake::class)
         ->assertCanSeeTableRecords([$bad, $exe])
         ->callTableAction('retry', $bad)
-        ->assertNotified('Done');
+        ->assertNotified('1 new application imported');
 
     $applicant = websiteApplicants($f)->sole();
     expect($bad->refresh()->resolution)->toBe(IntakeFailure::RESOLVED_IMPORTED)

@@ -1,0 +1,17 @@
+{
+  "name": "aureus-careers-site-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demo careers website for Aureus ERP: receives jobs from Aureus, shows them with Google JobPosting data and an Indeed XML feed, takes applications with CVs and hands them to Aureus (API contract aureus/v1).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.2"
+  }
+}
