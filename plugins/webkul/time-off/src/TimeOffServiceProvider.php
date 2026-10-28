@@ -25,6 +25,7 @@ class TimeOffServiceProvider extends PackageServiceProvider
     {
         $package->name(static::$name)
             ->hasTranslations()
+            ->hasViews()
             ->hasMigrations([
                 '2025_01_17_080711_create_time_off_leave_types_table',
                 '2025_01_17_080712_create_time_off_leaves_table',
@@ -35,6 +36,9 @@ class TimeOffServiceProvider extends PackageServiceProvider
                 '2025_01_22_101656_create_time_off_leave_allocations_table',
                 '2025_08_13_120000_alter_private_name_column_in_time_off_leaves_table',
                 '2026_08_25_000014_extend_leave_for_shared_approval',
+                '2026_10_28_000020_add_cancellation_to_time_off_leaves',
+                '2026_10_28_000021_create_time_off_allocation_policies_table',
+                '2026_10_28_000022_half_day_uses_casual_leave_balance',
             ])
             ->hasDependencies([
                 'employees',

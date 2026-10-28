@@ -12,7 +12,7 @@ use Webkul\TimeOff\Models\Leave;
  * with request_hour_from / request_hour_to on one day): at most
  * attendance.short_leave.max_hours hours each and at most
  * attendance.short_leave.max_per_month per employee per calendar month
- * (refused requests do not count). Anything longer must be a half day.
+ * (refused and cancelled requests do not count). Anything longer must be a half day.
  *
  * Enforced on the Leave model itself (saving) so every path -- the Time Off
  * forms, the calendar widgets, the API, submit for approval -- is covered.
@@ -70,7 +70,7 @@ class ShortLeavePolicy
         $taken = Leave::query()
             ->where('employee_id', $employeeId)
             ->where('request_unit_hours', true)
-            ->where('state', '!=', State::REFUSE->value)
+            ->whereNotIn('state', [State::REFUSE->value, State::CANCEL->value])
             ->whereBetween('request_date_from', [$day->copy()->startOfMonth()->toDateString(), $day->copy()->endOfMonth()->toDateString().' 23:59:59'])
             ->when($ignoreLeaveId, fn ($query) => $query->whereKeyNot($ignoreLeaveId))
             ->count();

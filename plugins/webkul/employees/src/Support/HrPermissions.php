@@ -62,10 +62,22 @@ final class HrPermissions
     /** Same gap, same fix, for EmployeeRequestTypeResource (gated on ManageEmployeeRequests alone). */
     public const ViewEmployeeRequestTypes = 'hr_view_employee_request_types';
 
+    /**
+     * Upload, replace, check and delete employee documents (and manage the
+     * document types) of the employees in one's HR scope. Line managers do
+     * not get it: their reports' documents stay private by default.
+     */
+    public const ManageEmployeeDocuments = 'hr_manage_employee_documents';
+
+    /** Read-only access to the employee documents of the employees in one's HR scope (auditors). */
+    public const ViewEmployeeDocuments = 'hr_view_employee_documents';
+
     /** @return array<int, string> */
     public static function all(): array
     {
         return [
+            self::ManageEmployeeDocuments,
+            self::ViewEmployeeDocuments,
             self::ViewAllRecords,
             self::ViewSensitiveEmployeeData,
             self::ManageSensitiveEmployeeData,
@@ -258,6 +270,7 @@ final class HrPermissions
     {
         return [
             self::ViewAllRecords,
+            self::ManageEmployeeDocuments,
             self::ApproveLeave,
             self::ApproveTimesheets,
             self::ManagePerformance,
@@ -293,6 +306,7 @@ final class HrPermissions
     public static function hrOfficer(): array
     {
         return [
+            self::ManageEmployeeDocuments,
             'view_any_employee_employee', 'view_employee_employee', 'create_employee_employee', 'update_employee_employee',
             'view_any_employee_employee::skill', 'view_employee_employee::skill', 'create_employee_employee::skill', 'update_employee_employee::skill',
             'view_any_employee_department', 'view_employee_department',
@@ -375,6 +389,7 @@ final class HrPermissions
         return [
             self::ViewAllRecords,
             self::ViewSensitiveEmployeeData,
+            self::ViewEmployeeDocuments,
             self::ViewAnalytics,
             self::ViewAttendance,
             self::ViewAttendanceLocationEvidence,

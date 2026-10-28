@@ -41,6 +41,7 @@ use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
+use Webkul\TimeOff\Database\Factories\LeaveTypeFactory;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveType;
@@ -277,7 +278,7 @@ class LogicalFixesVerificationTest extends TestCase
             'name'       => 'Direct Subordinate',
         ]);
 
-        $leaveType = LeaveType::first() ?? LeaveType::factory()->create(['company_id' => $this->company->id]);
+        $leaveType = LeaveTypeFactory::new()->create(['company_id' => $this->company->id, 'creator_id' => $managerUser->id, 'requires_allocation' => 'no']);
         $leave = Leave::create([
             'user_id'             => $employeeUser->id,
             'employee_id'         => $subordinate->id,

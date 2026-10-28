@@ -18,6 +18,7 @@ use Webkul\Support\Models\Company;
 use Webkul\TimeOff\Enums\RequestDateFromPeriod;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Services\LeaveApprovalService;
+use Webkul\TimeOff\Services\LeaveBalanceService;
 use Webkul\TimeOff\Services\ShortLeavePolicy;
 
 class Leave extends Model
@@ -76,6 +77,12 @@ class Leave extends Model
         'number_of_hours',
         'request_hour_from',
         'request_hour_to',
+        'cancellation_requested_at',
+        'cancellation_requested_by',
+        'cancellation_request_reason',
+        'cancelled_at',
+        'cancelled_by',
+        'cancellation_reason',
     ];
 
     public function getLogAttributeLabels(): array
@@ -109,17 +116,35 @@ class Leave extends Model
     }
 
     protected $casts = [
-        'state'                    => State::class,
-        'request_date_from_period' => RequestDateFromPeriod::class,
-        'request_date_from'        => 'date',
-        'date_from'                => 'date',
-        'request_unit_half'        => 'boolean',
-        'request_unit_hours'       => 'boolean',
-        'number_of_hours'          => 'decimal:4',
-        'submitted_at'             => 'datetime',
-        'approved_at'              => 'datetime',
-        'rejected_at'              => 'datetime',
+        'state'                     => State::class,
+        'request_date_from_period'  => RequestDateFromPeriod::class,
+        'request_date_from'         => 'date',
+        'date_from'                 => 'date',
+        'request_unit_half'         => 'boolean',
+        'request_unit_hours'        => 'boolean',
+        'number_of_hours'           => 'decimal:4',
+        'submitted_at'              => 'datetime',
+        'approved_at'               => 'datetime',
+        'rejected_at'               => 'datetime',
+        'cancellation_requested_at' => 'datetime',
+        'cancelled_at'              => 'datetime',
     ];
+
+    public function cancelledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    public function cancellationRequestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancellation_requested_by');
+    }
+
+    /** Waiting for a decision (submitted or not yet submitted). */
+    public function isPending(): bool
+    {
+        return in_array($this->state, [State::CONFIRM, State::VALIDATE_ONE], true);
+    }
 
     public function user(): BelongsTo
     {
@@ -212,6 +237,17 @@ class Leave extends Model
                     'request_date_from'  => $leave->request_date_from?->toDateString(),
                     'request_date_to'    => $leave->request_date_to ? Carbon::parse($leave->request_date_to)->toDateString() : null,
                 ], $leave->exists ? (int) $leave->id : null);
+            }
+
+            // Leave balance (LeaveBalanceService), whatever path writes the request: a new
+            // or changed pending request, or a refused / cancelled one put back to pending.
+            $state = $leave->state instanceof State ? $leave->state->value : (string) ($leave->state ?? State::CONFIRM->value);
+            $original = $leave->getRawOriginal('state');
+            if (in_array($state, LeaveBalanceService::PENDING_STATES, true)
+                && (! $leave->exists
+                    || $leave->isDirty(['holiday_status_id', 'number_of_days', 'request_date_from', 'employee_id'])
+                    || ($leave->isDirty('state') && ! in_array((string) $original, LeaveBalanceService::PENDING_STATES, true)))) {
+                app(LeaveBalanceService::class)->assertLeaveFits($leave);
             }
         });
     }

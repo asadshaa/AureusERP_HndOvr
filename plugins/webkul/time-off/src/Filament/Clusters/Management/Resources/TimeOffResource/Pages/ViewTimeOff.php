@@ -7,6 +7,7 @@ use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Webkul\Chatter\Filament\Actions\ChatterAction;
+use Webkul\TimeOff\Filament\Actions\LeaveCancellationActions;
 use Webkul\TimeOff\Filament\Clusters\Management\Resources\TimeOffResource;
 
 class ViewTimeOff extends ViewRecord
@@ -28,6 +29,7 @@ class ViewTimeOff extends ViewRecord
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getRecord()->activityPlans()),
+            ...LeaveCancellationActions::make(),
             EditAction::make(),
             DeleteAction::make()
                 ->successNotification(

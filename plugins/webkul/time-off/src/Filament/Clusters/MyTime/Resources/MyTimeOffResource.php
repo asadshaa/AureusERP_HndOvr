@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\TimeOff\Enums\State;
+use Webkul\TimeOff\Filament\Actions\LeaveCancellationActions;
 use Webkul\TimeOff\Filament\Clusters\Management\Resources\TimeOffResource;
 use Webkul\TimeOff\Filament\Clusters\MyTime;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource\Pages\CreateMyTimeOff;
@@ -78,6 +79,7 @@ class MyTimeOffResource extends Resource
             State::REFUSE,
             State::VALIDATE_ONE,
             State::VALIDATE_TWO,
+            State::CANCEL,
         ]);
     }
 
@@ -128,6 +130,7 @@ class MyTimeOffResource extends Resource
                                 ImageEntry::make('attachment')
                                     ->label(__('time-off::filament/clusters/management/resources/time-off.infolist.entries.attachment'))
                                     ->visible(fn ($record) => $record->holidayStatus?->support_document),
+                                ...LeaveCancellationActions::infolistEntries(),
                             ]),
                     ])->columnSpanFull(),
             ]);

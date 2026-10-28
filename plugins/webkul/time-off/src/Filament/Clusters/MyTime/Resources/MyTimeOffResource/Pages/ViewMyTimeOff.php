@@ -12,6 +12,7 @@ use Webkul\Chatter\Filament\Actions\ChatterAction;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Traits\HasRecordNavigationTabs;
 use Webkul\TimeOff\Enums\State;
+use Webkul\TimeOff\Filament\Actions\LeaveCancellationActions;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Services\LeaveApprovalService;
@@ -62,6 +63,7 @@ class ViewMyTimeOff extends ViewRecord
 
                     $this->getRecord()->refresh();
                 }),
+            ...LeaveCancellationActions::make(),
             EditAction::make(),
             DeleteAction::make()
                 ->successNotification(

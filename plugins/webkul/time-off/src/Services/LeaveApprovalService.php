@@ -98,7 +98,8 @@ class LeaveApprovalService
     {
         $leave->load('approvalRequest.decisions.actor.employee');
         $approval = $leave->approvalRequest;
-        if (! $approval) {
+        // A withdrawn or cancelled leave keeps its state whatever the approval request says.
+        if (! $approval || $leave->state === State::CANCEL || $approval->status === LeaveCancellationService::WITHDRAWN_STATUS) {
             return $leave;
         }
 

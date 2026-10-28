@@ -7,6 +7,7 @@ use Webkul\Security\Models\Role;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
+use Webkul\TimeOff\Models\LeaveAllocationPolicy;
 use Webkul\TimeOff\Models\LeaveType;
 
 /**
@@ -113,6 +114,9 @@ class LeaveWorkflowSeeder extends Seeder
                     ]
                 );
             }
+
+            // Yearly allocation policy defaults (12 / 8 / 5, Annual carries up to 6) for the types above.
+            LeaveAllocationPolicy::forCompany((int) $company->id);
         });
     }
 }

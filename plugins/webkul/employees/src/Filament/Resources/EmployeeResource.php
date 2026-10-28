@@ -47,6 +47,7 @@ use Filament\Tables;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\QueryBuilder;
 use Filament\Tables\Filters\QueryBuilder\Constraints\DateConstraint;
 use Filament\Tables\Filters\QueryBuilder\Constraints\NumberConstraint;
@@ -76,13 +77,19 @@ use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageResume;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageSkill;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ViewEmployee;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\AttendanceRecordsRelationManager;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\DocumentsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ResumeRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\SkillsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\TimeOffRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\WorkLocationAssignmentsRelationManager;
+use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Models\EmployeeJobPosition;
+use Webkul\Employee\Policies\EmployeeDocumentPolicy;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Employee\Support\Cnic;
+use Webkul\Employee\Support\HrPermissions;
 use Webkul\Field\Filament\Traits\HasCustomFields;
 use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
@@ -159,7 +166,8 @@ class EmployeeResource extends Resource
                                             ->columnSpan(1),
                                         TextInput::make('employee_number')
                                             ->label('Employee ID')
-                                            ->maxLength(80),
+                                            ->maxLength(80)
+                                            ->placeholder('Given automatically if left empty'),
                                         TextInput::make('job_title')
                                             ->label(__('employees::filament/resources/employee.form.sections.fields.job-title'))
                                             ->maxLength(255)
@@ -306,6 +314,14 @@ class EmployeeResource extends Resource
                                 DatePicker::make('joining_date')
                                     ->label('Joining date')
                                     ->native(false),
+                                DatePicker::make('probation_end_date')
+                                    ->label('Probation end date')
+                                    ->native(false)
+                                    ->afterOrEqual('joining_date'),
+                                DatePicker::make('confirmation_date')
+                                    ->label('Confirmation date')
+                                    ->native(false)
+                                    ->afterOrEqual('joining_date'),
                                 DatePicker::make('leaving_date')
                                     ->label('Leaving date')
                                     ->native(false)
@@ -625,6 +641,9 @@ class EmployeeResource extends Resource
                                                                                     ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                                                             )
                                                                             ->tel(),
+                                                                        TextInput::make('emergency_relationship')
+                                                                            ->label('Relation')
+                                                                            ->maxLength(100),
                                                                     ])->columns(2),
                                                             ])
                                                             ->columnSpan(['lg' => 1]),
@@ -740,6 +759,26 @@ class EmployeeResource extends Resource
                                                             ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.identification-id'))
                                                             ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
                                                             ->disabled(fn (?Employee $record): bool => $record !== null),
+                                                        TextInput::make('cnic')
+                                                            ->label('CNIC')
+                                                            ->placeholder('12345-1234567-1')
+                                                            ->maxLength(15)
+                                                            ->rule(fn (?Employee $record): Closure => static::cnicRule($record))
+                                                            ->dehydrateStateUsing(fn (?string $state): ?string => Cnic::normalize($state) ?? (blank($state) ? null : $state))
+                                                            ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
+                                                            ->disabled(fn (?Employee $record): bool => $record !== null)
+                                                            ->helperText(fn (?Employee $record): ?string => $record !== null ? 'Change it with "Request sensitive change".' : null),
+                                                        TextInput::make('ntn')
+                                                            ->label('NTN')
+                                                            ->maxLength(30)
+                                                            ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
+                                                            ->disabled(fn (?Employee $record): bool => $record !== null),
+                                                        TextInput::make('eobi_number')
+                                                            ->label('EOBI no.')
+                                                            ->maxLength(40),
+                                                        Select::make('blood_group')
+                                                            ->label('Blood group')
+                                                            ->options(static::bloodGroups()),
                                                         TextInput::make('ssnid')
                                                             ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.ssnid'))
                                                             ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
@@ -968,8 +1007,24 @@ class EmployeeResource extends Resource
                         TextColumn::make('name')
                             ->label(__('employees::filament/resources/employee.table.columns.name'))
                             ->weight(FontWeight::Bold)
-                            ->searchable()
+                            ->searchable(query: fn (Builder $query, string $search): Builder => static::applyDirectorySearch($query, $search))
                             ->sortable(),
+                        Stack::make([
+                            TextColumn::make('employee_number')
+                                ->icon('heroicon-m-hashtag')
+                                ->color('gray')
+                                ->label('Employee code'),
+                        ])
+                            ->visible(fn ($record) => filled($record->employee_number)),
+                        Stack::make([
+                            TextColumn::make('missing_required_documents_count')
+                                ->label('Missing documents')
+                                ->badge()
+                                ->color('warning')
+                                ->formatStateUsing(fn ($state): string => (int) $state.' required document'.((int) $state === 1 ? '' : 's').' missing'),
+                        ])
+                            ->visible(fn ($record): bool => (int) ($record->missing_required_documents_count ?? 0) > 0
+                                && static::canSeeDocumentsOf($record)),
                         Stack::make([
                             TextColumn::make('job_title')
                                 ->icon('heroicon-m-briefcase')
@@ -1029,6 +1084,33 @@ class EmployeeResource extends Resource
             ->filtersFormColumns(3)
             ->filters([
                 static::companyFilter(),
+                SelectFilter::make('department_id')
+                    ->label('Department')
+                    ->multiple()
+                    ->searchable()
+                    ->options(fn (): array => Department::query()
+                        ->whereIn('company_id', CurrentCompany::membershipIds() ?: [0])
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all()),
+                SelectFilter::make('job_id')
+                    ->label('Job position')
+                    ->multiple()
+                    ->searchable()
+                    ->options(fn (): array => EmployeeJobPosition::query()
+                        ->whereIn('company_id', CurrentCompany::membershipIds() ?: [0])
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all()),
+                SelectFilter::make('employment_status')
+                    ->label('Employment status')
+                    ->multiple()
+                    ->options(static::employmentStatuses()),
+                Filter::make('missing_required_documents')
+                    ->label('Missing required documents')
+                    ->toggle()
+                    ->visible(fn (): bool => Auth::user()?->can(HrPermissions::ManageEmployeeDocuments) || Auth::user()?->can(HrPermissions::ViewEmployeeDocuments))
+                    ->query(fn (Builder $query): Builder => $query->missingRequiredDocuments()),
                 SelectFilter::make('skills')
                     ->relationship('skills.skill', 'name')
                     ->searchable()
@@ -1445,6 +1527,8 @@ class EmployeeResource extends Resource
                             && (Auth::user()?->can('hr_manage_sensitive_employee_data') ?? false))
                         ->fillForm(fn (Employee $record): array => [
                             'identification_id'  => $record->identification_id,
+                            'cnic'               => $record->cnic,
+                            'ntn'                => $record->ntn,
                             'passport_id'        => $record->passport_id,
                             'ssnid'              => $record->ssnid,
                             'sinid'              => $record->sinid,
@@ -1454,7 +1538,13 @@ class EmployeeResource extends Resource
                             'salary_currency_id' => $record->salary_currency_id,
                         ])
                         ->schema([
-                            TextInput::make('identification_id')->label('CNIC / identification'),
+                            TextInput::make('cnic')
+                                ->label('CNIC')
+                                ->placeholder('12345-1234567-1')
+                                ->rule(fn (Employee $record): Closure => static::cnicRule($record))
+                                ->dehydrateStateUsing(fn (?string $state): ?string => Cnic::normalize($state) ?? (blank($state) ? null : $state)),
+                            TextInput::make('ntn')->label('NTN')->maxLength(30),
+                            TextInput::make('identification_id')->label('Other identification'),
                             TextInput::make('passport_id')->label('Passport'),
                             TextInput::make('ssnid')->label('SSN'),
                             TextInput::make('sinid')->label('SIN'),
@@ -1550,7 +1640,52 @@ class EmployeeResource extends Resource
                         }),
                 ]),
             ])
-            ->modifyQueryUsing(fn (Builder $query) => $query->with(['categories']));
+            ->modifyQueryUsing(fn (Builder $query) => $query->with(['categories'])->withMissingRequiredDocumentsCount());
+    }
+
+    /** @return array<string, string> */
+    public static function employmentStatuses(): array
+    {
+        return [
+            'active'     => 'Active',
+            'probation'  => 'Probation',
+            'notice'     => 'Notice period',
+            'suspended'  => 'Suspended',
+            'terminated' => 'Terminated',
+            'resigned'   => 'Resigned',
+            'inactive'   => 'Inactive',
+        ];
+    }
+
+    /**
+     * Directory search: name, employee code and work email for everyone; CNIC
+     * (with or without dashes) only for users who may see sensitive data.
+     */
+    public static function applyDirectorySearch(Builder $query, string $search): Builder
+    {
+        $search = trim($search);
+        $digits = Cnic::digits($search);
+        $canSearchCnic = (Auth::user()?->can(HrPermissions::ViewSensitiveEmployeeData) ?? false) && strlen($digits) >= 5;
+
+        return $query->where(function (Builder $query) use ($search, $digits, $canSearchCnic): void {
+            $query->where($query->qualifyColumn('name'), 'like', "%{$search}%")
+                ->orWhere($query->qualifyColumn('employee_number'), 'like', "%{$search}%")
+                ->orWhere($query->qualifyColumn('work_email'), 'like', "%{$search}%");
+
+            if ($canSearchCnic) {
+                $query->orWhereRaw("REPLACE({$query->qualifyColumn('cnic')}, '-', '') like ?", ["%{$digits}%"]);
+            }
+        });
+    }
+
+    /** HR document access (not line managers) to this employee. */
+    public static function canSeeDocumentsOf(?Employee $record): bool
+    {
+        $user = Auth::user();
+
+        return $record instanceof Employee
+            && $user instanceof User
+            && app(EmployeeDocumentPolicy::class)->hrCanView($user, $record);
     }
 
     /**
@@ -1622,6 +1757,30 @@ class EmployeeResource extends Resource
                                 TextEntry::make('parent.name')
                                     ->placeholder('—')
                                     ->label(__('employees::filament/resources/employee.infolist.sections.entries.manager')),
+                                TextEntry::make('employee_number')
+                                    ->label('Employee code')
+                                    ->placeholder('—')
+                                    ->copyable(),
+                                TextEntry::make('joining_date')
+                                    ->label('Date of joining')
+                                    ->date('d M Y')
+                                    ->placeholder('—'),
+                                TextEntry::make('probation_end_date')
+                                    ->label('Probation end')
+                                    ->date('d M Y')
+                                    ->placeholder('—'),
+                                TextEntry::make('confirmation_date')
+                                    ->label('Confirmation date')
+                                    ->date('d M Y')
+                                    ->placeholder('—'),
+                                TextEntry::make('missing_required_documents')
+                                    ->label('Missing required documents')
+                                    ->state(fn (Employee $record): string => ($missing = $record->missingRequiredDocumentTypes())->isEmpty()
+                                        ? 'None'
+                                        : $missing->count().': '.$missing->pluck('name')->implode(', '))
+                                    ->badge()
+                                    ->color(fn (string $state): string => $state === 'None' ? 'success' : 'warning')
+                                    ->visible(fn (Employee $record): bool => static::canSeeDocumentsOf($record)),
                                 TextEntry::make('categories.name')
                                     ->placeholder('—')
                                     ->label(__('employees::filament/resources/employee.infolist.sections.entries.employee-tags'))
@@ -1757,6 +1916,10 @@ class EmployeeResource extends Resource
                                                         ->placeholder('—')
                                                         ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                                         ->icon('heroicon-o-phone'),
+                                                    TextEntry::make('emergency_relationship')
+                                                        ->label('Relation')
+                                                        ->placeholder('—')
+                                                        ->icon('heroicon-o-users'),
                                                 ]),
                                             Fieldset::make(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.work-permit'))
                                                 ->schema([
@@ -1823,6 +1986,25 @@ class EmployeeResource extends Resource
                                                         ->copyMessage(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.identification-id-copy-message'))
                                                         ->copyMessageDuration(1500)
                                                         ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
+                                                    TextEntry::make('cnic')
+                                                        ->label('CNIC')
+                                                        ->icon('heroicon-o-identification')
+                                                        ->placeholder('—')
+                                                        ->copyable()
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
+                                                    TextEntry::make('ntn')
+                                                        ->label('NTN')
+                                                        ->icon('heroicon-o-document-text')
+                                                        ->placeholder('—')
+                                                        ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false),
+                                                    TextEntry::make('eobi_number')
+                                                        ->label('EOBI no.')
+                                                        ->icon('heroicon-o-document-text')
+                                                        ->placeholder('—'),
+                                                    TextEntry::make('blood_group')
+                                                        ->label('Blood group')
+                                                        ->icon('heroicon-o-heart')
+                                                        ->placeholder('—'),
                                                     TextEntry::make('ssnid')
                                                         ->label(__('employees::filament/resources/employee.infolist.tabs.private-information.entries.ssnid'))
                                                         ->icon('heroicon-o-document-check')
@@ -1952,6 +2134,40 @@ class EmployeeResource extends Resource
             ]);
     }
 
+    /** @return array<string, string> */
+    public static function bloodGroups(): array
+    {
+        return collect(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'])->mapWithKeys(fn (string $group): array => [$group => $group])->all();
+    }
+
+    /** CNIC must be 13 digits (dashes optional) and not used by another employee of the same company. */
+    public static function cnicRule(?Employee $record): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+            if (blank($value)) {
+                return;
+            }
+
+            $formatted = Cnic::normalize((string) $value);
+
+            if ($formatted === null) {
+                $fail('CNIC must be 13 digits, e.g. 35202-1234567-1.');
+
+                return;
+            }
+
+            $companyId = $record?->company_id ?? CurrentCompany::id();
+
+            if ($companyId && Employee::withTrashed()
+                ->where('company_id', $companyId)
+                ->where('cnic', $formatted)
+                ->when($record?->exists, fn (Builder $query) => $query->whereKeyNot($record->getKey()))
+                ->exists()) {
+                $fail('Another employee of this company already has this CNIC.');
+            }
+        };
+    }
+
     public static function getBankCreateSchema(): array
     {
         return [
@@ -2032,6 +2248,10 @@ class EmployeeResource extends Resource
                 TimeOffRelationManager::class,
             ])
                 ->icon('heroicon-o-calendar-days'),
+            RelationGroup::make('Documents', [
+                DocumentsRelationManager::class,
+            ])
+                ->icon('heroicon-o-document-text'),
         ];
 
         return $relations;

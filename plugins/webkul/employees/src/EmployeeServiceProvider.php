@@ -7,11 +7,13 @@ use Illuminate\Support\Facades\Schema;
 use Throwable;
 use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
 use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
+use Webkul\Employee\Database\Seeders\SelfServiceRequestWorkflowSeeder;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Employee\Support\DefaultDocumentTypes;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
@@ -29,7 +31,9 @@ class EmployeeServiceProvider extends PackageServiceProvider
     {
         $package->name(static::$name)
             ->hasViews()
+            ->hasRoute('requests')
             ->hasTranslations()
+            ->hasRoute('web')
             ->hasCommands([
                 AutoCompleteShiftsCommand::class,
             ])
@@ -71,6 +75,10 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_09_30_100004_add_verification_columns_to_employees_attendance_records_table',
                 '2026_10_28_100001_create_employees_attendance_intervals_table',
                 '2026_10_28_100002_create_employees_attendance_policies_table',
+                '2026_10_29_100001_create_employees_document_types_table',
+                '2026_10_29_100002_create_employees_employee_documents_table',
+                '2026_10_29_100003_add_pakistan_fields_to_employees_employees_table',
+                '2026_10_29_100004_create_employees_employee_code_sequences_table',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')
@@ -94,10 +102,23 @@ class EmployeeServiceProvider extends PackageServiceProvider
         // A company created after the initial seed must still get its attendance
         // correction workflow, otherwise every correction / missed-day request in
         // that company is refused ("No active approval workflow is configured").
+        // Same for the Loan / Salary advance / HR letter request types.
         Company::created(function (Company $company): void {
             try {
                 if (Schema::hasTable('employees_request_types') && Schema::hasTable('support_approval_workflows')) {
                     app(AttendanceWorkflowSeeder::class)->provisionForCompany($company);
+                    app(SelfServiceRequestWorkflowSeeder::class)->provisionForCompany($company);
+                }
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
+
+        // A new company starts with the default employee document types.
+        Company::created(function (Company $company): void {
+            try {
+                if (Schema::hasTable('employees_document_types')) {
+                    DefaultDocumentTypes::provisionForCompany((int) $company->id);
                 }
             } catch (Throwable $e) {
                 report($e);

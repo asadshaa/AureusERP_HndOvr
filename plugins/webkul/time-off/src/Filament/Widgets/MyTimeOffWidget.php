@@ -10,10 +10,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Models\Employee;
 use Webkul\Security\Services\CurrentCompany;
-use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
-use Webkul\TimeOff\Models\LeaveAllocation;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\LeaveBalanceService;
 
 class MyTimeOffWidget extends BaseWidget
 {
@@ -102,31 +101,20 @@ class MyTimeOffWidget extends BaseWidget
         return $stats;
     }
 
+    /** Remaining days this year (LeaveBalanceService: refused and cancelled leave never count). */
     protected function calculateAvailableDays($employeeId, $leaveTypeId, $endDate)
     {
-        $totalAllocated = LeaveAllocation::where('employee_id', $employeeId)
-            ->where('holiday_status_id', $leaveTypeId)
-            ->where('state', State::VALIDATE_TWO->value)
-            ->where(function ($query) use ($endDate) {
-                $query->where('date_to', '<=', $endDate)
-                    ->orWhereNull('date_to');
-            })
-            ->sum('number_of_days');
+        $employee = $employeeId ? Employee::query()->find($employeeId) : null;
+        $leaveType = LeaveType::query()->find($leaveTypeId);
 
-        $totalTaken = Leave::where('employee_id', $employeeId)
-            ->where('company_id', Auth::user()?->default_company_id)
-            ->where('holiday_status_id', $leaveTypeId)
-            ->where(function ($query) use ($endDate) {
-                $query->where('request_date_to', '<=', $endDate)
-                    ->orWhereNull('request_date_to');
-            })
-            ->where('state', '!=', 'refuse')
-            ->sum('number_of_days');
+        if (! $employee || ! $leaveType) {
+            return ['days' => number_format(0, 1)];
+        }
 
-        $availableDays = $totalAllocated - $totalTaken;
+        $balance = app(LeaveBalanceService::class)->poolUsage($employee, $leaveType, Carbon::parse($endDate)->year);
 
         return [
-            'days' => number_format($availableDays, 1),
+            'days' => number_format($balance['remaining'], 1),
         ];
     }
 

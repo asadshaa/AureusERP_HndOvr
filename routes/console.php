@@ -190,3 +190,29 @@ Schedule::command('hr:grace-balance-alerts')
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
     ->withoutOverlapping(30)
     ->onOneServer();
+
+/*
+| hr:document-expiry-reminders tells the company's HR (and the employee, for
+| document types visible to them) 30 days and 7 days before an employee
+| document expires and on expiry. Idempotent per document and threshold
+| (recorded on the document), so an overlap or a re-run never notifies twice.
+*/
+Schedule::command('hr:document-expiry-reminders')
+    ->dailyAt('09:00')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
+| time-off:yearly-allocation creates each active employee's leave allocations
+| for the new year from the company's yearly allocation policy (Time Off ->
+| Configuration -> Yearly allocation), carrying forward unused days up to the
+| policy cap. Runs once, 1 January 00:30 Karachi time; idempotent (an
+| allocation starting 1 January of the year is never created twice), so a
+| re-run or a manual run (--year=, --company=, --dry-run) is safe.
+*/
+Schedule::command('time-off:yearly-allocation')
+    ->yearlyOn(1, 1, '00:30')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(120)
+    ->onOneServer();

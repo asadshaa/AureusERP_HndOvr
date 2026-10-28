@@ -15,6 +15,9 @@ enum State: string implements HasColor, HasLabel
 
     case VALIDATE_TWO = 'validate_two';
 
+    /** Withdrawn by the employee before a decision, or an approved leave cancelled by HR. */
+    case CANCEL = 'cancel';
+
     public function getLabel(): ?string
     {
         return match ($this) {
@@ -22,6 +25,7 @@ enum State: string implements HasColor, HasLabel
             self::REFUSE       => __('time-off::enums/state.refuse'),
             self::VALIDATE_ONE => __('time-off::enums/state.validate_one'),
             self::VALIDATE_TWO => __('time-off::enums/state.validate_two'),
+            self::CANCEL       => __('time-off::enums/state.cancel'),
         };
     }
 
@@ -38,6 +42,7 @@ enum State: string implements HasColor, HasLabel
             self::VALIDATE_ONE => 'info',
             self::VALIDATE_TWO => 'success',
             self::REFUSE       => 'danger',
+            self::CANCEL       => 'gray',
         };
     }
 
@@ -48,6 +53,7 @@ enum State: string implements HasColor, HasLabel
             self::REFUSE->value       => __('time-off::enums/state.refuse'),
             self::VALIDATE_ONE->value => __('time-off::enums/state.validate_one'),
             self::VALIDATE_TWO->value => __('time-off::enums/state.validate_two'),
+            self::CANCEL->value       => __('time-off::enums/state.cancel'),
         ];
     }
 }

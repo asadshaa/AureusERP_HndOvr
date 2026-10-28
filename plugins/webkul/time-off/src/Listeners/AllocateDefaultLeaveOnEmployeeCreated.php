@@ -7,6 +7,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\TimeOff\Enums\AllocationType;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\LeaveAllocation;
+use Webkul\TimeOff\Models\LeaveAllocationPolicy;
 use Webkul\TimeOff\Models\LeaveType;
 
 /**
@@ -47,8 +48,14 @@ class AllocateDefaultLeaveOnEmployeeCreated
         $yearStart = Carbon::now()->startOfYear();
         $yearEnd = Carbon::now()->endOfYear();
 
-        foreach (self::DEFAULT_DAYS as $typeName => $days) {
+        foreach (self::DEFAULT_DAYS as $typeName => $defaultDays) {
             $leaveType = $leaveTypes->get($typeName);
+
+            // The company's yearly allocation policy, when HR configured one (LeaveAllocationPolicy).
+            $days = LeaveAllocationPolicy::annualDaysFor((int) $employee->company_id, (int) $leaveType->id) ?? $defaultDays;
+            if ($days <= 0) {
+                continue;
+            }
 
             LeaveAllocation::query()->firstOrCreate(
                 [

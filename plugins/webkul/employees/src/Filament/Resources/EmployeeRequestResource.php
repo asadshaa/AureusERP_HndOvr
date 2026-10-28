@@ -7,6 +7,7 @@ use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
@@ -43,9 +44,11 @@ use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Models\Company;
 use Webkul\Support\Services\ApprovalEngine;
 
 class EmployeeRequestResource extends Resource
@@ -228,6 +231,70 @@ class EmployeeRequestResource extends Resource
                                     TextEntry::make('nature_of_expense')->label('Nature of Expense')->placeholder('—'),
                                 ])
                                 ->columns(2),
+
+                            Section::make('Loan Details')
+                                ->visible(fn (EmployeeRequest $record): bool => $record->requestType?->category === EmployeeRequestKinds::LoanCategory)
+                                ->schema([
+                                    TextEntry::make('amount')->label('Loan amount')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->weight(FontWeight::Bold),
+                                    TextEntry::make('payload.instalments')->label('Instalments'),
+                                    TextEntry::make('payload.start_month')->label('First instalment')
+                                        ->formatStateUsing(fn (?string $state): ?string => EmployeeRequestKinds::monthLabel($state)),
+                                    TextEntry::make('loan_recorded')->label('Recorded')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => filled(data_get($record->payload, 'recorded_at'))
+                                            ? 'Approved and recorded on '.Carbon::parse(data_get($record->payload, 'recorded_at'))->format('d M Y')
+                                            : 'Not yet (schedule is provisional until final approval)'),
+                                    TextEntry::make('payload.purpose')->label('Purpose')->columnSpanFull(),
+                                    TextEntry::make('loan_schedule')->label('Instalment schedule')->html()->columnSpanFull()
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => static::instalmentScheduleHtml($record)),
+                                ])
+                                ->columns(2),
+
+                            Section::make('Salary Advance Details')
+                                ->visible(fn (EmployeeRequest $record): bool => $record->requestType?->category === EmployeeRequestKinds::SalaryAdvanceCategory)
+                                ->schema([
+                                    TextEntry::make('amount')->label('Advance amount')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->weight(FontWeight::Bold),
+                                    TextEntry::make('payload.deduct_month')->label('Deduct from')
+                                        ->formatStateUsing(fn (?string $state): ?string => EmployeeRequestKinds::monthLabel($state)),
+                                    TextEntry::make('payload.cap_amount')->label('Limit that applied')->placeholder('No salary on file (no limit)')
+                                        ->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR'),
+                                    TextEntry::make('advance_recorded')->label('Recorded')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => filled(data_get($record->payload, 'recorded_at'))
+                                            ? 'Approved and recorded on '.Carbon::parse(data_get($record->payload, 'recorded_at'))->format('d M Y')
+                                            : 'Not yet'),
+                                    TextEntry::make('payload.reason')->label('Reason')->columnSpanFull(),
+                                ])
+                                ->columns(2),
+
+                            Section::make('Letter Request')
+                                ->visible(fn (EmployeeRequest $record): bool => $record->requestType?->category === EmployeeRequestKinds::HrLetterCategory)
+                                ->schema([
+                                    TextEntry::make('payload.letter_type')->label('Letter type')
+                                        ->formatStateUsing(fn (?string $state): string => EmployeeRequestKinds::letterTypeLabel($state)),
+                                    TextEntry::make('payload.addressed_to')->label('Addressed to'),
+                                    TextEntry::make('payload.needed_by')->label('Needed by')->date('d M Y'),
+                                    TextEntry::make('letter_status')->label('Letter')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => filled(data_get($record->payload, 'letter_issued_at'))
+                                            ? 'Issued on '.Carbon::parse(data_get($record->payload, 'letter_issued_at'))->format('d M Y')
+                                            : 'Not issued yet')
+                                        ->badge()
+                                        ->color(fn (EmployeeRequest $record): string => filled(data_get($record->payload, 'letter_issued_at')) ? 'success' : 'gray'),
+                                    TextEntry::make('payload.letter_purpose')->label('Purpose')->columnSpanFull(),
+                                    TextEntry::make('letter_download')->label('Download')
+                                        ->getStateUsing(fn (): string => 'Download letter')
+                                        ->icon('heroicon-o-arrow-down-tray')
+                                        ->color('primary')
+                                        ->url(fn (EmployeeRequest $record): ?string => app(EmployeeRequestService::class)->letterDownloadUrl($record), shouldOpenInNewTab: true)
+                                        ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                                            && app(EmployeeRequestService::class)->canDownloadLetter(Auth::user(), $record)),
+                                ])
+                                ->columns(2),
+
+                            Section::make('Approval Trail')
+                                ->visible(fn (EmployeeRequest $record): bool => $record->approvalRequest !== null)
+                                ->schema([
+                                    TextEntry::make('approval_trail')->hiddenLabel()->html()->columnSpanFull()
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => static::approvalTrailHtml($record)),
+                                ]),
                         ])->columnSpan(2),
 
                         Group::make([
@@ -343,6 +410,15 @@ class EmployeeRequestResource extends Resource
 
         $isFinancial = fn (Get $get): bool => (bool) static::selectedRequestType($get)?->is_financial;
         $isAttendance = fn (Get $get): bool => static::selectedRequestType($get)?->category === 'attendance_correction';
+        $isLoan = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::LoanCategory;
+        $isAdvance = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::SalaryAdvanceCategory;
+        $isLetter = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::HrLetterCategory;
+        $isSelfService = fn (Get $get): bool => EmployeeRequestKinds::isSelfServiceCategory(static::selectedRequestType($get)?->category);
+        $companyCurrency = $companyId ? Company::query()->with('currency')->find($companyId)?->currency?->code : null;
+        $advanceCap = fn (Get $get): ?string => EmployeeRequestKinds::advanceCap(
+            Employee::query()->where('company_id', $companyId)->find($get('employee_id')),
+            static::selectedRequestType($get),
+        );
         $canSeeBankDetails = function (Get $get) use ($user): bool {
             if (! $user) {
                 return false;
@@ -409,7 +485,15 @@ class EmployeeRequestResource extends Resource
                     }),
                 Placeholder::make('approval_type_display')
                     ->label('Approval Category')
-                    ->content(fn (Get $get): string => $isFinancial($get) ? 'Claims Approval' : ($isAttendance($get) ? 'Attendance Correction' : ($get('request_type_id') ? 'Standard Approval' : '—')))
+                    ->content(fn (Get $get): string => match (true) {
+                        $isFinancial($get)              => 'Claims Approval',
+                        $isAttendance($get)             => 'Attendance Correction',
+                        $isLoan($get)                   => 'Loan: line manager, then HR'.(static::loanHasFinanceStep($companyId) ? ', then finance' : ''),
+                        $isAdvance($get)                => 'Salary advance: line manager, then HR',
+                        $isLetter($get)                 => 'HR letter: handled by HR',
+                        filled($get('request_type_id')) => 'Standard Approval',
+                        default                         => '—',
+                    })
                     ->visible(fn (Get $get): bool => filled($get('request_type_id'))),
                 Select::make('nature_of_expense')
                     ->label(fn (Get $get): string => 'What is the nature of expense'.(($name = static::selectedRequestType($get)?->name) ? " for {$name}?" : '?'))
@@ -527,6 +611,97 @@ class EmployeeRequestResource extends Resource
                         }),
                 ]),
 
+            Section::make(fn (Get $get): string => $isLoan($get) ? 'Loan Details' : 'Salary Advance Details')
+                ->columns(2)
+                ->visible(fn (Get $get): bool => $isLoan($get) || $isAdvance($get))
+                ->schema([
+                    TextInput::make('amount')
+                        ->label(fn (Get $get): string => $isLoan($get) ? 'Loan amount' : 'Advance amount')
+                        ->prefix($companyCurrency)
+                        ->numeric()
+                        ->minValue(1)
+                        ->maxValue(fn (Get $get): ?float => $isAdvance($get) && ($cap = $advanceCap($get)) !== null ? (float) $cap : null)
+                        ->helperText(function (Get $get) use ($isAdvance, $advanceCap, $companyCurrency): ?string {
+                            if (! $isAdvance($get)) {
+                                return 'In '.($companyCurrency ?? 'the company currency').'.';
+                            }
+                            $cap = $advanceCap($get);
+                            $percent = EmployeeRequestKinds::advanceSalaryPercent(static::selectedRequestType($get));
+
+                            return $cap !== null
+                                ? 'Up to '.number_format((float) $cap, 2).' '.$companyCurrency.' ('.(float) $percent.'% of the monthly salary).'
+                                : 'In '.($companyCurrency ?? 'the company currency').'. No salary on file, so HR checks the amount.';
+                        })
+                        ->live(onBlur: true)
+                        ->required(fn (Get $get): bool => $isLoan($get) || $isAdvance($get)),
+                    TextInput::make('payload.instalments')
+                        ->label('Number of instalments')
+                        ->integer()
+                        ->minValue(EmployeeRequestKinds::MinInstalments)
+                        ->maxValue(EmployeeRequestKinds::MaxInstalments)
+                        ->helperText('Monthly, 1 to 24.')
+                        ->live(onBlur: true)
+                        ->visible($isLoan)
+                        ->required($isLoan),
+                    Select::make('payload.start_month')
+                        ->label('First instalment month')
+                        ->options(fn (): array => EmployeeRequestKinds::upcomingMonths())
+                        ->live()
+                        ->visible($isLoan)
+                        ->required($isLoan),
+                    Placeholder::make('loan_instalment_preview')
+                        ->label('Monthly instalment')
+                        ->visible($isLoan)
+                        ->content(function (Get $get) use ($companyCurrency): string {
+                            $amount = $get('amount');
+                            $count = (int) $get('payload.instalments');
+                            if (! is_numeric($amount) || (float) $amount <= 0 || $count < EmployeeRequestKinds::MinInstalments || $count > EmployeeRequestKinds::MaxInstalments) {
+                                return '—';
+                            }
+
+                            return number_format((float) EmployeeRequestKinds::instalmentSchedule((string) $amount, $count, now()->format('Y-m'))[0]['amount'], 2).' '.$companyCurrency.' x '.$count;
+                        }),
+                    Select::make('payload.deduct_month')
+                        ->label('Deduct from salary of')
+                        ->options(fn (): array => EmployeeRequestKinds::upcomingMonths())
+                        ->visible($isAdvance)
+                        ->required($isAdvance),
+                    Textarea::make('payload.purpose')
+                        ->label('Purpose of the loan')
+                        ->columnSpanFull()
+                        ->visible($isLoan)
+                        ->required($isLoan),
+                    Textarea::make('payload.reason')
+                        ->label('Reason for the advance')
+                        ->columnSpanFull()
+                        ->visible($isAdvance)
+                        ->required($isAdvance),
+                ]),
+
+            Section::make('Letter Request')
+                ->columns(2)
+                ->visible($isLetter)
+                ->schema([
+                    Select::make('payload.letter_type')
+                        ->label('Letter type')
+                        ->options(EmployeeRequestKinds::LetterTypes)
+                        ->required($isLetter),
+                    TextInput::make('payload.addressed_to')
+                        ->label('Addressed to')
+                        ->placeholder('e.g. To whom it may concern, or the bank / embassy name')
+                        ->maxLength(255)
+                        ->required($isLetter),
+                    DatePicker::make('payload.needed_by')
+                        ->label('Needed by')
+                        ->native(false)
+                        ->minDate(today())
+                        ->required($isLetter),
+                    Textarea::make('payload.letter_purpose')
+                        ->label('Purpose')
+                        ->columnSpanFull()
+                        ->required($isLetter),
+                ]),
+
             Select::make('currency_id')
                 ->relationship('currency', 'name')
                 ->default(fn (): ?int => Auth::user()?->defaultCompany?->currency_id)
@@ -534,7 +709,7 @@ class EmployeeRequestResource extends Resource
                 ->visible($isFinancial)
                 ->required($isFinancial),
             Section::make('Attachments')
-                ->visible(fn (Get $get): bool => ! $isAttendance($get))
+                ->visible(fn (Get $get): bool => ! $isAttendance($get) && ! $isLetter($get))
                 ->schema([
                     FileUpload::make('attachments')
                         ->label('Supporting Documents / Receipts')
@@ -544,9 +719,13 @@ class EmployeeRequestResource extends Resource
                         ->visibility('private')
                         ->columnSpanFull(),
                 ]),
-            KeyValue::make('payload')
+            // Its own state key, merged into payload by formatAttendancePayload(): bound
+            // to "payload" directly, the hidden field wiped every payload.* field of the
+            // attendance / loan / advance / letter sections on save.
+            KeyValue::make('payload_details')
                 ->label('Additional request details')->columnSpanFull()
-                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get)),
+                ->formatStateUsing(fn ($state, ?EmployeeRequest $record): ?array => $state ?? (is_array($record?->payload) ? array_filter($record->payload, 'is_scalar') : null))
+                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get)),
 
             Section::make('Financial Details')->columns(2)
                 ->visible($isFinancial)
@@ -591,6 +770,72 @@ class EmployeeRequestResource extends Resource
         ];
     }
 
+    protected static function loanHasFinanceStep(int $companyId): bool
+    {
+        return DB::table('support_approval_workflows as w')
+            ->join('support_approval_steps as s', 's.workflow_id', '=', 'w.id')
+            ->where('w.company_id', $companyId)
+            ->where('w.request_type', EmployeeRequestKinds::LoanCode)
+            ->whereNotNull('s.approver_role_id')
+            ->exists();
+    }
+
+    /** One-line summary of a Loan / Salary advance / HR letter request for the list. */
+    protected static function selfServiceSummary(EmployeeRequest $record): ?string
+    {
+        $payload = (array) ($record->payload ?? []);
+
+        return match ($record->requestType?->category) {
+            EmployeeRequestKinds::LoanCategory          => ($payload['instalments'] ?? '?').' instalments from '.(EmployeeRequestKinds::monthLabel($payload['start_month'] ?? null) ?? '?'),
+            EmployeeRequestKinds::SalaryAdvanceCategory => 'Deduct from '.(EmployeeRequestKinds::monthLabel($payload['deduct_month'] ?? null) ?? '?'),
+            EmployeeRequestKinds::HrLetterCategory      => EmployeeRequestKinds::letterTypeLabel($payload['letter_type'] ?? null)
+                .(filled($payload['letter_issued_at'] ?? null) ? ' (issued)' : ' (needed by '.(filled($payload['needed_by'] ?? null) ? Carbon::parse($payload['needed_by'])->format('d M Y') : '?').')'),
+            default => null,
+        };
+    }
+
+    public static function instalmentScheduleHtml(EmployeeRequest $record): string
+    {
+        $schedule = (array) data_get($record->payload, 'schedule', []);
+        if ($schedule === []) {
+            return '<span class="text-gray-500">Calculated on submission.</span>';
+        }
+
+        $currency = e($record->currency?->code ?? '');
+        $rows = collect($schedule)->map(fn (array $line): string => '<tr>'
+            .'<td class="px-3 py-1">'.e((string) ($line['number'] ?? '')).'</td>'
+            .'<td class="px-3 py-1">'.e((string) EmployeeRequestKinds::monthLabel($line['month'] ?? null)).'</td>'
+            .'<td class="px-3 py-1 text-end">'.e(number_format((float) ($line['amount'] ?? 0), 2)).' '.$currency.'</td>'
+            .'</tr>')->implode('');
+
+        return '<table class="text-sm"><thead><tr>'
+            .'<th class="px-3 py-1 text-start">#</th><th class="px-3 py-1 text-start">Month</th><th class="px-3 py-1 text-end">Amount</th>'
+            .'</tr></thead><tbody>'.$rows.'</tbody></table>';
+    }
+
+    /** Every decision so far, then who the request is waiting on. */
+    public static function approvalTrailHtml(EmployeeRequest $record): string
+    {
+        $approval = $record->approvalRequest;
+        if (! $approval) {
+            return '';
+        }
+
+        $approval->loadMissing(['decisions.actor', 'decisions.step', 'workflow.steps']);
+        $lines = $approval->decisions->sortBy('id')->map(fn ($decision): string => '<li>'
+            .'<strong>'.e(ucfirst((string) $decision->decision)).'</strong> by '.e($decision->actor?->name ?? 'Unknown')
+            .' at '.e((string) $decision->step?->name ?: 'step')
+            .' on '.e($decision->decided_at?->format('d M Y, h:i A') ?? '')
+            .(filled($decision->reason) ? ' &mdash; '.e($decision->reason) : '')
+            .'</li>');
+
+        if ($approval->status === 'pending') {
+            $lines->push('<li><em>Waiting: '.e(($approval->currentStep()?->name ?? 'Approval').' &middot; '.app(ApprovalEngine::class)->describeCurrentApprover($approval)).'</em></li>');
+        }
+
+        return '<ul class="space-y-1 text-sm">'.$lines->implode('').'</ul>';
+    }
+
     protected static function selectedRequestType(Get $get): ?EmployeeRequestType
     {
         $id = $get('request_type_id');
@@ -619,6 +864,13 @@ class EmployeeRequestResource extends Resource
 
     public static function formatAttendancePayload(array $data): array
     {
+        if (array_key_exists('payload_details', $data)) {
+            if (is_array($data['payload_details'])) {
+                $data['payload'] = array_merge(is_array($data['payload'] ?? null) ? $data['payload'] : [], $data['payload_details']);
+            }
+            unset($data['payload_details']);
+        }
+
         if (isset($data['payload']) && is_array($data['payload'])) {
             $payload = $data['payload'];
             $dateStr = $payload['attendance_date'] ?? null;
@@ -726,6 +978,9 @@ class EmployeeRequestResource extends Resource
                         }
 
                         return "In: {$origIn} → {$reqIn} | Out: {$origOut} → {$reqOut}";
+                    }
+                    if ($summary = static::selfServiceSummary($record)) {
+                        return $summary;
                     }
                     if ($record->nature_of_expense) {
                         return $record->nature_of_expense;
@@ -906,6 +1161,59 @@ class EmployeeRequestResource extends Resource
                             Notification::make()->danger()->title('Could not reject')->body($e->getMessage())->send();
                         }
                     }),
+                Action::make('generate_letter')
+                    ->label('Generate letter (PDF)')
+                    ->icon('heroicon-o-document-text')
+                    ->color('success')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                        && app(EmployeeRequestService::class)->canIssueLetter(Auth::user(), $record))
+                    ->schema(fn (EmployeeRequest $record): array => [
+                        Placeholder::make('letter_summary')
+                            ->label('Letter')
+                            ->content(EmployeeRequestKinds::letterTypeLabel(data_get($record->payload, 'letter_type')).' for '.$record->employee?->name.', addressed to '.data_get($record->payload, 'addressed_to')),
+                        Checkbox::make('include_salary')
+                            ->label('Include the monthly salary')
+                            ->helperText('Only on a salary certificate, and only when the employee has a salary on file.')
+                            ->visible(data_get($record->payload, 'letter_type') === EmployeeRequestKinds::SalaryCertificate && $record->employee?->base_salary !== null),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->generateLetterPdf($record, Auth::user(), (bool) ($data['include_salary'] ?? false));
+                            Notification::make()->success()->title('Letter generated and shared with the employee')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not generate the letter')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('issue_letter')
+                    ->label('Attach letter')
+                    ->icon('heroicon-o-paper-clip')
+                    ->color('success')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                        && app(EmployeeRequestService::class)->canIssueLetter(Auth::user(), $record))
+                    ->schema([
+                        FileUpload::make('letter_file')
+                            ->label('Signed letter')
+                            ->disk('local')
+                            ->directory(fn (EmployeeRequest $record): string => 'employees/requests/letters/'.$record->company_id)
+                            ->visibility('private')
+                            ->acceptedFileTypes(['application/pdf', 'image/png', 'image/jpeg'])
+                            ->maxSize(10240)
+                            ->required(),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->issueLetter($record, Auth::user(), (string) $data['letter_file']);
+                            Notification::make()->success()->title('Letter attached and shared with the employee')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not attach the letter')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('download_letter')
+                    ->label('Download letter')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                        && app(EmployeeRequestService::class)->canDownloadLetter(Auth::user(), $record))
+                    ->url(fn (EmployeeRequest $record): ?string => app(EmployeeRequestService::class)->letterDownloadUrl($record), shouldOpenInNewTab: true),
                 Action::make('refresh_approval')
                     ->label('Refresh approval')
                     ->icon('heroicon-o-arrow-path')

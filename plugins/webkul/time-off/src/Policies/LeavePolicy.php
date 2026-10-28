@@ -77,7 +77,7 @@ class LeavePolicy
         }
 
         return $leave->approvalRequest?->status !== 'pending'
-            && $leave->state !== State::VALIDATE_TWO
+            && ! in_array($leave->state, [State::VALIDATE_TWO, State::CANCEL], true)
             && $leave->employee
             && $this->hierarchy->canManage($user, $leave->employee);
     }
@@ -92,7 +92,7 @@ class LeavePolicy
         }
 
         return $leave->approvalRequest?->status !== 'pending'
-            && $leave->state !== State::VALIDATE_TWO
+            && ! in_array($leave->state, [State::VALIDATE_TWO, State::CANCEL], true)
             && $leave->employee
             && $this->hierarchy->canManage($user, $leave->employee);
     }

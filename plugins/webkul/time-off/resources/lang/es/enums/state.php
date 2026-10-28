@@ -5,4 +5,5 @@ return [
     'refuse'       => 'Rechazado',
     'validate_one' => 'Segunda aprobación',
     'validate_two' => 'Aprobado',
+    'cancel'       => 'Cancelado',
 ];

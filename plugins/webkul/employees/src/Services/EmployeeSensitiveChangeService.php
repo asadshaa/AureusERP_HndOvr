@@ -14,6 +14,8 @@ class EmployeeSensitiveChangeService
 {
     private const FIELDS = [
         'identification_id',
+        'cnic',
+        'ntn',
         'passport_id',
         'ssnid',
         'sinid',

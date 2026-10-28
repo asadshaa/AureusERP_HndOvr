@@ -106,6 +106,7 @@ class ApprovalWorkflowResource extends Resource
                             'requester_manager'  => 'Requester manager',
                             'department_manager' => 'Department manager',
                             'team_manager'       => 'Team manager',
+                            'hr'                 => 'HR of the company',
                         ]),
                         TextInput::make('sla_hours')->numeric()->minValue(1),
                         Repeater::make('conditions')->columns(3)->columnSpanFull()->schema([

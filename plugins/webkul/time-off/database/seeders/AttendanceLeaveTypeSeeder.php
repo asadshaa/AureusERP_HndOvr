@@ -10,9 +10,10 @@ use Webkul\TimeOff\Models\LeaveType;
  * The leave types the attendance rules rely on (business decision of
  * 2026-10-28), per company:
  *
- *  - "Half day"    : half-day unit, counts 0.5 day; allocation rule copied
- *                    from the company's Casual Leave (the casual leave
- *                    settings), else "yes".
+ *  - "Half day"    : half-day unit, counts 0.5 day; no allocation of its
+ *                    own: it uses the employee's Casual Leave balance
+ *                    (Annual Leave if the company has no Casual Leave), see
+ *                    LeaveBalanceService.
  *  - "Short leave" : hour unit (from-to time), no allocation; limited by
  *                    attendance.short_leave.* (ShortLeavePolicy).
  *  - "On Duty"     : no allocation; recognised by the monthly report through
@@ -31,8 +32,6 @@ class AttendanceLeaveTypeSeeder extends Seeder
 
     public function provisionForCompany(Company $company): void
     {
-        $casual = LeaveType::query()->where('company_id', $company->id)->where('name', 'Casual Leave')->first();
-
         $common = [
             'leave_validation_type'      => 'manager',
             'employee_requests'          => 'no',
@@ -44,7 +43,7 @@ class AttendanceLeaveTypeSeeder extends Seeder
 
         $types = [
             'Half day' => [
-                'requires_allocation' => (string) ($casual?->requires_allocation ?: 'yes'),
+                'requires_allocation' => 'no',
                 'time_type'           => 'leave',
                 'request_unit'        => 'half_day',
             ],

@@ -22,8 +22,8 @@ use Webkul\Employee\Models\Employee;
 use Webkul\TimeOff\Enums\RequestDateFromPeriod;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
-use Webkul\TimeOff\Models\LeaveAllocation;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\LeaveBalanceService;
 use Webkul\TimeOff\Services\ShortLeavePolicy;
 
 trait TimeOffHelper
@@ -38,7 +38,7 @@ trait TimeOffHelper
 
         $this->handleLeaveOverlap($data, $excludeRecordId, $action);
 
-        $this->handleLeaveAllocation($data, $action);
+        $this->handleLeaveAllocation($data, $action, $excludeRecordId);
 
         $data['state'] = State::CONFIRM->value;
         $data['date_from'] = $data['request_date_from'] ?? null;
@@ -118,6 +118,18 @@ trait TimeOffHelper
                         ->columnSpanFull()
                         ->placeholder(__('time-off::filament/widgets/calendar-widget.form.fields.time-off-type-placeholder'))
                         ->helperText(__('time-off::filament/widgets/calendar-widget.form.fields.time-off-type-helper')),
+
+                    TextEntry::make('leave_balance_info')
+                        ->label('Leave balance')
+                        ->visible(fn (Get $get): bool => filled($get('holiday_status_id')))
+                        ->state(fn (Get $get, $record = null): string => $this->leaveBalanceSummary(
+                            $get('holiday_status_id'),
+                            $get('employee_id'),
+                            $get('request_date_from'),
+                            $record instanceof Leave ? (int) $record->id : null,
+                        ))
+                        ->columnSpanFull()
+                        ->extraAttributes(['class' => 'font-medium p-3 rounded-lg border border-gray-200']),
 
                     Grid::make(2)
                         ->schema([
@@ -391,77 +403,64 @@ trait TimeOffHelper
         }
     }
 
-    private function handleLeaveAllocation(array &$data, ?Action $action = null): void
+    /**
+     * The balance of the chosen type for the current allocation year (the
+     * year of the start date), shown live on the request form.
+     */
+    private function leaveBalanceSummary(mixed $leaveTypeId, mixed $employeeId, mixed $startDate, ?int $ignoreLeaveId = null): string
+    {
+        $leaveType = $leaveTypeId ? LeaveType::query()->find($leaveTypeId) : null;
+        $employee = $employeeId ? Employee::query()->find($employeeId) : Auth::user()?->employee;
+
+        if (! $leaveType || ! $employee) {
+            return 'Choose the employee and the leave type to see the balance.';
+        }
+
+        $year = filled($startDate) ? Carbon::parse($startDate)->year : null;
+
+        return app(LeaveBalanceService::class)->summary($employee, $leaveType, $year, $ignoreLeaveId);
+    }
+
+    /**
+     * Refuses a request above the remaining balance of a type that requires
+     * an allocation (LeaveBalanceService; the Leave model checks it again on
+     * save). A refused request is shown as a notification and the form stays open.
+     */
+    private function handleLeaveAllocation(array &$data, ?Action $action = null, ?int $excludeRecordId = null): void
     {
         $employee = Employee::find($data['employee_id'] ?? null);
+        $leaveType = LeaveType::find($data['holiday_status_id'] ?? null);
 
-        if (! $employee) {
+        if (! $employee || ! $leaveType) {
             return;
         }
 
-        $leaveTypeId = $data['holiday_status_id'] ?? null;
+        $refusal = app(LeaveBalanceService::class)->refusal(
+            $employee,
+            $leaveType,
+            (float) ($data['number_of_days'] ?? 0),
+            $data['request_date_from'] ?? null,
+            $excludeRecordId,
+        );
 
-        if (! $leaveTypeId) {
+        if (! $refusal) {
             return;
         }
 
-        $leaveType = LeaveType::find($leaveTypeId);
+        $title = $refusal['reason'] === 'insufficient'
+            ? __('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_insufficient_balance.title')
+            : __('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_no_allocation.title');
 
-        // requires_allocation is the string "yes" / "no" (no cast): "no" must not demand an allocation.
-        $requiresAllocation = $leaveType?->requires_allocation instanceof \BackedEnum ? $leaveType->requires_allocation->value : $leaveType?->requires_allocation;
-        if (! $leaveType || ! $requiresAllocation || $requiresAllocation === 'no') {
-            return;
-        }
+        Notification::make()
+            ->danger()
+            ->title($title)
+            ->body($refusal['message'])
+            ->send();
 
-        $requestedDays = $data['number_of_days'];
-        $endOfYear = Carbon::now()->endOfYear();
-
-        $totalAllocated = LeaveAllocation::where('employee_id', $employee->id)
-            ->where('holiday_status_id', $leaveTypeId)
-            ->where('state', State::VALIDATE_TWO->value)
-            ->where(function ($q) use ($endOfYear) {
-                $q->where('date_to', '<=', $endOfYear)
-                    ->orWhereNull('date_to');
-            })
-            ->sum('number_of_days');
-
-        $totalTaken = Leave::where('employee_id', $employee->id)
-            ->where('holiday_status_id', $leaveTypeId)
-            ->where('state', '!=', State::REFUSE->value)
-            ->where(fn ($q) => true)
-            ->sum('number_of_days');
-
-        $availableBalance = round($totalAllocated - $totalTaken, 1);
-
-        if ($totalAllocated <= 0) {
-            Notification::make()
-                ->danger()
-                ->title(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_no_allocation.title'))
-                ->body(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_no_allocation.body', ['leaveType' => $leaveType->name]))
-                ->send();
-
-            if ($action) {
-                $action->halt();
-            } else {
-                $this->halt();
-            }
-        }
-
-        if ($requestedDays > $availableBalance) {
-            Notification::make()
-                ->danger()
-                ->title(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_insufficient_balance.title'))
-                ->body(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.leave_request_denied_insufficient_balance.body', [
-                    'available_balance' => $availableBalance,
-                    'requested_days'    => $requestedDays,
-                ]))
-                ->send();
-
-            if ($action) {
-                $action->halt();
-            } else {
-                $this->halt();
-            }
+        if ($action) {
+            $action->halt();
+        } else {
+            $this->halt();
         }
     }
 
@@ -494,6 +493,7 @@ trait TimeOffHelper
         $end = $endDate ? Carbon::parse($endDate) : $start;
 
         $query = Leave::where('employee_id', $employeeId)
+            ->where(fn ($q) => $q->whereNull('state')->orWhere('state', '!=', State::CANCEL->value))
             ->where(function ($q) use ($start, $end) {
                 $q->whereBetween('date_from', [$start, $end])
                     ->orWhereBetween('date_to', [$start, $end])

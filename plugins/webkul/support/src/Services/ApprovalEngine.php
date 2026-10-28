@@ -3,17 +3,54 @@
 namespace Webkul\Support\Services;
 
 use Brick\Math\BigDecimal;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 
 final class ApprovalEngine
 {
+    /**
+     * Roles whose holders are HR people. Used for the HR fallback (no line /
+     * department / team manager) and for "hr" steps. Plain manager roles are
+     * deliberately absent: their permission bundle (HrPermissions::manager())
+     * carries hr_manage_employee_requests / hr_approve_leave /
+     * hr_manage_attendance so they can act on their OWN reports, which must
+     * never make them an approver for every employee without a manager (D5).
+     *
+     * @var array<int, string>
+     */
+    public const HR_ROLE_NAMES = [
+        'hr',
+        'hr_manager',
+        'hr manager',
+        'hr_ops_manager',
+        'hr ops manager',
+        'hr operations manager',
+        'hr_administrator',
+        'hr administrator',
+        'human resources',
+        'human resources manager',
+    ];
+
+    /**
+     * Permissions that make a user an HR approver: company-wide HR visibility.
+     *
+     * @var array<int, string>
+     */
+    public const HR_APPROVER_PERMISSIONS = [
+        'hr_view_all_records',
+    ];
+
+    /** @var array<string, bool> */
+    private array $companyHrApproverCache = [];
+
     /** @param array<string, mixed> $context */
     public function matchingWorkflow(int $companyId, string $requestType, ?string $amount = null, array $context = []): ?ApprovalWorkflow
     {
@@ -117,15 +154,22 @@ final class ApprovalEngine
         }
 
         if ($step->approver_role_id) {
-            return User::query()
+            if ($request->status !== 'pending') {
+                return collect();
+            }
+
+            return CurrentCompany::scopeUsersOf(User::query(), $companyId)
                 ->where('is_active', true)
                 ->whereHas('roles', fn ($q) => $q->where('roles.id', $step->approver_role_id))
-                ->get()
-                ->filter(fn (User $u) => $this->userCanAccessCompany($u, $companyId) && $this->canAct($request, $u))
-                ->values();
+                ->orderBy('id')
+                ->get();
         }
 
         $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+
+        if ($step->hierarchy_route === 'hr') {
+            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+        }
 
         if ($step->hierarchy_route === 'requester_manager') {
             $manager = $subjectEmployee?->parent?->user;
@@ -167,24 +211,35 @@ final class ApprovalEngine
         return collect();
     }
 
+    /**
+     * The HR people of one company: active users who belong to it (default
+     * company or an explicit membership -- a group owner's implicit access to
+     * every company does not count) and hold an HR role or company-wide HR
+     * visibility. One query; line managers are never included (D5).
+     */
     public function resolveHrApproversForCompany(int $companyId, ?int $excludeUserId = null): Collection
     {
-        return User::query()
-            ->where('is_active', true)
-            ->get()
-            ->filter(function (User $u) use ($companyId, $excludeUserId): bool {
-                if ($excludeUserId && (int) $u->id === (int) $excludeUserId) {
-                    return false;
-                }
-                if (! $this->userCanAccessCompany($u, $companyId)) {
-                    return false;
-                }
+        return $this->hrApproversQuery($companyId, $excludeUserId)->orderBy('id')->get();
+    }
 
-                return $this->isHrApprover($u)
-                    || $u->can('hr_manage_employee_requests')
-                    || $u->can('hr_view_all_records');
-            })
-            ->values();
+    /** Whether $user is one of $companyId's HR approvers (see resolveHrApproversForCompany()). */
+    public function isCompanyHrApprover(User $user, int $companyId): bool
+    {
+        return $this->companyHrApproverCache[$companyId.':'.$user->id] ??= $this->hrApproversQuery($companyId)
+            ->whereKey($user->id)
+            ->exists();
+    }
+
+    /** @return Builder<User> */
+    public function hrApproversQuery(int $companyId, ?int $excludeUserId = null): Builder
+    {
+        return CurrentCompany::scopeUsersOf(User::query(), $companyId)
+            ->where('is_active', true)
+            ->when($excludeUserId, fn (Builder $query) => $query->whereKeyNot($excludeUserId))
+            ->where(fn (Builder $query) => $query
+                ->whereHas('roles', fn (Builder $roles) => $roles->whereIn('name', self::HR_ROLE_NAMES))
+                ->orWhereHas('roles.permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_APPROVER_PERMISSIONS))
+                ->orWhereHas('permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_APPROVER_PERMISSIONS)));
     }
 
     /**
@@ -274,11 +329,22 @@ final class ApprovalEngine
         $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
 
         return match ($step->hierarchy_route) {
+            'hr'                 => $this->canActAsHr($subjectEmployee, $actor, $request),
             'requester_manager'  => $this->canActAsRequesterManager($subjectEmployee, $actor, $request),
             'department_manager' => $this->canActAsDepartmentManager($subjectEmployee, $actor, $request),
             'team_manager'       => $this->canActAsTeamManager($subjectEmployee, $actor, $request),
             default              => false,
         };
+    }
+
+    /** An "hr" step: any HR approver of the request's company except the employee the request is about. */
+    private function canActAsHr(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
+    {
+        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
+            return false;
+        }
+
+        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     private function canActAsRequesterManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
@@ -295,7 +361,7 @@ final class ApprovalEngine
             return false;
         }
 
-        return $this->isHrOrAdminApprover($actor, $request);
+        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     private function resolveTechHeadUserId(ApprovalRequest $request): ?int
@@ -331,7 +397,7 @@ final class ApprovalEngine
             return false;
         }
 
-        return $this->isHrOrAdminApprover($actor, $request);
+        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     private function canActAsTeamManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
@@ -346,7 +412,7 @@ final class ApprovalEngine
             return false;
         }
 
-        return $this->isHrOrAdminApprover($actor, $request);
+        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     private function isHrApprover(User $actor): bool
@@ -369,36 +435,6 @@ final class ApprovalEngine
         ])
         || $actor->can('hr_manage_sensitive_employee_data')
         || $actor->can('hr_view_all_records');
-    }
-
-    private function isHrOrAdminApprover(User $actor, ApprovalRequest $request): bool
-    {
-        if ($actor->hasRole([
-            'Admin',
-            'Super Admin',
-            'hr',
-            'hr_manager',
-            'hr manager',
-            'hr_ops_manager',
-            'hr ops manager',
-            'hr operations manager',
-            'hr_administrator',
-            'hr administrator',
-            'human resources',
-            'human resources manager',
-        ])) {
-            return true;
-        }
-
-        if ($actor->can('hr_view_all_records')) {
-            return true;
-        }
-
-        return match ($request->request_type) {
-            'attendance_time_change', 'missing_attendance' => $actor->can('hr_manage_attendance'),
-            'leave_request'                                => $actor->can('hr_approve_leave'),
-            default                                        => $actor->can('hr_manage_employee_requests'),
-        };
     }
 
     /**
@@ -444,6 +480,7 @@ final class ApprovalEngine
         }
 
         $manager = match ($step->hierarchy_route) {
+            'hr'                 => null,
             'requester_manager'  => $subjectEmployee?->parent?->user,
             'department_manager' => $techHeadUser ?? $subjectEmployee?->department?->manager?->user,
             'team_manager'       => $subjectEmployee?->team?->manager?->user,
@@ -454,6 +491,7 @@ final class ApprovalEngine
         }
 
         return match ($step->hierarchy_route) {
+            'hr'                 => 'Forwarded to HR.',
             'requester_manager'  => 'Forwarded to HR (no line manager assigned).',
             'department_manager' => 'Forwarded to HR (no department manager assigned).',
             'team_manager'       => 'Forwarded to HR (no team manager assigned).',

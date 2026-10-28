@@ -2,6 +2,8 @@
 
 namespace Webkul\Employee\Models;
 
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,7 +14,9 @@ use InvalidArgumentException;
 use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
 use Webkul\Employee\Database\Factories\EmployeeFactory;
+use Webkul\Employee\Services\EmployeeCodeGenerator;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
+use Webkul\Employee\Support\Cnic;
 use Webkul\Field\Traits\HasCustomFields;
 use Webkul\Partner\Models\BankAccount;
 use Webkul\Partner\Models\Partner;
@@ -85,6 +89,12 @@ class Employee extends Model
         'ssnid',
         'sinid',
         'identification_id',
+        'cnic',
+        'ntn',
+        'eobi_number',
+        'blood_group',
+        'probation_end_date',
+        'confirmation_date',
         'passport_id',
         'permit_no',
         'visa_no',
@@ -124,6 +134,8 @@ class Employee extends Model
         'work_permit_scheduled_activity' => 'boolean',
         'joining_date'                   => 'date',
         'leaving_date'                   => 'date',
+        'probation_end_date'             => 'date',
+        'confirmation_date'              => 'date',
         'base_salary'                    => 'decimal:4',
         'document_metadata'              => 'array',
     ];
@@ -283,6 +295,63 @@ class Employee extends Model
         return $this->hasMany(EmployeeRequest::class);
     }
 
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EmployeeDocument::class, 'employee_id');
+    }
+
+    /**
+     * Active "required for new hires" document types of the employee's
+     * company that this employee has no (non-deleted) document of.
+     *
+     * @return Collection<int, DocumentType>
+     */
+    public function missingRequiredDocumentTypes(): Collection
+    {
+        if (! $this->company_id) {
+            return new Collection;
+        }
+
+        return DocumentType::query()
+            ->where('company_id', $this->company_id)
+            ->where('is_active', true)
+            ->where('required_for_new_hires', true)
+            ->whereNotIn('id', $this->documents()->select('document_type_id'))
+            ->orderBy('sort')
+            ->get();
+    }
+
+    /** Adds missing_required_documents_count (see missingRequiredDocumentTypes()) to each row. */
+    public function scopeWithMissingRequiredDocumentsCount(Builder $query): Builder
+    {
+        if ($query->getQuery()->columns === null) {
+            $query->select($query->qualifyColumn('*'));
+        }
+
+        return $query->addSelect([
+            'missing_required_documents_count' => static::missingRequiredDocumentTypesSubquery()->selectRaw('count(*)'),
+        ]);
+    }
+
+    /** Employees missing at least one required document. */
+    public function scopeMissingRequiredDocuments(Builder $query): Builder
+    {
+        return $query->whereExists(static::missingRequiredDocumentTypesSubquery()->select('employees_document_types.id'));
+    }
+
+    protected static function missingRequiredDocumentTypesSubquery(): Builder
+    {
+        return DocumentType::query()
+            ->whereColumn('employees_document_types.company_id', 'employees_employees.company_id')
+            ->where('employees_document_types.is_active', true)
+            ->where('employees_document_types.required_for_new_hires', true)
+            ->whereNotExists(fn ($documents) => $documents
+                ->from('employees_employee_documents')
+                ->whereColumn('employees_employee_documents.document_type_id', 'employees_document_types.id')
+                ->whereColumn('employees_employee_documents.employee_id', 'employees_employees.id')
+                ->whereNull('employees_employee_documents.deleted_at'));
+    }
+
     public function synchronizeApprovalState(ApprovalRequest $request): void
     {
         if ($request->request_type === 'employee_sensitive_change' && $request->status === 'approved') {
@@ -319,8 +388,13 @@ class Employee extends Model
     {
         parent::boot();
 
+        static::creating(function (self $employee): void {
+            app(EmployeeCodeGenerator::class)->assignIfEmpty($employee);
+        });
+
         static::saving(function (self $employee): void {
             static::assertHierarchyIsSameCompany($employee);
+            static::normalizeCnic($employee);
 
             // Time-off approval always follows the reporting line: the line manager set in
             // "Manager" is who approves this employee's leave, never a separately-picked person.
@@ -418,6 +492,40 @@ class Employee extends Model
                 && ! $user->allowedCompanies()->whereKey($companyId)->exists()) {
                 throw new InvalidArgumentException('The linked user does not have access to this company.');
             }
+        }
+    }
+
+    /**
+     * CNIC is stored as 12345-1234567-1 whatever way it was typed; anything
+     * that is not 13 digits is refused on every write path (form, API,
+     * sensitive-change approval), and it must be unique in the company.
+     */
+    private static function normalizeCnic(self $employee): void
+    {
+        if (! $employee->isDirty('cnic')) {
+            return;
+        }
+
+        if (blank($employee->cnic)) {
+            $employee->cnic = null;
+
+            return;
+        }
+
+        $formatted = Cnic::normalize((string) $employee->cnic);
+
+        if ($formatted === null) {
+            throw new InvalidArgumentException('CNIC must be 13 digits, written 12345-1234567-1.');
+        }
+
+        $employee->cnic = $formatted;
+
+        if ($employee->company_id && static::withTrashed()
+            ->where('company_id', $employee->company_id)
+            ->where('cnic', $formatted)
+            ->when($employee->exists, fn (Builder $query) => $query->whereKeyNot($employee->getKey()))
+            ->exists()) {
+            throw new InvalidArgumentException('Another employee of this company already has this CNIC.');
         }
     }
 

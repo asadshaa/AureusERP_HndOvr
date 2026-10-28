@@ -406,6 +406,7 @@ class CalendarWidget extends FullCalendarWidget
             State::VALIDATE_TWO => State::VALIDATE_TWO->getLabel(),
             State::CONFIRM      => State::CONFIRM->getLabel(),
             State::REFUSE       => State::REFUSE->getLabel(),
+            State::CANCEL       => State::CANCEL->getLabel(),
         };
     }
 

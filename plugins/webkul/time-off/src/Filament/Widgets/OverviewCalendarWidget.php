@@ -166,14 +166,15 @@ class OverviewCalendarWidget extends FullCalendarWidget
         return Leave::query()
             ->where('company_id', $user?->default_company_id)
             ->whereIn('employee_id', LeaveOversight::visibleEmployeeIds())
+            ->where(fn ($query) => $query->whereNull('state')->orWhere('state', '!=', State::CANCEL->value))
             ->where('request_date_from', '>=', $fetchInfo['start'])
             ->where('request_date_to', '<=', $fetchInfo['end'])
-            ->with('holidayStatus')
+            ->with('holidayStatus', 'employee')
             ->get()
             ->map(function (Leave $leave) {
                 return [
                     'id'              => $leave->id,
-                    'title'           => $leave->holidayStatus?->name,
+                    'title'           => trim(($leave->employee?->name ? $leave->employee->name.': ' : '').($leave->holidayStatus?->name ?? '')),
                     'start'           => $leave->request_date_from,
                     'end'             => $leave->request_date_to,
                     'allDay'          => true,

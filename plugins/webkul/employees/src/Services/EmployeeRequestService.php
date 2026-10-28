@@ -2,10 +2,13 @@
 
 namespace Webkul\Employee\Services;
 
+use Barryvdh\DomPDF\Facade\Pdf;
 use Brick\Math\BigDecimal;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use RuntimeException;
 use Webkul\Account\Enums\DisplayType;
 use Webkul\Account\Enums\JournalType;
@@ -21,6 +24,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
+use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
@@ -46,6 +50,7 @@ class EmployeeRequestService
             throw new RuntimeException('This employee request type requires a supporting document.');
         }
         $this->assertClaimTaxConsistency($request);
+        $this->prepareSelfServicePayload($request);
 
         $approval = $this->approvals->submit(
             $request,
@@ -300,6 +305,9 @@ class EmployeeRequestService
         }
         if ($request->requestType->category === 'attendance_correction') {
             $this->applyAttendanceTimeChange($request->fresh(['approvalRequest.decisions']));
+        }
+        if (in_array($request->requestType->category, [EmployeeRequestKinds::LoanCategory, EmployeeRequestKinds::SalaryAdvanceCategory], true)) {
+            $this->recordApprovedFinancialRequest($request->fresh(['requestType']));
         }
 
         $this->notifyDecision($request, 'approved');
@@ -569,6 +577,253 @@ class EmployeeRequestService
         $actualNet = BigDecimal::of((string) ($request->amount ?? 0));
         if (! $expectedNet->isEqualTo($actualNet)) {
             throw new RuntimeException('Net payment must equal the billed amount minus tax deductions.');
+        }
+    }
+
+    /**
+     * Validates the Loan / Salary advance / HR letter fields kept in the
+     * payload and stores what is derived from them (the loan's instalment
+     * schedule, the advance cap that applied). Runs on every submission, so a
+     * bypassed or edited form cannot slip an invalid request into approval.
+     */
+    private function prepareSelfServicePayload(EmployeeRequest $request): void
+    {
+        $category = $request->requestType->category;
+        if (! EmployeeRequestKinds::isSelfServiceCategory($category)) {
+            return;
+        }
+
+        $payload = (array) ($request->payload ?? []);
+        $payload['kind'] = $category;
+
+        if ($category === EmployeeRequestKinds::LoanCategory) {
+            $instalments = $payload['instalments'] ?? null;
+            if (blank($payload['purpose'] ?? null)) {
+                throw new RuntimeException('Please give the purpose of the loan.');
+            }
+            if (filter_var($instalments, FILTER_VALIDATE_INT) === false
+                || (int) $instalments < EmployeeRequestKinds::MinInstalments
+                || (int) $instalments > EmployeeRequestKinds::MaxInstalments) {
+                throw new RuntimeException('The number of instalments must be between '.EmployeeRequestKinds::MinInstalments.' and '.EmployeeRequestKinds::MaxInstalments.'.');
+            }
+            if (! EmployeeRequestKinds::isValidUpcomingMonth($payload['start_month'] ?? null)) {
+                throw new RuntimeException('The first instalment month must be this month or later.');
+            }
+
+            $payload['instalments'] = (int) $instalments;
+            $payload['schedule'] = EmployeeRequestKinds::instalmentSchedule((string) $request->amount, (int) $instalments, $payload['start_month']);
+        }
+
+        if ($category === EmployeeRequestKinds::SalaryAdvanceCategory) {
+            if (blank($payload['reason'] ?? null)) {
+                throw new RuntimeException('Please give the reason for the salary advance.');
+            }
+            if (! EmployeeRequestKinds::isValidUpcomingMonth($payload['deduct_month'] ?? null)) {
+                throw new RuntimeException('The deduction month must be this month or later.');
+            }
+
+            $cap = EmployeeRequestKinds::advanceCap($request->employee, $request->requestType);
+            if ($cap !== null && BigDecimal::of((string) $request->amount)->isGreaterThan($cap)) {
+                $percent = EmployeeRequestKinds::advanceSalaryPercent($request->requestType);
+                throw new RuntimeException('A salary advance cannot exceed '.(float) $percent.'% of the monthly salary ('.number_format((float) $cap, 2).').');
+            }
+
+            $payload['cap_amount'] = $cap;
+        }
+
+        if ($category === EmployeeRequestKinds::HrLetterCategory) {
+            if (! array_key_exists((string) ($payload['letter_type'] ?? ''), EmployeeRequestKinds::LetterTypes)) {
+                throw new RuntimeException('Please choose the type of letter.');
+            }
+            foreach (['addressed_to' => 'who the letter is addressed to', 'letter_purpose' => 'the purpose of the letter'] as $field => $label) {
+                if (blank($payload[$field] ?? null)) {
+                    throw new RuntimeException("Please give {$label}.");
+                }
+            }
+            if (blank($payload['needed_by'] ?? null) || strtotime((string) $payload['needed_by']) === false) {
+                throw new RuntimeException('Please give the date the letter is needed by.');
+            }
+
+            $payload['needed_by'] = Carbon::parse($payload['needed_by'])->toDateString();
+            unset($payload['letter_path'], $payload['letter_issued_at'], $payload['letter_issued_by']);
+        }
+
+        $request->payload = $payload;
+        $request->save();
+    }
+
+    /** Final approval of a loan or salary advance: recorded on the request only (no payroll or accounting posting). */
+    private function recordApprovedFinancialRequest(EmployeeRequest $request): void
+    {
+        $payload = (array) ($request->payload ?? []);
+
+        if ($request->requestType->category === EmployeeRequestKinds::LoanCategory && filled($payload['start_month'] ?? null)) {
+            $payload['schedule'] = EmployeeRequestKinds::instalmentSchedule((string) $request->amount, max(1, (int) ($payload['instalments'] ?? 1)), (string) $payload['start_month']);
+        }
+
+        $payload['recorded_at'] ??= now()->toDateTimeString();
+        $request->forceFill(['payload' => $payload])->save();
+    }
+
+    /**
+     * HR issues the letter for an approved HR letter request by attaching a
+     * file already stored on the private (local) disk.
+     */
+    public function issueLetter(EmployeeRequest $request, User $actor, string $storedPath): EmployeeRequest
+    {
+        $this->assertCanIssueLetter($request, $actor);
+
+        if (! Storage::disk('local')->exists($storedPath)) {
+            throw new RuntimeException('The letter file could not be found.');
+        }
+
+        $payload = (array) ($request->payload ?? []);
+        $payload['letter_path'] = $storedPath;
+        $payload['letter_issued_at'] = now()->toDateTimeString();
+        $payload['letter_issued_by'] = $actor->id;
+        $request->forceFill(['payload' => $payload])->save();
+
+        $this->notifyLetterIssued($request);
+
+        return $request->fresh();
+    }
+
+    /**
+     * Renders a simple branded letter (company name/logo, employee name,
+     * designation, joining date; salary only on a salary certificate and only
+     * when HR asks for it), stores it privately and issues it.
+     */
+    public function generateLetterPdf(EmployeeRequest $request, User $actor, bool $includeSalary = false): EmployeeRequest
+    {
+        $this->assertCanIssueLetter($request, $actor);
+        $request->loadMissing(['company.currency', 'employee.job', 'employee.salaryCurrency']);
+
+        $payload = (array) ($request->payload ?? []);
+        $letterType = (string) ($payload['letter_type'] ?? 'other');
+        $employee = $request->employee;
+        $showSalary = $includeSalary && $letterType === EmployeeRequestKinds::SalaryCertificate && $employee?->base_salary !== null;
+
+        $pdf = Pdf::loadView('employees::requests.letter-pdf', [
+            'company'     => $request->company,
+            'logo'        => $this->companyLogoDataUri($request->company?->logo),
+            'employee'    => $employee,
+            'designation' => $employee?->job_title ?: $employee?->job?->name,
+            'letterTitle' => EmployeeRequestKinds::letterTypeLabel($letterType),
+            'letterType'  => $letterType,
+            'addressedTo' => (string) ($payload['addressed_to'] ?? ''),
+            'purpose'     => (string) ($payload['letter_purpose'] ?? ''),
+            'salary'      => $showSalary ? number_format((float) $employee->base_salary, 2) : null,
+            'currency'    => $showSalary ? ($employee->salaryCurrency?->name ?? $request->company?->currency?->name) : null,
+            'reference'   => $request->reference,
+            'issuedOn'    => now(),
+            'issuer'      => $actor,
+        ]);
+
+        $path = 'employees/requests/letters/'.$request->company_id.'/'.$request->id.'-'.now()->format('YmdHis').'.pdf';
+        Storage::disk('local')->put($path, $pdf->output());
+
+        $payload['letter_includes_salary'] = $showSalary;
+        $request->forceFill(['payload' => $payload])->save();
+
+        return $this->issueLetter($request, $actor, $path);
+    }
+
+    /** Short-lived signed link to the issued letter (the route also requires a signed-in, permitted user). */
+    public function letterDownloadUrl(EmployeeRequest $request, int $minutes = 30): ?string
+    {
+        if (blank(data_get($request->payload, 'letter_path'))) {
+            return null;
+        }
+
+        return URL::temporarySignedRoute('employees.requests.letter', now()->addMinutes($minutes), ['employeeRequest' => $request->id]);
+    }
+
+    /** The employee, whoever filed the request, and the company's HR approvers may download an issued letter. */
+    public function canDownloadLetter(User $user, EmployeeRequest $request): bool
+    {
+        $request->loadMissing(['requestType', 'employee']);
+
+        if ($request->requestType?->category !== EmployeeRequestKinds::HrLetterCategory || blank(data_get($request->payload, 'letter_path'))) {
+            return false;
+        }
+
+        if ((int) $request->requested_by === (int) $user->id || (int) $request->employee?->user_id === (int) $user->id) {
+            return true;
+        }
+
+        return $this->approvals->isCompanyHrApprover($user, (int) $request->company_id);
+    }
+
+    public function canIssueLetter(User $user, EmployeeRequest $request): bool
+    {
+        $request->loadMissing(['requestType', 'employee']);
+
+        return $request->status === 'approved'
+            && $request->requestType?->category === EmployeeRequestKinds::HrLetterCategory
+            && (int) $request->employee?->user_id !== (int) $user->id
+            && $this->approvals->isCompanyHrApprover($user, (int) $request->company_id);
+    }
+
+    private function assertCanIssueLetter(EmployeeRequest $request, User $actor): void
+    {
+        $request->loadMissing(['requestType', 'employee']);
+
+        if ($request->requestType?->category !== EmployeeRequestKinds::HrLetterCategory) {
+            throw new RuntimeException('Only HR letter requests can have a letter issued.');
+        }
+        if ($request->status !== 'approved') {
+            throw new RuntimeException('Approve the letter request before issuing the letter.');
+        }
+        if (! $this->canIssueLetter($actor, $request)) {
+            throw new RuntimeException('Only HR of this company can issue this letter.');
+        }
+    }
+
+    private function companyLogoDataUri(?string $logo): ?string
+    {
+        if (blank($logo)) {
+            return null;
+        }
+
+        foreach (['public', 'local'] as $disk) {
+            try {
+                if (Storage::disk($disk)->exists($logo)) {
+                    $mime = Storage::disk($disk)->mimeType($logo) ?: 'image/png';
+
+                    return str_starts_with($mime, 'image/') ? 'data:'.$mime.';base64,'.base64_encode(Storage::disk($disk)->get($logo)) : null;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    private function notifyLetterIssued(EmployeeRequest $request): void
+    {
+        try {
+            $request->loadMissing(['employee.user', 'requester']);
+            $recipients = collect([$request->requester, $request->employee?->user])
+                ->filter(fn (?User $u): bool => $u && $u->is_active)
+                ->unique('id');
+
+            $title = EmployeeRequestKinds::letterTypeLabel(data_get($request->payload, 'letter_type'));
+            $notification = FilamentNotification::make()
+                ->success()
+                ->title("Your {$title} is ready")
+                ->body("HR has issued the letter for request {$request->reference}. Open Employee Requests to download it.");
+
+            foreach ($recipients as $recipient) {
+                app(HierarchicalNotificationService::class)->sendIdempotentNotification(
+                    $recipient,
+                    $notification,
+                    "employee_request_letter_{$request->id}_".md5((string) data_get($request->payload, 'letter_path'))."_{$recipient->id}",
+                    ['event' => 'employee_request_letter_issued', 'employee_request_id' => $request->id, 'company_id' => $request->company_id],
+                );
+            }
+        } catch (\Throwable $e) {
+            report($e);
         }
     }
 

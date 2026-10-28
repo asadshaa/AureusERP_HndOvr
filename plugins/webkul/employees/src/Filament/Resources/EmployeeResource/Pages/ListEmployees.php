@@ -3,11 +3,15 @@
 namespace Webkul\Employee\Filament\Resources\EmployeeResource\Pages;
 
 use Carbon\Carbon;
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
+use Webkul\Employee\Services\EmployeeDirectoryExport;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
@@ -20,6 +24,27 @@ class ListEmployees extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('exportExcel')
+                ->label('Export to Excel')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->modalHeading('Export employees to Excel')
+                ->modalDescription('The employees in the list with its current search and filters. Sensitive columns are only offered to users allowed to see them.')
+                ->modalSubmitActionLabel('Download')
+                ->schema(fn (): array => [
+                    CheckboxList::make('columns')
+                        ->label('Columns')
+                        ->options(app(EmployeeDirectoryExport::class)->columnOptions(Auth::user()))
+                        ->default(app(EmployeeDirectoryExport::class)->defaultColumns())
+                        ->columns(3)
+                        ->bulkToggleable()
+                        ->required(),
+                ])
+                ->action(fn (array $data): StreamedResponse => app(EmployeeDirectoryExport::class)->download(
+                    Auth::user(),
+                    $this->getFilteredTableQuery(),
+                    (array) ($data['columns'] ?? []),
+                )),
             CreateAction::make()
                 ->icon('heroicon-o-plus-circle')
                 ->label(__('employees::filament/resources/employee/pages/list-employee.header-actions.create.label')),

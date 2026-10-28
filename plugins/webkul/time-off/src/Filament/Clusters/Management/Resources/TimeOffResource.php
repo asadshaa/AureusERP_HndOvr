@@ -33,6 +33,7 @@ use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\TimeOff\Enums\State;
+use Webkul\TimeOff\Filament\Actions\LeaveCancellationActions;
 use Webkul\TimeOff\Filament\Clusters\Management;
 use Webkul\TimeOff\Filament\Clusters\Management\Resources\TimeOffResource\Pages\CreateTimeOff;
 use Webkul\TimeOff\Filament\Clusters\Management\Resources\TimeOffResource\Pages\EditTimeOff;
@@ -248,13 +249,14 @@ class TimeOffResource extends Resource
                                 ->send();
                         })
                         ->label(__('time-off::filament/clusters/management/resources/time-off.table.actions.refused.title')),
+                    ...LeaveCancellationActions::make(),
                     ViewAction::make(),
                     EditAction::make()
                         ->visible(fn (Leave $record): bool => $record->approvalRequest?->status !== 'pending'
-                            && $record->state !== State::VALIDATE_TWO),
+                            && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true)),
                     DeleteAction::make()
                         ->visible(fn (Leave $record): bool => $record->approvalRequest?->status !== 'pending'
-                            && $record->state !== State::VALIDATE_TWO)
+                            && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true))
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -267,7 +269,7 @@ class TimeOffResource extends Resource
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
                         ->action(function (Collection $records) {
-                            $deletable = $records->filter(fn (Leave $record) => static::isActiveCompanyRecord($record) && $record->approvalRequest?->status !== 'pending' && $record->state !== State::VALIDATE_TWO);
+                            $deletable = $records->filter(fn (Leave $record) => static::isActiveCompanyRecord($record) && $record->approvalRequest?->status !== 'pending' && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true));
                             $skipped = $records->count() - $deletable->count();
 
                             $deletable->each(fn (Leave $record) => $record->delete());
@@ -344,6 +346,7 @@ class TimeOffResource extends Resource
                                 ImageEntry::make('attachment')
                                     ->label(__('time-off::filament/clusters/my-time/resources/my-time-off.infolist.entries.attachment'))
                                     ->visible(fn ($record) => $record->holidayStatus?->support_document),
+                                ...LeaveCancellationActions::infolistEntries(),
                             ]),
                     ]),
             ])
