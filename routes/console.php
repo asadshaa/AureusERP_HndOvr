@@ -153,3 +153,40 @@ Schedule::command('hr:today-attendance-digest')
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
     ->withoutOverlapping(30)
     ->onOneServer();
+
+/*
+| Employee attendance notices (config/attendance.php -> notifications.*, all
+| idempotent: keyed per employee and day, per manager and day, or per
+| employee and month, so an overlap or a re-run never notifies twice):
+|
+| hr:remind-missing-check-in -- "You haven't checked in today", 15 minutes
+| after the employee is due: the 10:15 tick, or 14:15 after an approved
+| first half off. Weekends, public holidays, approved leave and On-Duty are
+| skipped. Runs every 15 minutes in office hours so the 14:15 reminders go
+| out too.
+|
+| hr:line-manager-attendance-digest -- each line manager's own team, late /
+| absent so far, at 10:30; nothing to report = no notice.
+|
+| hr:grace-balance-alerts -- once the office day is over: the first time in
+| a month an employee's grace balance is below zero. (Late check-ins raise
+| the same alert straight away.)
+*/
+Schedule::command('hr:remind-missing-check-in')
+    ->everyFifteenMinutes()
+    ->between('10:00', '18:00')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(10)
+    ->onOneServer();
+
+Schedule::command('hr:line-manager-attendance-digest')
+    ->dailyAt('10:30')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('hr:grace-balance-alerts')
+    ->dailyAt('20:00')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();

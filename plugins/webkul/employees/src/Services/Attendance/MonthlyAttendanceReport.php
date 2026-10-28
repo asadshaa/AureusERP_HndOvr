@@ -151,6 +151,32 @@ class MonthlyAttendanceReport
     }
 
     /**
+     * The month of the given employees of one company, without a user (the
+     * scheduled employee reminders; callers decide who is told). Employees
+     * of another company are ignored.
+     *
+     * @param  array<int, int>  $employeeIds
+     * @return array<int, array{employee: array<string, mixed>, rows: array<int, array<string, mixed>>, summary: array<string, mixed>}> keyed by employee id
+     */
+    public function forEmployeesOfCompany(int $companyId, string $month, array $employeeIds): array
+    {
+        if ($employeeIds === []) {
+            return [];
+        }
+
+        $employees = Employee::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', array_map('intval', $employeeIds))
+            ->with(['department', 'job'])
+            ->orderBy('id')
+            ->get();
+
+        return collect($this->build($employees, $companyId, $this->monthStart($month)))
+            ->keyBy(fn (array $report): int => (int) $report['employee']['id'])
+            ->all();
+    }
+
+    /**
      * The employee's grace balance ledger for a month: allowance, earned
      * extra, used (late + left early + gaps), balance and one line per day.
      * The employee sees their own; a line manager their team; HR their
@@ -369,9 +395,12 @@ class MonthlyAttendanceReport
         $lateSeconds = 0;
         $earlySeconds = 0;
         $workedInLeave = 0;
+        $dueStartSeconds = null;
         if ($isWorking && $requiredSeconds > 0) {
             $due = $this->subtract([[$start, $end]], $leaveWindows);
             $odCover = $odInterval !== null ? [$odInterval] : [];
+            $expected = $this->subtract($due, $odCover);
+            $dueStartSeconds = $expected !== [] ? $expected[0][0] : null;
 
             if ($due !== []) {
                 $dueStart = $due[0][0];
@@ -446,6 +475,8 @@ class MonthlyAttendanceReport
             'worked_in_leave_seconds' => $workedInLeave,
             'net_seconds'             => $netSeconds,
             'missing_check_out'       => $isWorking && $missingCheckOut,
+            // When the employee is first expected at work (office start, 14:00 after a first half off, ...); null = not expected.
+            'due_start_seconds'       => $dueStartSeconds,
             'od'                      => $odInterval !== null ? $od : null,
             'od_days'                 => $odInterval === null ? 0.0 : ($od === 'full' ? 1.0 : 0.5),
             'leave_days'              => $this->leaveDays($type, $isWorking, $parts, $settings['required']),

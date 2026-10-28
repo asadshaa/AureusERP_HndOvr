@@ -76,4 +76,40 @@ return [
         // Unused earned extra of the previous month opens the next month (one month, no chaining).
         'carry_over' => (bool) env('ATTENDANCE_TIME_BANK_CARRY_OVER', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Employee attendance notifications
+    |--------------------------------------------------------------------------
+    |
+    | Panel (bell) notifications to employees and line managers, sent by
+    | Webkul\Employee\Services\Attendance\EmployeeAttendanceNotifier and
+    | LineManagerAttendanceDigest. Each type can be switched off here; all are
+    | on by default. Every notice is sent at most once (keyed per employee /
+    | day, or per month for the negative grace balance).
+    |
+    */
+    'notifications' => [
+        // hr:remind-missing-check-in: "You haven't checked in today", this many minutes after
+        // the employee is due (10:15; 14:15 after an approved first half off).
+        'check_in_reminder'               => (bool) env('ATTENDANCE_NOTIFY_CHECK_IN_REMINDER', true),
+        'check_in_reminder_after_minutes' => (int) env('ATTENDANCE_CHECK_IN_REMINDER_AFTER_MINUTES', 15),
+
+        // Right after a late first check-in of the day (queued, after commit), with the grace balance.
+        'late_check_in' => (bool) env('ATTENDANCE_NOTIFY_LATE_CHECK_IN', true),
+        // Only check-ins recorded this recently are "right now" (imports / back-dated entries are not notified).
+        'late_check_in_max_age_minutes' => (int) env('ATTENDANCE_LATE_CHECK_IN_MAX_AGE_MINUTES', 120),
+
+        // hr:flag-forgotten-shifts also tells the employee to check out or request a correction.
+        'forgotten_check_out' => (bool) env('ATTENDANCE_NOTIFY_FORGOTTEN_CHECK_OUT', true),
+
+        // Time Off approved / refused (full day, half day, short leave, On-Duty).
+        'leave_decision' => (bool) env('ATTENDANCE_NOTIFY_LEAVE_DECISION', true),
+
+        // First time in a month the grace balance goes below zero (hr:grace-balance-alerts and late check-ins).
+        'negative_grace_balance' => (bool) env('ATTENDANCE_NOTIFY_NEGATIVE_GRACE_BALANCE', true),
+
+        // hr:line-manager-attendance-digest: each line manager's own team, late / absent so far.
+        'line_manager_digest' => (bool) env('ATTENDANCE_NOTIFY_LINE_MANAGER_DIGEST', true),
+    ],
 ];

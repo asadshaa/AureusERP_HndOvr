@@ -11,6 +11,7 @@ use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
+use Webkul\TimeOff\Enums\RequestDateFromPeriod;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 
@@ -200,8 +201,61 @@ class LeaveApprovalService
         }
     }
 
+    /**
+     * " on Wed, 28 Oct 2026 (first half, 10:00–14:00)", " on ... (14:00–16:00)"
+     * for a short leave, or " from ... to ... (3 days)".
+     */
+    private function decisionWhen(Leave $leave): string
+    {
+        if (! $leave->request_date_from) {
+            return $leave->date_from ? ' on '.Carbon::parse($leave->date_from)->format('D, d M Y') : '';
+        }
+
+        $start = Carbon::parse($leave->request_date_from);
+        $end = $leave->request_date_to ? Carbon::parse($leave->request_date_to) : $start;
+
+        if (! $start->isSameDay($end) && ! $leave->request_unit_half && ! $leave->request_unit_hours) {
+            $days = $leave->number_of_days ? ' ('.(float) $leave->number_of_days.' days)' : '';
+
+            return " from {$start->format('D, d M Y')} to {$end->format('D, d M Y')}{$days}";
+        }
+
+        $officeStart = $this->hoursFromClock((string) config('attendance.monthly_report.office_start', '10:00'));
+        $officeEnd = $this->hoursFromClock((string) config('attendance.monthly_report.office_end', '18:00'));
+        $middle = $officeStart + ($officeEnd - $officeStart) / 2;
+
+        $window = null;
+        if ($leave->request_unit_half) {
+            $window = $leave->request_date_from_period === RequestDateFromPeriod::AFTERNOON
+                ? 'second half, '.$this->clockFromHours($middle).'–'.$this->clockFromHours($officeEnd)
+                : 'first half, '.$this->clockFromHours($officeStart).'–'.$this->clockFromHours($middle);
+        } elseif ($leave->request_unit_hours && $leave->request_hour_from !== null && $leave->request_hour_to !== null) {
+            $window = $this->clockFromHours((float) $leave->request_hour_from).'–'.$this->clockFromHours((float) $leave->request_hour_to);
+        }
+
+        return " on {$start->format('D, d M Y')}".($window !== null ? " ({$window})" : '');
+    }
+
+    private function hoursFromClock(string $clock): float
+    {
+        [$hours, $minutes] = array_map('intval', explode(':', $clock) + [1 => 0]);
+
+        return $hours + $minutes / 60;
+    }
+
+    private function clockFromHours(float $hours): string
+    {
+        $minutes = (int) round($hours * 60);
+
+        return sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
+    }
+
     private function notifyDecision(Leave $leave, string $decision, ?string $reason = null): void
     {
+        if (! config('attendance.notifications.leave_decision', true)) {
+            return;
+        }
+
         try {
             $leave->loadMissing(['employee.user', 'employee.parent', 'user', 'holidayStatus', 'approvalRequest.decisions.actor.employee']);
             $recipients = collect([$leave->user, $leave->employee?->user])
@@ -231,35 +285,26 @@ class LeaveApprovalService
             }
 
             $actorName = $actor?->name;
-            $approverLabel = $actorName ? "{$approverRole} ({$actorName})" : $approverRole;
+            $approverLabel = $actorName ? "{$actorName} ({$approverRole})" : $approverRole;
 
-            $dateInfo = '';
-            if ($leave->request_date_from) {
-                $startDate = Carbon::parse($leave->request_date_from)->format('d M Y');
-                $endDate = $leave->request_date_to ? Carbon::parse($leave->request_date_to)->format('d M Y') : $startDate;
-                $days = $leave->number_of_days ? ' ('.(float) $leave->number_of_days.' days)' : '';
-                $dateInfo = " from {$startDate}".($endDate !== $startDate ? " to {$endDate}" : '').$days;
-            } elseif ($leave->date_from) {
-                $dateInfo = " ({$leave->date_from->toDateString()})";
-            }
+            $dateInfo = $this->decisionWhen($leave);
 
             $isApproved = $decision === 'approved';
-            $isRejected = $decision === 'rejected';
             $isPartiallyApproved = $decision === 'partially_approved';
 
             if ($isPartiallyApproved) {
-                $title = "{$approverRole} approved your leave request";
-                $body = "Your {$type} request{$dateInfo} has been approved by {$approverLabel} and forwarded for final review.";
+                $title = "Your {$type} was approved by {$approverRole}";
+                $body = "Your {$type}{$dateInfo} was approved by {$approverLabel} and forwarded for final review.";
                 $color = 'info';
                 $icon = 'heroicon-o-check-circle';
             } elseif ($isApproved) {
-                $title = "{$approverRole} approved your leave request";
-                $body = "Your {$type} request{$dateInfo} has been approved by {$approverLabel}.";
+                $title = "Your {$type} was approved";
+                $body = "Your {$type}{$dateInfo} was approved by {$approverLabel}.";
                 $color = 'success';
                 $icon = 'heroicon-o-check-circle';
             } else {
-                $title = "{$approverRole} rejected your leave request";
-                $body = "Your {$type} request{$dateInfo} was rejected by {$approverLabel}.".($reason ? " Reason: {$reason}" : '');
+                $title = "Your {$type} was refused";
+                $body = "Your {$type}{$dateInfo} was refused by {$approverLabel}.".($reason ? " Reason: {$reason}" : '');
                 $color = 'danger';
                 $icon = 'heroicon-o-x-circle';
             }

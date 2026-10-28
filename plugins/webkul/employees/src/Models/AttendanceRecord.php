@@ -14,6 +14,7 @@ use Webkul\Employee\Enums\AttendanceVerificationResult;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
 use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
+use Webkul\Employee\Services\Attendance\EmployeeAttendanceNotifier;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 
@@ -276,6 +277,20 @@ class AttendanceRecord extends Model
         static::updated(function (self $record): void {
             if (! self::$syncingIntervals && $record->wasChanged(['check_in', 'check_out'])) {
                 app(AttendanceIntervalService::class)->applyDirectEdit($record, false, self::$pendingIntervalReason);
+            }
+        });
+
+        // The day's first check-in (any source): queue the employee's late check-in
+        // notice (EmployeeAttendanceNotifier decides whether it was late and recent).
+        static::created(function (self $record): void {
+            if ($record->check_in !== null) {
+                app(EmployeeAttendanceNotifier::class)->queueLateCheckIn($record);
+            }
+        });
+
+        static::updated(function (self $record): void {
+            if ($record->check_in !== null && $record->wasChanged('check_in') && $record->getOriginal('check_in') === null) {
+                app(EmployeeAttendanceNotifier::class)->queueLateCheckIn($record);
             }
         });
 

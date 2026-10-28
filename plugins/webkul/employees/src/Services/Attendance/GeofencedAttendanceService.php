@@ -751,6 +751,7 @@ class GeofencedAttendanceService
                     });
 
                     $this->notifyLineManager($record, 'missing_checkout', 'Missing check-out', 'never checked out. Set the correct check-out time (Edit) or ask them to request a correction.');
+                    app(EmployeeAttendanceNotifier::class)->notifyForgottenCheckOut($record);
                     $flagged++;
                 }
             });
