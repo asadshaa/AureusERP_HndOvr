@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Listeners\NotifyUsersOnMoveConfirmed;
+use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Blade;
@@ -27,6 +28,9 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(Authenticatable::class, User::class);
+
+        // The home dashboard's widgets share one role / company resolution per request.
+        $this->app->scoped(HomeDashboardContext::class);
 
         $this->registerNativeMobileComponents();
     }

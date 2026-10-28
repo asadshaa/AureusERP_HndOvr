@@ -2,8 +2,14 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Dashboard;
+use App\Filament\Widgets\CompanySnapshotWidget;
 use App\Filament\Widgets\EmployeeDashboardOverviewWidget;
+use App\Filament\Widgets\HomeGreetingWidget;
+use App\Filament\Widgets\MyDayWidget;
 use App\Filament\Widgets\PendingActionsCenterWidget;
+use App\Filament\Widgets\RecruitmentPipelineWidget;
+use App\Filament\Widgets\TeamTodayWidget;
 use App\Filament\Widgets\TodayAttendanceRollCallWidget;
 use App\Http\Middleware\ApplyBrandSettings;
 use App\Http\Middleware\SetLocale;
@@ -13,7 +19,6 @@ use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
-use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -70,8 +75,13 @@ class AdminPanelProvider extends PanelProvider
                 Dashboard::class,
             ])
             ->widgets([
+                HomeGreetingWidget::class,
+                CompanySnapshotWidget::class,
                 PendingActionsCenterWidget::class,
+                MyDayWidget::class,
+                TeamTodayWidget::class,
                 TodayAttendanceRollCallWidget::class,
+                RecruitmentPipelineWidget::class,
                 EmployeeDashboardOverviewWidget::class,
             ])
             ->plugins([
@@ -113,6 +123,7 @@ class AdminPanelProvider extends PanelProvider
                 Authenticate::class,
                 EnsureActiveCompany::class,
             ])
+            ->renderHook(PanelsRenderHook::STYLES_AFTER, fn (): string => view('filament.home.styles')->render(), scopes: Dashboard::class)
             ->renderHook(PanelsRenderHook::USER_MENU_BEFORE, fn (): string => view('security::components.company-switcher')->render())
             ->multiFactorAuthentication([
                 AppAuthentication::make()

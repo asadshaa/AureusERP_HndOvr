@@ -5,37 +5,43 @@ namespace Webkul\Support\Enums;
 use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 
+/**
+ * Top navigation groups. Filament orders enum groups by case order, so the
+ * cases are listed in the order people use them: home, HR (employees,
+ * attendance, time off), recruitment (and its careers website), finance,
+ * then the other modules, and settings last.
+ */
 enum NavigationGroup: string implements HasIcon, HasLabel
 {
     case Dashboard = 'dashboard';
 
-    case Contact = 'contact';
+    case Employee = 'employee';
+
+    case Attendance = 'attendance';
+
+    case TimeOff = 'time-off';
+
+    case Recruitment = 'recruitment';
+
+    case Website = 'website';
+
+    case Accounting = 'accounting';
+
+    case Invoice = 'invoice';
 
     case Sale = 'sale';
 
     case Purchase = 'purchase';
 
-    case Maintenance = 'maintenance';
-
-    case Manufacturing = 'manufacturing';
+    case Contact = 'contact';
 
     case Inventory = 'inventory';
 
-    case Invoice = 'invoice';
+    case Manufacturing = 'manufacturing';
 
-    case Accounting = 'accounting';
+    case Maintenance = 'maintenance';
 
     case Project = 'project';
-
-    case Employee = 'employee';
-
-    case TimeOff = 'time-off';
-
-    case Attendance = 'attendance';
-
-    case Recruitment = 'recruitment';
-
-    case Website = 'website';
 
     case Barcode = 'barcode';
 

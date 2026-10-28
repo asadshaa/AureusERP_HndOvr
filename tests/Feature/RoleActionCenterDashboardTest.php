@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\Dashboard\HomeDashboardContext;
 use App\Services\Dashboard\RoleActionCenterService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
@@ -18,7 +19,8 @@ class RoleActionCenterDashboardTest extends TestCase
 
         $response = $this->get('/admin');
         $response->assertStatus(200);
-        $response->assertSee('Welcome back, '.$zainab->name);
+        $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
+        $response->assertSee('Pending actions');
         $response->assertSee('HR Manager');
 
         $service = app(RoleActionCenterService::class);
@@ -38,7 +40,8 @@ class RoleActionCenterDashboardTest extends TestCase
 
         $response = $this->get('/admin');
         $response->assertStatus(200);
-        $response->assertSee('Welcome back, '.$raza->name);
+        $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
+        $response->assertSee('Pending actions');
         $response->assertSee('Administrator');
 
         $service = app(RoleActionCenterService::class);
@@ -61,6 +64,7 @@ class RoleActionCenterDashboardTest extends TestCase
 
         $response = $this->get('/admin');
         $response->assertStatus(200);
-        $response->assertSee('Welcome back, '.$employeeUser->name);
+        $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
+        $response->assertSee('Pending actions');
     }
 }

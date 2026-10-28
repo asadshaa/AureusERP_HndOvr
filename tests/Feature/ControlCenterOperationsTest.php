@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\ControlCenter\ControlCenterService;
+use App\Services\Dashboard\HomeDashboardContext;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
 use Webkul\Employee\Models\AttendanceRecord;
@@ -91,6 +92,7 @@ class ControlCenterOperationsTest extends TestCase
 
         $response = $this->get('/admin');
         $response->assertStatus(200);
-        $response->assertSee('Welcome back, '.$user->name);
+        $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
+        $response->assertSee('Pending actions');
     }
 }
