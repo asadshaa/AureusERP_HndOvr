@@ -263,7 +263,7 @@
                             <div class="space-y-1">
                                 @if ($checkedIn)
                                     <div class="text-base font-bold text-gray-950 dark:text-white">
-                                        In at {{ $state['check_in'] }}
+                                        In at {{ $state['current_check_in'] ?? $state['check_in'] }}
                                     </div>
                                     <div class="text-xs text-gray-500 dark:text-gray-400">
                                         Duration: <span class="font-semibold text-emerald-600 dark:text-emerald-400">{{ $state['elapsed_formatted'] ?? 'Just started' }}</span>
@@ -278,6 +278,9 @@
                                     <div class="text-xs text-gray-500 dark:text-gray-400">
                                         Total: <span class="font-semibold text-gray-900 dark:text-gray-200">{{ $state['worked'] }}</span>
                                     </div>
+                                    <div class="text-[11px] text-gray-500 dark:text-gray-400">
+                                        Back in the office? Check in again; each check-in / check-out pair counts.
+                                    </div>
                                 @else
                                     <div class="text-base font-bold text-gray-950 dark:text-white">
                                         Ready to Check In
@@ -287,6 +290,12 @@
                                             Shift: <span class="font-medium text-gray-800 dark:text-gray-200">{{ $state['scheduled_start'] }} – {{ $state['scheduled_end'] }}</span>
                                         </div>
                                     @endif
+                                @endif
+
+                                @if (! empty($state['intervals']))
+                                    <div class="text-[11px] text-gray-500 dark:text-gray-400" data-testid="today-intervals">
+                                        Check-ins today: <span class="font-medium text-gray-800 dark:text-gray-200">{{ $state['intervals'] }}</span>
+                                    </div>
                                 @endif
 
                                 @if ($remote)
@@ -336,7 +345,7 @@
                             {{-- Punch Button --}}
                             @if (($state['mode'] ?? null) === 'none' && ! $checkedIn)
                                 <p class="text-xs text-center text-gray-500">{{ __('employees::attendance.results.no_location_configured') }}</p>
-                            @elseif (! $checkedOut)
+                            @else
                                 <button
                                     type="button"
                                     x-on:click="attempt('{{ $checkedIn ? 'check_out' : 'check_in' }}')"
@@ -353,7 +362,7 @@
                                             @endif
                                         @else
                                             <x-filament::icon icon="heroicon-m-arrow-left-on-rectangle" class="h-4 w-4" />
-                                            <span>{{ $outcome && ! $outcome['ok'] ? 'Try again — ' : '' }}Check In Now</span>
+                                            <span>{{ $outcome && ! $outcome['ok'] ? 'Try again — ' : '' }}{{ $checkedOut ? 'Check In Again' : 'Check In Now' }}</span>
                                         @endif
                                     </span>
                                     <span x-show="phase === 'locating'" x-cloak class="flex items-center justify-center gap-2">
@@ -507,6 +516,12 @@
                             @endforeach
                         </div>
                     </x-filament::section>
+
+                    {{-- Grace balance (time bank): the same numbers as HR's monthly report --}}
+                    @php($grace = $this->getGraceBalance())
+                    @if ($grace)
+                        @include('employees::filament.components.grace-ledger', ['ledgerRows' => $grace['rows'], 'ledgerSummary' => $grace['summary'], 'ledgerTitle' => $grace['title']])
+                    @endif
 
                     {{-- Recent Attendance History Section --}}
                     <x-filament::section heading="Recent Attendance Logs" :collapsible="true" :collapsed="true">

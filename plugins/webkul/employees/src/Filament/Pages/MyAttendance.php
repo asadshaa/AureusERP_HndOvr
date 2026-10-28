@@ -25,6 +25,7 @@ use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\Data\LocationEvidence;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
+use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Support\Enums\NavigationGroup;
@@ -121,6 +122,39 @@ class MyAttendance extends Page
     {
         $this->calendarYear = (int) now()->year;
         $this->calendarMonth = (int) now()->month;
+    }
+
+    /**
+     * The signed-in employee's own grace balance for the month on screen
+     * (MonthlyAttendanceReport, so it equals what HR exports).
+     *
+     * @return array{rows: array<int, array<string, mixed>>, summary: array<string, mixed>, title: string}|null
+     */
+    public function getGraceBalance(): ?array
+    {
+        $user = Auth::user();
+        $employee = $user ? app(GeofencedAttendanceService::class)->resolveEmployee($user) : null;
+        $report = app(MonthlyAttendanceReport::class);
+
+        if (! $employee || ! $report->canSeeLedger($user, $employee)) {
+            return null;
+        }
+
+        $month = sprintf('%04d-%02d', $this->calendarYear ?: now()->year, $this->calendarMonth ?: now()->month);
+
+        try {
+            $data = $report->forEmployee($employee, (int) $employee->company_id, $month);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        return [
+            'rows'    => $data['rows'],
+            'summary' => $data['summary'],
+            'title'   => 'My grace balance — '.CarbonImmutable::createFromFormat('Y-m-d', $month.'-01')->format('F Y'),
+        ];
     }
 
     /** @return array<string, mixed>|null */

@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             LeaveTypeSeeder::class,
             LeaveMandatoryDay::class,
             LeaveTypeSeeder::class,
+            AttendanceLeaveTypeSeeder::class,
         ]);
     }
 }

@@ -140,3 +140,16 @@ Schedule::command('recruitments:interview-reminders')
     ->hourly()
     ->withoutOverlapping(30)
     ->onOneServer();
+
+/*
+| hr:today-attendance-digest tells each company's HR managers at 11:00
+| Karachi time how many people are absent and late today and how many left
+| yesterday without checking out, with a link to Attendance -> Today's
+| attendance. Idempotent per company, day and recipient (the notification
+| carries a digest key), so an overlap or a re-run never notifies twice.
+*/
+Schedule::command('hr:today-attendance-digest')
+    ->dailyAt('11:00')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();

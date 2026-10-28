@@ -8,7 +8,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
+use Webkul\Employee\Models\AttendancePolicy;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\HrHierarchyService;
@@ -19,29 +21,60 @@ use Webkul\Support\Models\CalendarLeave;
 use Webkul\Support\Models\Company;
 
 /**
- * Monthly attendance report, exactly as HR's Google Sheet template computes it.
+ * Monthly attendance report, exactly as HR's Google Sheet template computes
+ * it, extended with several check-in / check-out pairs per day, half days,
+ * short leave and the time bank (business rules of 2026-10-28).
  *
- * Per working day: the part of the day inside the office window
- * (config attendance.monthly_report.office_start / office_end, 10:00-18:00)
- * counts in full; time before the start or after the end counts up to
- * max_outside_credit_minutes (60). Final = inside + credit (not capped at 8h).
- * Month: worked = sum(final); required = working days x daily_required_minutes;
- * delta = max(0, required - worked); penalty = delta / required.
+ * Per working day (office window attendance.monthly_report.office_start /
+ * office_end, 10:00-18:00):
+ *  - inside  = SUM of every interval clipped to the office window (merged, so
+ *              overlaps count once; never first-in to last-out);
+ *  - credit  = minutes worked before the start + after the end, across the
+ *              intervals, capped at the company's daily extra-credit cap
+ *              (AttendancePolicy, default max_outside_credit_minutes = 60);
+ *  - final   = inside + credit (not capped at 8h);
+ *  - required= daily_required_minutes minus approved leave: a half day
+ *              (Time Off half day, morning = first half 10-14, afternoon =
+ *              second half 14-18) excuses half, a short leave (Time Off by
+ *              the hour) excuses its from-to window. An approved On-Duty
+ *              (OD) window counts as worked.
+ *  - due window = the office window minus the approved leave windows.
+ *    late = due minutes between the due start (10:00, 14:00 after a
+ *    first-half off, the end of a short leave starting at 10:00) and the
+ *    first check-in; left early = due minutes between the last check-out
+ *    and the due end; gap = the remaining due minutes not worked and not
+ *    covered by leave or OD. No grace (late_grace_minutes, default 0).
+ *  - Work done during an approved-off window (e.g. stayed after a second
+ *    half day off) is real work inside 10-6: it counts in inside and is
+ *    shown as extra; HR should cancel the leave if it was not taken.
  *
- * Inputs are read, never written: punches from employees_attendance_records
- * (the day's earliest check-in and latest check-out), approved leave from the
- * Time Off plugin (state validate_two, via ApprovedLeaveLookup), public
- * holidays from calendar_leaves. An approved Time Off whose leave type name
- * matches on_duty_leave_type_pattern is On-Duty (OD): the whole day (or, for
- * a half-day request, the morning / afternoon half) counts as worked.
+ * Month: worked = sum(final); required = sum(required);
+ * delta = max(0, required - worked - grace allowance - carry-in);
+ * penalty = delta / required.
  *
- * Every figure is kept in seconds internally, so the Excel durations match
- * what the sheet shows; minutes columns are whole (truncated) minutes.
+ * Time bank (grace balance) per day: + extra (credit + work during approved
+ * off windows) - late - left early - gap, which is exactly final - required.
+ * The running balance starts at the company's monthly grace allowance plus
+ * the carry-in, so the month's closing balance = allowance + carry-in +
+ * worked - required; when it is negative, -balance = delta (the shortfall
+ * that drives the penalty). With no allowance the balance is simply
+ * worked - required, i.e. -delta whenever there is a shortfall.
+ * Carry-over (per company, default off): the previous month's earned extra
+ * that was not used up (min(closing balance, earned extra), never negative,
+ * one month only -- no chaining) is added to the next month's opening.
+ *
+ * Inputs are read, never written: intervals (employees_attendance_intervals,
+ * falling back to the day's check_in / check_out for rows without intervals),
+ * approved leave from Time Off (state validate_two, via ApprovedLeaveLookup),
+ * public holidays from calendar_leaves.
+ *
+ * Every figure is kept in seconds internally; punches count to the minute.
  */
 class MonthlyAttendanceReport
 {
     public function __construct(
         protected HrHierarchyService $hierarchy,
+        protected AttendanceIntervalService $intervals,
     ) {}
 
     /** HR (view or manage attendance). Line managers hold ManageAttendance too, but only see their own people. */
@@ -71,7 +104,7 @@ class MonthlyAttendanceReport
      *
      * @param  string  $month  Y-m
      * @param  array<int, int>  $employeeIds  empty = every reportable employee
-     * @return array{company: array{id: int, name: string}, month: string, month_label: string, generated_at: CarbonImmutable, generated_by: ?string, employees: array<int, array<string, mixed>>}
+     * @return array{company: array{id: int, name: string}, month: string, month_label: string, generated_at: CarbonImmutable, generated_by: ?string, policy: array<string, mixed>, employees: array<int, array<string, mixed>>}
      *
      * @throws AuthorizationException
      */
@@ -95,6 +128,7 @@ class MonthlyAttendanceReport
             'month_label'  => $monthStart->format('F Y'),
             'generated_at' => CarbonImmutable::now($this->timezone()),
             'generated_by' => $user->name,
+            'policy'       => $this->policyFor($companyId),
             'employees'    => $this->build($employees, $companyId, $monthStart),
         ];
     }
@@ -117,12 +151,93 @@ class MonthlyAttendanceReport
     }
 
     /**
+     * The employee's grace balance ledger for a month: allowance, earned
+     * extra, used (late + left early + gaps), balance and one line per day.
+     * The employee sees their own; a line manager their team; HR their
+     * company (the same visibility as the monthly report).
+     *
+     * @return array{employee: array<string, mixed>, month: string, month_label: string, policy: array<string, mixed>, allowance_minutes: int, carry_in_minutes: int, earned_minutes: int, late_minutes: int, left_early_minutes: int, gap_minutes: int, used_minutes: int, balance_minutes: int, summary: array<string, mixed>, rows: array<int, array<string, mixed>>}
+     *
+     * @throws AuthorizationException
+     */
+    public function graceLedger(User $viewer, Employee $employee, string $month): array
+    {
+        if (! $this->canSeeLedger($viewer, $employee)) {
+            throw new AuthorizationException('You may not view this employee\'s grace balance.');
+        }
+
+        $report = $this->forEmployee($employee, (int) $employee->company_id, $month);
+        $summary = $report['summary'];
+        $monthStart = $this->monthStart($month);
+
+        return [
+            'employee'           => $report['employee'],
+            'month'              => $monthStart->format('Y-m'),
+            'month_label'        => $monthStart->format('F Y'),
+            'policy'             => $this->policyFor((int) $employee->company_id),
+            'allowance_minutes'  => $summary['grace_allowance_minutes'],
+            'carry_in_minutes'   => $summary['grace_carry_in_minutes'],
+            'earned_minutes'     => $summary['time_bank_extra_minutes'],
+            'late_minutes'       => $summary['late_minutes'],
+            'left_early_minutes' => $summary['left_early_minutes'],
+            'gap_minutes'        => $summary['gap_minutes'],
+            'used_minutes'       => $summary['late_minutes'] + $summary['left_early_minutes'] + $summary['gap_minutes'],
+            'balance_minutes'    => $summary['grace_balance_minutes'],
+            'summary'            => $summary,
+            'rows'               => collect($report['rows'])
+                ->filter(fn (array $row): bool => $row['working'] || $row['ledger_seconds'] !== 0)
+                ->map(fn (array $row): array => [
+                    'date'               => $row['date'],
+                    'check_ins'          => $row['intervals_text'],
+                    'remarks'            => $row['remarks'],
+                    'extra_minutes'      => $row['extra_minutes'],
+                    'late_minutes'       => $row['late_minutes'],
+                    'left_early_minutes' => $row['left_early_minutes'],
+                    'gap_minutes'        => $row['gap_minutes'],
+                    'change_minutes'     => intdiv($row['ledger_seconds'], 60),
+                    'balance_minutes'    => intdiv($row['grace_balance_seconds'], 60),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    public function canSeeLedger(User $viewer, Employee $employee): bool
+    {
+        if ((int) $employee->user_id === (int) $viewer->id && $employee->user_id !== null) {
+            return true;
+        }
+
+        $companyId = (int) $employee->company_id;
+
+        return static::canView($viewer)
+            && CurrentCompany::canAccess($companyId, $viewer)
+            && $this->hierarchy->visibleEmployeeIds($viewer, $companyId)->contains((int) $employee->id);
+    }
+
+    /** @return array{monthly_grace_minutes: int, daily_extra_credit_cap_minutes: int, carry_over: bool} */
+    public function policyFor(int $companyId): array
+    {
+        $policy = AttendancePolicy::forCompany($companyId);
+
+        return [
+            'monthly_grace_minutes'          => (int) $policy->monthly_grace_minutes,
+            'daily_extra_credit_cap_minutes' => (int) $policy->daily_extra_credit_cap_minutes,
+            'carry_over'                     => (bool) $policy->carry_over,
+        ];
+    }
+
+    /**
      * The template's arithmetic for one day. Times are seconds after the
      * day's local midnight (a check-out after midnight is > 86400).
      *
-     * od is null | full | first_half | second_half; a leave portion is full | first_half | second_half | hours.
+     * intervals is a list of [in, out|null] pairs; without it, in / out are
+     * the day's single pair (as before intervals existed).
+     * od is null | full | first_half | second_half; a leave portion is full |
+     * first_half | second_half | hours (with an optional window [from, to] in
+     * seconds and an approver name). leaves lists several part-day leaves.
      *
-     * @param  array{in?: ?int, out?: ?int, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float}}  $day
+     * @param  array{in?: ?int, out?: ?int, intervals?: array<int, array{0: int, 1: ?int}>, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}, leaves?: array<int, array<string, mixed>>, credit_cap_minutes?: int}  $day
      * @return array<string, mixed>
      */
     public function calculateDay(array $day): array
@@ -132,11 +247,12 @@ class MonthlyAttendanceReport
         $end = $settings['end'];
         $middle = $start + intdiv($end - $start, 2);
         $required = $settings['required'] * 60;
+        $creditCap = (int) ($day['credit_cap_minutes'] ?? $settings['credit']) * 60;
 
-        $in = $day['in'] ?? null;
-        $out = $day['out'] ?? null;
+        [$pairs, $in, $out, $missingCheckIn] = $this->normalisePairs($day);
         $od = $day['od'] ?? null;
-        $leave = $day['leave'] ?? null;
+        $parts = array_values(array_filter($day['leaves'] ?? (isset($day['leave']) && $day['leave'] !== null ? [$day['leave']] : [])));
+        $fullLeave = collect($parts)->first(fn (array $part): bool => $part['portion'] === 'full');
         $remarks = [];
 
         $type = 'working';
@@ -151,27 +267,44 @@ class MonthlyAttendanceReport
         } elseif (($day['holiday'] ?? null) !== null) {
             $type = 'holiday';
             $remarks[] = 'Public holiday'.($day['holiday'] !== '' ? ': '.$day['holiday'] : '');
-        } elseif ($leave !== null && $leave['portion'] === 'full') {
+        } elseif ($fullLeave !== null) {
             $type = 'leave';
-            $remarks[] = $leave['name'];
+            $remarks[] = $fullLeave['name'];
         }
 
         $isWorking = $type === 'working';
         $excusedSeconds = 0;
+        $leaveWindows = [];
 
-        if ($isWorking && $leave !== null) {
-            $excusedSeconds = match ($leave['portion']) {
-                'first_half', 'second_half' => intdiv($required, 2),
-                'hours'                     => (int) round(((float) ($leave['hours'] ?? 0)) * 3600),
-                default                     => 0,
-            };
-            $remarks[] = $leave['name'].match ($leave['portion']) {
-                'first_half'  => ' - first half',
-                'second_half' => ' - second half',
-                'hours'       => ' ('.rtrim(rtrim(number_format((float) ($leave['hours'] ?? 0), 2), '0'), '.').'h)',
-                default       => '',
-            };
+        if ($isWorking) {
+            foreach ($parts as $part) {
+                $window = match ($part['portion']) {
+                    'first_half'  => [$start, $middle],
+                    'second_half' => [$middle, $end],
+                    'hours'       => isset($part['window']) && $part['window'] !== null ? [max($start, $part['window'][0]), min($end, $part['window'][1])] : null,
+                    default       => null,
+                };
+                if ($window !== null && $window[1] > $window[0]) {
+                    $leaveWindows[] = $window;
+                }
+
+                $excusedSeconds += match ($part['portion']) {
+                    'first_half', 'second_half' => intdiv($required, 2),
+                    'hours'                     => $window !== null ? max(0, $window[1] - $window[0]) : (int) round(((float) ($part['hours'] ?? 0)) * 3600),
+                    default                     => 0,
+                };
+
+                $remarks[] = $part['name'].match ($part['portion']) {
+                    'first_half'  => ' - first half',
+                    'second_half' => ' - second half',
+                    'hours'       => isset($part['window']) && $part['window'] !== null
+                        ? ' '.$this->clock($part['window'][0]).'–'.$this->clock($part['window'][1])
+                        : ' ('.rtrim(rtrim(number_format((float) ($part['hours'] ?? 0), 2), '0'), '.').'h)',
+                    default       => '',
+                }.(! empty($part['approver']) ? ' (approved: '.$part['approver'].')' : '');
+            }
         }
+        $excusedSeconds = min($excusedSeconds, $required);
 
         $odInterval = $isWorking ? match ($od) {
             'full'        => [$start, $end],
@@ -188,26 +321,29 @@ class MonthlyAttendanceReport
             };
         }
 
-        $missingCheckOut = $in !== null && ($out === null || ($day['missing_check_out'] ?? false));
-        $missingCheckIn = $in === null && $out !== null;
-        $hasPair = $in !== null && $out !== null && ! $missingCheckOut && $out > $in;
+        $closed = array_values(array_filter($pairs, fn (array $pair): bool => $pair[1] !== null && $pair[1] > $pair[0]));
+        $hasOpen = collect($pairs)->contains(fn (array $pair): bool => $pair[1] === null);
+        $missingCheckOut = $hasOpen;
+        $hasPair = $closed !== [];
 
-        $intervals = [];
-        if ($hasPair) {
-            $intervals[] = [$in, $out];
-        }
+        $work = $closed;
         if ($odInterval !== null) {
-            $intervals[] = $odInterval;
+            $work[] = $odInterval;
         }
 
-        $inside = $this->unionWithin($intervals, $start, $end);
-        $before = $hasPair ? max(0, min($out, $start) - $in) : 0;
-        $after = $hasPair ? max(0, $out - max($in, $end)) : 0;
-        $credit = min($settings['credit'] * 60, $before + $after);
+        $inside = $this->unionWithin($work, $start, $end);
+        $before = 0;
+        $after = 0;
+        foreach ($closed as [$pairIn, $pairOut]) {
+            $before += max(0, min($pairOut, $start) - $pairIn);
+            $after += max(0, $pairOut - max($pairIn, $end));
+        }
+        $credit = min($creditCap, $before + $after);
         $final = $inside + $credit;
 
+        $lastClosedOut = $hasPair ? max(array_column($closed, 1)) : null;
         $clampedIn = $in !== null ? max($in, $start) : null;
-        $clampedOut = $hasPair ? min($out, $end) : null;
+        $clampedOut = $hasPair ? min($lastClosedOut, $end) : null;
         if ($odInterval !== null) {
             $clampedIn = $clampedIn === null ? $odInterval[0] : min($clampedIn, $odInterval[0]);
             $clampedOut = $clampedOut === null ? $odInterval[1] : max($clampedOut, $odInterval[1]);
@@ -220,19 +356,62 @@ class MonthlyAttendanceReport
         if ($absent) {
             $remarks[] = 'Absent';
         }
-        if ($missingCheckOut) {
+        if ($missingCheckOut && $isWorking) {
+            $remarks[] = 'Missing check-out';
+        } elseif ($missingCheckOut) {
             $remarks[] = 'Missing check-out';
         }
         if ($missingCheckIn) {
             $remarks[] = 'Missing check-in';
         }
 
-        $firstHalfExcused = $od === 'first_half' || ($leave['portion'] ?? null) === 'first_half';
-        $lateThreshold = ($firstHalfExcused ? $middle : $start) + $settings['grace'] * 60;
-        $late = $isWorking && $in !== null && $od !== 'full' && $in > $lateThreshold;
-        $lateMinutes = $late ? intdiv($in - ($firstHalfExcused ? $middle : $start), 60) : 0;
+        // Time bank: late / left early / gap inside the due window (office minus approved leave).
+        $lateSeconds = 0;
+        $earlySeconds = 0;
+        $workedInLeave = 0;
+        if ($isWorking && $requiredSeconds > 0) {
+            $due = $this->subtract([[$start, $end]], $leaveWindows);
+            $odCover = $odInterval !== null ? [$odInterval] : [];
+
+            if ($due !== []) {
+                $dueStart = $due[0][0];
+                $dueEnd = $due[count($due) - 1][1];
+
+                if ($in !== null) {
+                    $lateSeconds = $this->measure($this->subtract($this->intersect($due, [[$dueStart, $in]]), $odCover));
+                }
+                if ($lastClosedOut !== null && ! $hasOpen) {
+                    $earlySeconds = $this->measure($this->subtract($this->intersect($due, [[$lastClosedOut, $dueEnd]]), $odCover));
+                }
+            }
+
+            $workedInLeave = max(0, $inside - $this->measure($this->intersect($due, $this->merge($work))));
+        }
+
+        $netSeconds = $isWorking ? $final - $requiredSeconds : 0;
+        $extraSeconds = $isWorking ? $credit + $workedInLeave : 0;
+        $gapSeconds = $extraSeconds - $lateSeconds - $earlySeconds - $netSeconds;
+        if ($gapSeconds < 0) {
+            // Only reachable with legacy hour-only leave (no window): keep extra - late - early - gap = final - required.
+            $extraSeconds -= $gapSeconds;
+            $gapSeconds = 0;
+        }
+
+        $lateMinutes = intdiv($lateSeconds, 60);
+        $late = $isWorking && $in !== null && $od !== 'full' && $lateMinutes > $settings['grace'];
         if ($late) {
             $remarks[] = 'Late';
+        }
+        $earlyMinutes = intdiv($earlySeconds, 60);
+        if ($isWorking && $earlyMinutes > 0) {
+            $remarks[] = 'Left early';
+        }
+        $gapMinutes = intdiv($gapSeconds, 60);
+        if ($isWorking && $gapMinutes > 0 && ! $absent && ! $missingCheckOut) {
+            $remarks[] = 'Away without approval '.$gapMinutes.' min';
+        }
+        if ($isWorking && $workedInLeave >= 60) {
+            $remarks[] = 'Worked during approved leave';
         }
 
         $offDayWork = in_array($type, ['weekend', 'holiday', 'leave'], true) && $hasPair;
@@ -241,72 +420,97 @@ class MonthlyAttendanceReport
         }
 
         return [
-            'type'               => $type,
-            'working'            => $isWorking,
-            'first_in'           => $in,
-            'last_out'           => $out,
-            'remarks'            => implode('; ', array_unique($remarks)),
-            'clamped_in'         => ($isWorking || $hasPair) ? $clampedIn : null,
-            'clamped_out'        => ($isWorking || $hasPair) ? $clampedOut : null,
-            'before_minutes'     => intdiv($before, 60),
-            'after_minutes'      => intdiv($after, 60),
-            'inside_seconds'     => $inside,
-            'credit_minutes'     => intdiv($credit, 60),
-            'credit_seconds'     => $credit,
-            'final_seconds'      => $final,
-            'required_seconds'   => $requiredSeconds,
-            'present'            => $isWorking && ($hasPunch || $odInterval !== null),
-            'absent'             => $absent,
-            'late'               => $late,
-            'late_minutes'       => $lateMinutes,
-            'missing_check_out'  => $isWorking && $missingCheckOut,
-            'od'                 => $odInterval !== null ? $od : null,
-            'od_days'            => $odInterval === null ? 0.0 : ($od === 'full' ? 1.0 : 0.5),
-            'leave_days'         => $this->leaveDays($type, $isWorking, $leave, $settings['required']),
-            'off_day_work'       => $offDayWork,
-            'off_day_seconds'    => $offDayWork ? $final : 0,
+            'type'                    => $type,
+            'working'                 => $isWorking,
+            'first_in'                => $in,
+            'last_out'                => $out,
+            'intervals'               => $pairs,
+            'intervals_text'          => $this->intervalsText($pairs),
+            'remarks'                 => implode('; ', array_unique($remarks)),
+            'clamped_in'              => ($isWorking || $hasPair) ? $clampedIn : null,
+            'clamped_out'             => ($isWorking || $hasPair) ? $clampedOut : null,
+            'before_minutes'          => intdiv($before, 60),
+            'after_minutes'           => intdiv($after, 60),
+            'inside_seconds'          => $inside,
+            'credit_minutes'          => intdiv($credit, 60),
+            'credit_seconds'          => $credit,
+            'final_seconds'           => $final,
+            'required_seconds'        => $requiredSeconds,
+            'present'                 => $isWorking && ($hasPunch || $odInterval !== null),
+            'absent'                  => $absent,
+            'late'                    => $late,
+            'late_minutes'            => $isWorking ? $lateMinutes : 0,
+            'left_early_minutes'      => $isWorking ? $earlyMinutes : 0,
+            'gap_minutes'             => $isWorking ? $gapMinutes : 0,
+            'extra_minutes'           => intdiv($extraSeconds, 60),
+            'worked_in_leave_seconds' => $workedInLeave,
+            'net_seconds'             => $netSeconds,
+            'missing_check_out'       => $isWorking && $missingCheckOut,
+            'od'                      => $odInterval !== null ? $od : null,
+            'od_days'                 => $odInterval === null ? 0.0 : ($od === 'full' ? 1.0 : 0.5),
+            'leave_days'              => $this->leaveDays($type, $isWorking, $parts, $settings['required']),
+            'off_day_work'            => $offDayWork,
+            'off_day_seconds'         => $offDayWork ? $final : 0,
         ];
     }
 
     /**
-     * Month totals of calculated rows.
+     * Month totals of calculated rows. $allowanceMinutes / $carryInMinutes
+     * open the grace balance (see the class docs).
      *
      * @param  array<int, array<string, mixed>>  $rows
      * @return array<string, mixed>
      */
-    public function summarize(array $rows): array
+    public function summarize(array $rows, int $allowanceMinutes = 0, int $carryInMinutes = 0): array
     {
         $countOffDayWork = (bool) config('attendance.monthly_report.count_off_day_work', false);
         $rows = collect($rows);
         $working = $rows->where('working', true);
 
-        $workedSeconds = (int) $working->sum('final_seconds') + ($countOffDayWork ? (int) $rows->sum('off_day_seconds') : 0);
+        $offDaySeconds = (int) $rows->sum('off_day_seconds');
+        $workedSeconds = (int) $working->sum('final_seconds') + ($countOffDayWork ? $offDaySeconds : 0);
         $requiredSeconds = (int) $working->sum('required_seconds');
         $extraSeconds = (int) $working->sum(fn (array $row): int => max(0, $row['final_seconds'] - $row['required_seconds']))
-            + ($countOffDayWork ? 0 : (int) $rows->sum('off_day_seconds'));
+            + ($countOffDayWork ? 0 : $offDaySeconds);
 
+        $graceSeconds = ($allowanceMinutes + $carryInMinutes) * 60;
         $workedHours = round($workedSeconds / 3600, 2);
         $requiredHours = round($requiredSeconds / 3600, 2);
-        $delta = round(max(0, $requiredHours - $workedHours), 2);
+        $delta = round(max(0, $requiredHours - $workedHours - $graceSeconds / 3600), 2);
+
+        $lateMinutes = (int) $working->sum('late_minutes');
+        $leftEarlyMinutes = (int) $working->sum(fn (array $row): int => (int) ($row['left_early_minutes'] ?? 0));
+        $gapMinutes = (int) $working->sum(fn (array $row): int => (int) ($row['gap_minutes'] ?? 0));
+        $bankExtraMinutes = (int) $working->sum(fn (array $row): int => (int) ($row['extra_minutes'] ?? 0))
+            + ($countOffDayWork ? intdiv($offDaySeconds, 60) : 0);
+        $netBalanceMinutes = (int) round(($workedSeconds - $requiredSeconds) / 60);
 
         return [
-            'working_days'        => $working->where('required_seconds', '>', 0)->count(),
-            'present_days'        => $working->where('present', true)->count(),
-            'absent_days'         => $working->where('absent', true)->count(),
-            'leave_days'          => round((float) $rows->sum('leave_days'), 2),
-            'od_days'             => round((float) $rows->sum('od_days'), 2),
-            'holidays'            => $rows->where('type', 'holiday')->count(),
-            'late_days'           => $working->where('late', true)->count(),
-            'late_minutes'        => (int) $working->sum('late_minutes'),
-            'missing_check_outs'  => $working->where('missing_check_out', true)->count(),
-            'worked_seconds'      => $workedSeconds,
-            'required_seconds'    => $requiredSeconds,
-            'worked_hours'        => $workedHours,
-            'required_hours'      => $requiredHours,
-            'delta_hours'         => $delta,
-            'penalty_percent'     => $requiredHours > 0 ? round($delta / $requiredHours * 100, 2) : 0.0,
-            'extra_minutes'       => intdiv($extraSeconds, 60),
-            'off_day_work_hours'  => round((int) $rows->sum('off_day_seconds') / 3600, 2),
+            'working_days'            => $working->where('required_seconds', '>', 0)->count(),
+            'present_days'            => $working->where('present', true)->count(),
+            'absent_days'             => $working->where('absent', true)->count(),
+            'leave_days'              => round((float) $rows->sum('leave_days'), 2),
+            'od_days'                 => round((float) $rows->sum('od_days'), 2),
+            'holidays'                => $rows->where('type', 'holiday')->count(),
+            'late_days'               => $working->where('late', true)->count(),
+            'late_minutes'            => $lateMinutes,
+            'left_early_minutes'      => $leftEarlyMinutes,
+            'gap_minutes'             => $gapMinutes,
+            'missing_check_outs'      => $working->where('missing_check_out', true)->count(),
+            'worked_seconds'          => $workedSeconds,
+            'required_seconds'        => $requiredSeconds,
+            'worked_hours'            => $workedHours,
+            'required_hours'          => $requiredHours,
+            'delta_hours'             => $delta,
+            'penalty_percent'         => $requiredHours > 0 ? round($delta / $requiredHours * 100, 2) : 0.0,
+            'extra_minutes'           => intdiv($extraSeconds, 60),
+            'off_day_work_hours'      => round($offDaySeconds / 3600, 2),
+            // Time bank: extra - late - left early - gap = worked - required (minutes).
+            'time_bank_extra_minutes' => $bankExtraMinutes,
+            'net_balance_minutes'     => $netBalanceMinutes,
+            'grace_allowance_minutes' => $allowanceMinutes,
+            'grace_carry_in_minutes'  => $carryInMinutes,
+            'grace_balance_minutes'   => $allowanceMinutes + $carryInMinutes + $netBalanceMinutes,
         ];
     }
 
@@ -316,12 +520,12 @@ class MonthlyAttendanceReport
      *
      * @return array<int, string>
      */
-    public function dailyHeaders(): array
+    public function dailyHeaders(?int $creditMinutes = null): array
     {
         $settings = $this->settings();
         $start = $settings['start'];
         $end = $settings['end'];
-        $credit = $settings['credit'];
+        $credit = $creditMinutes ?? $settings['credit'];
 
         $short = fn (int $seconds): string => ltrim(CarbonImmutable::today()->addSeconds($seconds)->format(intdiv($seconds % 3600, 60) === 0 ? 'g' : 'g:i'));
         $meridiem = fn (int $seconds): string => $short($seconds).' '.CarbonImmutable::today()->addSeconds($seconds)->format('A');
@@ -348,6 +552,16 @@ class MonthlyAttendanceReport
         ];
     }
 
+    /**
+     * Columns added after the template's 15 (never between them).
+     *
+     * @return array<int, string>
+     */
+    public function extraHeaders(): array
+    {
+        return ['Check-ins', 'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Grace balance (mins)'];
+    }
+
     public function timezone(): string
     {
         return (string) config('attendance.monthly_report.timezone', 'Asia/Karachi');
@@ -357,7 +571,7 @@ class MonthlyAttendanceReport
      * @param  Collection<int, Employee>  $employees
      * @return array<int, array{employee: array<string, mixed>, rows: array<int, array<string, mixed>>, summary: array<string, mixed>}>
      */
-    protected function build(Collection $employees, int $companyId, CarbonImmutable $monthStart): array
+    protected function build(Collection $employees, int $companyId, CarbonImmutable $monthStart, bool $withCarry = true): array
     {
         if ($employees->isEmpty()) {
             return [];
@@ -369,6 +583,8 @@ class MonthlyAttendanceReport
         $to = $monthEnd->toDateString();
         $today = CarbonImmutable::now($timezone)->toDateString();
         $employeeIds = $employees->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $policy = $this->policyFor($companyId);
+        $countOffDayWork = (bool) config('attendance.monthly_report.count_off_day_work', false);
 
         $punches = $this->punches($companyId, $employeeIds, $from, $to, $timezone);
         $leaves = $this->leaves($employeeIds, $from, $to);
@@ -376,27 +592,43 @@ class MonthlyAttendanceReport
         $weekendDays = array_map('intval', (array) config('attendance.monthly_report.weekend_days', [6, 7]));
         $showOffDays = (bool) config('attendance.monthly_report.show_off_days', false);
 
+        $carryIn = [];
+        if ($withCarry && $policy['carry_over']) {
+            foreach ($this->build($employees, $companyId, $monthStart->subMonthNoOverflow()->startOfMonth(), false) as $previous) {
+                $summary = $previous['summary'];
+                $carryIn[$previous['employee']['id']] = max(0, min($summary['grace_balance_minutes'], $summary['time_bank_extra_minutes']));
+            }
+        }
+
         $reports = [];
 
         foreach ($employees as $employee) {
             $rows = [];
+            $allowance = $policy['monthly_grace_minutes'];
+            $carry = (int) ($carryIn[$employee->id] ?? 0);
+            $running = ($allowance + $carry) * 60;
 
             for ($date = $monthStart; $date->lte($monthEnd); $date = $date->addDay()) {
                 $key = $date->toDateString();
                 $punch = $punches[$employee->id][$key] ?? null;
-                [$od, $leave] = $this->dayLeave($leaves[$employee->id] ?? [], $key);
+                [$od, $parts] = $this->dayLeave($leaves[$employee->id] ?? [], $key);
 
                 $row = $this->calculateDay([
-                    'in'                => $punch['in'] ?? null,
-                    'out'               => $punch['out'] ?? null,
-                    'missing_check_out' => $punch['missing_check_out'] ?? false,
-                    'weekend'           => in_array($date->dayOfWeekIso, $weekendDays, true),
-                    'holiday'           => $this->holidayOn($holidays, $key, $employee->calendar_id ? (int) $employee->calendar_id : null),
-                    'employed'          => $this->isEmployedOn($employee, $key),
-                    'future'            => $key > $today,
-                    'od'                => $od,
-                    'leave'             => $leave,
+                    'intervals'          => $punch['intervals'] ?? [],
+                    'weekend'            => in_array($date->dayOfWeekIso, $weekendDays, true),
+                    'holiday'            => $this->holidayOn($holidays, $key, $employee->calendar_id ? (int) $employee->calendar_id : null),
+                    'employed'           => $this->isEmployedOn($employee, $key),
+                    'future'             => $key > $today,
+                    'od'                 => $od,
+                    'leaves'             => $parts,
+                    'credit_cap_minutes' => $policy['daily_extra_credit_cap_minutes'],
                 ]);
+
+                // Running grace balance: working days move it by final - required; off-day work only when it counts.
+                $change = $row['working'] ? $row['net_seconds'] : ($countOffDayWork ? $row['off_day_seconds'] : 0);
+                $running += $change;
+                $row['ledger_seconds'] = $change;
+                $row['grace_balance_seconds'] = $running;
 
                 // Like the template: working days, weekday leave and holidays; weekends only when worked (or configured).
                 $visible = $row['working']
@@ -420,7 +652,7 @@ class MonthlyAttendanceReport
                     'designation' => (string) ($employee->job_title ?: $employee->job?->name ?: ''),
                 ],
                 'rows'    => $rows,
-                'summary' => $this->summarize($rows),
+                'summary' => $this->summarize($rows, $allowance, $carry),
             ];
         }
 
@@ -428,73 +660,75 @@ class MonthlyAttendanceReport
     }
 
     /**
-     * Earliest check-in / latest check-out per employee per local day.
+     * The day's check-in / check-out intervals per employee per local day,
+     * in seconds after local midnight, to the minute.
      *
      * @param  array<int, int>  $employeeIds
-     * @return array<int, array<string, array{in: ?int, out: ?int, missing_check_out: bool}>>
+     * @return array<int, array<string, array{intervals: array<int, array{0: int, 1: ?int}>}>>
      */
     protected function punches(int $companyId, array $employeeIds, string $from, string $to, string $timezone): array
     {
         $result = [];
 
-        AttendanceRecord::query()
+        $records = AttendanceRecord::query()
             ->where('company_id', $companyId)
             ->whereIn('employee_id', $employeeIds)
             ->whereDate('attendance_date', '>=', $from)
             ->whereDate('attendance_date', '<=', $to)
             ->orderBy('check_in')
-            ->get(['employee_id', 'attendance_date', 'check_in', 'check_out'])
-            ->each(function (AttendanceRecord $record) use (&$result, $timezone): void {
-                $date = $record->attendance_date->toDateString();
-                $midnight = CarbonImmutable::parse($date, $timezone)->startOfDay();
-                // Punches count to the minute (seconds dropped), as in HR's sheet: 10:20:45 → 10:20.
-                $seconds = fn ($moment): ?int => $moment
-                    ? (int) floor($midnight->diffInSeconds(CarbonImmutable::parse($moment)->setTimezone($timezone), false) / 60) * 60
-                    : null;
+            ->get(['id', 'employee_id', 'attendance_date', 'check_in', 'check_out']);
 
-                $in = $seconds($record->check_in);
-                $out = $seconds($record->check_out);
-                $day = $result[$record->employee_id][$date] ?? ['in' => null, 'out' => null, 'missing_check_out' => false, 'open_in' => null];
+        $intervals = $this->intervals->intervalsForRecords($records->pluck('id')->map(fn ($id): int => (int) $id)->all());
 
-                if ($in !== null) {
-                    $day['in'] = $day['in'] === null ? $in : min($day['in'], $in);
-                }
-                if ($out !== null) {
-                    $day['out'] = $day['out'] === null ? $out : max($day['out'], $out);
-                }
-                if ($in !== null && $out === null) {
-                    $day['open_in'] = max($day['open_in'] ?? $in, $in);
-                }
+        foreach ($records as $record) {
+            $date = $record->attendance_date->toDateString();
+            $midnight = CarbonImmutable::parse($date, $timezone)->startOfDay();
+            // Punches count to the minute (seconds dropped), as in HR's sheet: 10:20:45 → 10:20.
+            $seconds = fn ($moment): ?int => $moment
+                ? (int) floor($midnight->diffInSeconds(CarbonImmutable::parse($moment)->setTimezone($timezone), false) / 60) * 60
+                : null;
 
-                // An open shift that started after the last check-out was never closed.
-                $day['missing_check_out'] = $day['open_in'] !== null && ($day['out'] === null || $day['open_in'] > $day['out']);
-                $result[$record->employee_id][$date] = $day;
-            });
+            $pairs = ($intervals[$record->id] ?? collect())
+                ->map(fn ($interval): array => [$seconds($interval->check_in), $seconds($interval->check_out)])
+                ->all();
+
+            if ($pairs === []) {
+                if ($record->check_in === null && $record->check_out === null) {
+                    continue;
+                }
+                $pairs = [[$seconds($record->check_in), $seconds($record->check_out)]];
+            }
+
+            $result[$record->employee_id][$date]['intervals'] = array_merge($result[$record->employee_id][$date]['intervals'] ?? [], array_values($pairs));
+        }
 
         return $result;
     }
 
     /**
-     * Approved Time Off (with its leave type name) overlapping the month, per employee.
+     * Approved Time Off (with its leave type name and final approver) overlapping the month, per employee.
      *
      * @param  array<int, int>  $employeeIds
      * @return array<int, array<int, object>>
      */
-    protected function leaves(array $employeeIds, string $from, string $to): array
+    public function leaves(array $employeeIds, string $from, string $to): array
     {
         if (! ApprovedLeaveLookup::available()) {
             return [];
         }
 
-        return ApprovedLeaveLookup::overlapping(
-            DB::table('time_off_leaves')
-                ->leftJoin('time_off_leave_types', 'time_off_leave_types.id', '=', 'time_off_leaves.holiday_status_id')
-                ->whereIn('time_off_leaves.employee_id', $employeeIds)
-                ->where('time_off_leaves.state', ApprovedLeaveLookup::APPROVED_STATE)
-                ->select('time_off_leaves.*', 'time_off_leave_types.name as leave_type_name'),
-            $from,
-            $to,
-        )
+        $query = DB::table('time_off_leaves')
+            ->leftJoin('time_off_leave_types', 'time_off_leave_types.id', '=', 'time_off_leaves.holiday_status_id')
+            ->whereIn('time_off_leaves.employee_id', $employeeIds)
+            ->where('time_off_leaves.state', ApprovedLeaveLookup::APPROVED_STATE)
+            ->select('time_off_leaves.*', 'time_off_leave_types.name as leave_type_name');
+
+        if (Schema::hasColumn('time_off_leaves', 'second_approver_id')) {
+            $query->leftJoin('employees_employees as leave_approvers', 'leave_approvers.id', '=', DB::raw('COALESCE(time_off_leaves.second_approver_id, time_off_leaves.first_approver_id)'))
+                ->addSelect('leave_approvers.name as approver_name');
+        }
+
+        return ApprovedLeaveLookup::overlapping($query, $from, $to)
             ->get()
             ->groupBy('employee_id')
             ->map(fn (Collection $rows): array => $rows->all())
@@ -502,15 +736,15 @@ class MonthlyAttendanceReport
     }
 
     /**
-     * The OD marker and the (non-OD) leave covering a day.
+     * The OD marker and the (non-OD) leave portions covering a day.
      *
      * @param  array<int, object>  $leaves
-     * @return array{0: ?string, 1: ?array{name: string, portion: string, hours?: float}}
+     * @return array{0: ?string, 1: array<int, array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}>}
      */
-    protected function dayLeave(array $leaves, string $date): array
+    public function dayLeave(array $leaves, string $date): array
     {
         $od = null;
-        $leave = null;
+        $parts = [];
         $pattern = (string) config('attendance.monthly_report.on_duty_leave_type_pattern', '/\b(on[\s\-_]?duty|o\.?d\.?)\b/i');
 
         foreach ($leaves as $row) {
@@ -531,31 +765,50 @@ class MonthlyAttendanceReport
                 continue;
             }
 
-            $candidate = ['name' => $name, 'portion' => $portion];
+            $candidate = ['name' => $name, 'portion' => $portion, 'approver' => ($row->approver_name ?? null) ?: null];
             if ($portion === 'hours') {
                 $candidate['hours'] = $this->leaveHours($row);
+                $candidate['window'] = $this->leaveWindow($row);
             }
 
-            // A full day beats a part day when two approved requests overlap.
-            if ($leave === null || $portion === 'full') {
-                $leave = $candidate;
+            // A full day beats part days when approved requests overlap.
+            if ($portion === 'full') {
+                $parts = [$candidate];
+
+                break;
             }
+
+            $parts[] = $candidate;
         }
 
-        return [$od, $leave];
+        return [$od, $parts];
     }
 
     protected function leaveHours(object $leave): float
     {
+        $window = $this->leaveWindow($leave);
+        if ($window !== null) {
+            return round(($window[1] - $window[0]) / 3600, 4);
+        }
+
         if (($leave->number_of_hours ?? null) !== null && (float) $leave->number_of_hours > 0) {
             return (float) $leave->number_of_hours;
         }
 
-        if (($leave->request_hour_from ?? null) !== null && ($leave->request_hour_to ?? null) !== null) {
-            return max(0.0, (float) $leave->request_hour_to - (float) $leave->request_hour_from);
+        return 0.0;
+    }
+
+    /** @return array{0: int, 1: int}|null  the short leave's from-to in seconds after midnight */
+    protected function leaveWindow(object $leave): ?array
+    {
+        $from = $leave->request_hour_from ?? null;
+        $to = $leave->request_hour_to ?? null;
+
+        if ($from === null || $to === null || (float) $to <= (float) $from) {
+            return null;
         }
 
-        return 0.0;
+        return [(int) round((float) $from * 3600), (int) round((float) $to * 3600)];
     }
 
     /** @return Collection<int, CalendarLeave> */
@@ -587,22 +840,69 @@ class MonthlyAttendanceReport
         return ($joined === null || $joined <= $date) && ($left === null || $left >= $date);
     }
 
-    /** @param  array{name: string, portion: string, hours?: float}|null  $leave */
-    protected function leaveDays(string $type, bool $isWorking, ?array $leave, int $requiredMinutes): float
+    /** @param  array<int, array<string, mixed>>  $parts */
+    protected function leaveDays(string $type, bool $isWorking, array $parts, int $requiredMinutes): float
     {
         if ($type === 'leave') {
             return 1.0;
         }
 
-        if (! $isWorking || $leave === null) {
+        if (! $isWorking) {
             return 0.0;
         }
 
-        return match ($leave['portion']) {
+        return (float) collect($parts)->sum(fn (array $part): float => match ($part['portion']) {
             'first_half', 'second_half' => 0.5,
-            'hours'                     => $requiredMinutes > 0 ? round(((float) ($leave['hours'] ?? 0)) * 60 / $requiredMinutes, 2) : 0.0,
+            'hours'                     => $requiredMinutes > 0 ? round(((float) ($part['hours'] ?? 0)) * 60 / $requiredMinutes, 2) : 0.0,
             default                     => 0.0,
-        };
+        });
+    }
+
+    /**
+     * [pairs, first in, last out, missing check-in] from either intervals or the legacy in / out.
+     *
+     * @param  array<string, mixed>  $day
+     * @return array{0: array<int, array{0: int, 1: ?int}>, 1: ?int, 2: ?int, 3: bool}
+     */
+    protected function normalisePairs(array $day): array
+    {
+        if (array_key_exists('intervals', $day)) {
+            $pairs = collect($day['intervals'])
+                ->filter(fn ($pair): bool => is_array($pair) && $pair[0] !== null)
+                ->map(fn (array $pair): array => [(int) $pair[0], $pair[1] !== null ? (int) $pair[1] : null])
+                ->sortBy(0)
+                ->values()
+                ->all();
+
+            $in = $pairs !== [] ? $pairs[0][0] : null;
+            $outs = array_filter(array_column($pairs, 1), fn ($value): bool => $value !== null);
+
+            return [$pairs, $in, $outs !== [] ? max($outs) : null, false];
+        }
+
+        $in = $day['in'] ?? null;
+        $out = $day['out'] ?? null;
+
+        if ($in === null) {
+            return [[], null, $out, $out !== null];
+        }
+
+        $open = $out === null || ($day['missing_check_out'] ?? false);
+
+        return [[[(int) $in, $open ? null : (int) $out]], $in, $out, false];
+    }
+
+    /** @param  array<int, array{0: int, 1: ?int}>  $pairs */
+    protected function intervalsText(array $pairs): string
+    {
+        return implode(', ', array_map(fn (array $pair): string => $this->clock($pair[0]).'–'.($pair[1] !== null ? $this->clock($pair[1]) : '…'), $pairs));
+    }
+
+    protected function clock(int $seconds): string
+    {
+        $seconds = $seconds % 86400;
+
+        return sprintf('%02d:%02d', intdiv($seconds, 3600), intdiv($seconds % 3600, 60));
     }
 
     /**
@@ -610,33 +910,93 @@ class MonthlyAttendanceReport
      */
     protected function unionWithin(array $intervals, int $start, int $end): int
     {
-        $clipped = collect($intervals)
-            ->map(fn (array $interval): array => [max($interval[0], $start), min($interval[1], $end)])
+        return $this->measure($this->intersect($this->merge($intervals), [[$start, $end]]));
+    }
+
+    /**
+     * Sorted, non-overlapping union of intervals.
+     *
+     * @param  array<int, array{0: int, 1: int}>  $intervals
+     * @return array<int, array{0: int, 1: int}>
+     */
+    protected function merge(array $intervals): array
+    {
+        $sorted = collect($intervals)
             ->filter(fn (array $interval): bool => $interval[1] > $interval[0])
             ->sortBy(0)
-            ->values();
+            ->values()
+            ->all();
 
-        $total = 0;
-        $current = null;
-
-        foreach ($clipped as $interval) {
-            if ($current === null) {
-                $current = $interval;
-
-                continue;
-            }
-
-            if ($interval[0] <= $current[1]) {
-                $current[1] = max($current[1], $interval[1]);
+        $merged = [];
+        foreach ($sorted as $interval) {
+            $last = count($merged) - 1;
+            if ($last >= 0 && $interval[0] <= $merged[$last][1]) {
+                $merged[$last][1] = max($merged[$last][1], $interval[1]);
 
                 continue;
             }
-
-            $total += $current[1] - $current[0];
-            $current = $interval;
+            $merged[] = [$interval[0], $interval[1]];
         }
 
-        return $total + ($current !== null ? $current[1] - $current[0] : 0);
+        return $merged;
+    }
+
+    /**
+     * @param  array<int, array{0: int, 1: int}>  $a
+     * @param  array<int, array{0: int, 1: int}>  $b
+     * @return array<int, array{0: int, 1: int}>
+     */
+    protected function intersect(array $a, array $b): array
+    {
+        $result = [];
+        foreach ($this->merge($a) as [$aStart, $aEnd]) {
+            foreach ($this->merge($b) as [$bStart, $bEnd]) {
+                $from = max($aStart, $bStart);
+                $to = min($aEnd, $bEnd);
+                if ($to > $from) {
+                    $result[] = [$from, $to];
+                }
+            }
+        }
+
+        return $this->merge($result);
+    }
+
+    /**
+     * $a minus $b.
+     *
+     * @param  array<int, array{0: int, 1: int}>  $a
+     * @param  array<int, array{0: int, 1: int}>  $b
+     * @return array<int, array{0: int, 1: int}>
+     */
+    protected function subtract(array $a, array $b): array
+    {
+        $result = $this->merge($a);
+        foreach ($this->merge($b) as [$cutStart, $cutEnd]) {
+            $next = [];
+            foreach ($result as [$from, $to]) {
+                if ($cutEnd <= $from || $cutStart >= $to) {
+                    $next[] = [$from, $to];
+
+                    continue;
+                }
+                if ($cutStart > $from) {
+                    $next[] = [$from, $cutStart];
+                }
+                if ($cutEnd < $to) {
+                    $next[] = [$cutEnd, $to];
+                }
+            }
+            $result = $next;
+        }
+
+        return $result;
+    }
+
+    /** @param  array<int, array{0: int, 1: int}>  $intervals */
+    protected function measure(array $intervals): int
+    {
+        return (int) array_sum(array_map(fn (array $interval): int => max(0, $interval[1] - $interval[0]), $intervals));
     }
 
     /** @return array{start: int, end: int, required: int, credit: int, grace: int} */

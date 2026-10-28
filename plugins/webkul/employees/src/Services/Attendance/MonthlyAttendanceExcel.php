@@ -17,25 +17,30 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Writes a MonthlyAttendanceReport::forCompany() result as the HR template
- * workbook: a "Summary" sheet, then one sheet per employee with the daily
- * table (template headers, Times New Roman 10, d-MMM-yyyy dates,
- * h:mm:ss AM/PM times, [h]:mm durations).
+ * workbook: a "Summary" sheet (with the time-bank / grace balance columns),
+ * then one sheet per employee (named after the employee) whose daily table
+ * starts on row 1: the template's 15 headers in order, then Check-ins, Late,
+ * Left early, Extra, Away without approval and Grace balance. Times New
+ * Roman 10, d-mmm-yyyy dates, h:mm:ss AM/PM times, [h]:mm durations, month
+ * totals on the first data row only.
  */
 class MonthlyAttendanceExcel
 {
-    public const HEADER_ROW = 8;
+    /** The per-employee table starts on row 1, like HR's sheet. */
+    public const HEADER_ROW = 1;
 
     public const SUMMARY_HEADER_ROW = 6;
 
     private const FONT = 'Times New Roman';
 
-    private const GREY = 'FFE7E6E6';
+    // Subtle flags only (the template has no heavy colours).
+    private const GREY = 'FFF2F2F2';
 
-    private const RED = 'FFFFC7CE';
+    private const RED = 'FFFDECEC';
 
-    private const AMBER = 'FFFFEB9C';
+    private const AMBER = 'FFFFF7E0';
 
-    private const HEADER_FILL = 'FFD9E1F2';
+    private const GRID = 'FFBFBFBF';
 
     public function __construct(
         protected MonthlyAttendanceReport $report,
@@ -95,7 +100,7 @@ class MonthlyAttendanceExcel
         $sheet->setTitle('Summary');
 
         $sheet->setCellValue('A1', 'Monthly Attendance Report');
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(12);
         $sheet->setCellValue('A2', 'Company');
         $sheet->setCellValue('B2', $report['company']['name']);
         $sheet->setCellValue('A3', 'Month');
@@ -104,8 +109,12 @@ class MonthlyAttendanceExcel
         $sheet->setCellValue('B4', $this->generatedLine($report));
         $sheet->getStyle('A2:A4')->getFont()->setBold(true);
 
-        $headers = ['Code', 'Employee', 'Department', 'Designation', 'Working days', 'Present', 'Absent', 'Leave', 'OD', 'Late', 'Missing check-out', 'Holidays', 'Total Hrs Worked', 'Total Hrs Req', 'Delta', 'Penalty', 'Extra (outside required)'];
-        $widths = [10, 26, 20, 24, 10, 9, 9, 8, 8, 8, 11, 9, 11, 11, 9, 9, 12];
+        $headers = [
+            'Code', 'Employee', 'Department', 'Designation', 'Working days', 'Present', 'Absent', 'Leave', 'OD', 'Late', 'Missing check-out', 'Holidays',
+            'Total Hrs Worked', 'Total Hrs Req', 'Delta', 'Penalty', 'Extra (outside required)',
+            'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Net balance (mins)', 'Grace allowance (mins)', 'Grace balance (mins)',
+        ];
+        $widths = [10, 26, 20, 24, 10, 9, 9, 8, 8, 8, 11, 9, 11, 11, 9, 9, 12, 10, 10, 10, 12, 11, 11, 11];
         $headerRow = self::SUMMARY_HEADER_ROW;
 
         $row = $headerRow + 1;
@@ -131,6 +140,13 @@ class MonthlyAttendanceExcel
                 $summary['delta_hours'],
                 $summary['penalty_percent'] / 100,
                 $summary['extra_minutes'] / 1440,
+                $summary['late_minutes'],
+                $summary['left_early_minutes'] ?? 0,
+                $summary['time_bank_extra_minutes'] ?? 0,
+                $summary['gap_minutes'] ?? 0,
+                $summary['net_balance_minutes'] ?? 0,
+                ($summary['grace_allowance_minutes'] ?? 0) + ($summary['grace_carry_in_minutes'] ?? 0),
+                $summary['grace_balance_minutes'] ?? 0,
             ]], null, 'A'.$row, true);
 
             if ($summary['penalty_percent'] > 0) {
@@ -144,35 +160,30 @@ class MonthlyAttendanceExcel
         $this->table($sheet, $headers, $widths, $headerRow, $lastRow);
 
         if ($lastRow > $headerRow) {
+            $sheet->getStyle('A'.($headerRow + 1).':X'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
             $sheet->getStyle('M'.($headerRow + 1).':O'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
             $sheet->getStyle('P'.($headerRow + 1).':P'.$lastRow)->getNumberFormat()->setFormatCode('0.00%');
             $sheet->getStyle('Q'.($headerRow + 1).':Q'.$lastRow)->getNumberFormat()->setFormatCode('[h]:mm');
+            $sheet->getStyle('R'.($headerRow + 1).':X'.$lastRow)->getNumberFormat()->setFormatCode('0');
         }
     }
 
     /**
+     * One employee's month, laid out like HR's sheet: the header on row 1
+     * (who and which month is the sheet name and the Summary sheet), the
+     * template's 15 columns, then the added columns; month totals only on
+     * the first data row in L-O.
+     *
      * @param  array<string, mixed>  $report
      * @param  array<string, mixed>  $employeeReport
      */
     protected function employeeSheet(Worksheet $sheet, array $report, array $employeeReport): void
     {
-        $employee = $employeeReport['employee'];
         $summary = $employeeReport['summary'];
+        $credit = isset($report['policy']['daily_extra_credit_cap_minutes']) ? (int) $report['policy']['daily_extra_credit_cap_minutes'] : null;
 
-        $sheet->setCellValue('A1', $report['company']['name']);
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(12);
-        $info = [
-            ['Employee', $employee['name'], 'Month', $report['month_label']],
-            ['Code', $employee['code'], 'Generated', $this->generatedLine($report)],
-            ['Department', $employee['department'], '', ''],
-            ['Designation', $employee['designation'], '', ''],
-        ];
-        $sheet->fromArray($info, null, 'A2', true);
-        $sheet->getStyle('A2:A5')->getFont()->setBold(true);
-        $sheet->getStyle('C2:C5')->getFont()->setBold(true);
-
-        $headers = $this->report->dailyHeaders();
-        $widths = [12, 12, 12, 24, 12, 12, 11, 11, 11, 11, 16, 11, 11, 9, 9];
+        $headers = [...$this->report->dailyHeaders($credit), ...$this->report->extraHeaders()];
+        $widths = [14, 13, 13, 18, 14, 14, 14, 14, 14, 14, 20, 13, 13, 13, 13, 24, 11, 11, 11, 13, 13];
         $headerRow = self::HEADER_ROW;
 
         $row = $headerRow + 1;
@@ -193,10 +204,18 @@ class MonthlyAttendanceExcel
             }
 
             if ($index === 0) {
-                $sheet->setCellValue('L'.$row, $summary['worked_hours']);
-                $sheet->setCellValue('M'.$row, $summary['required_hours']);
-                $sheet->setCellValue('N'.$row, $summary['delta_hours']);
-                $sheet->setCellValue('O'.$row, $summary['penalty_percent'] / 100);
+                $this->monthTotals($sheet, $row, $summary);
+            }
+
+            $sheet->setCellValueExplicit('P'.$row, (string) ($day['intervals_text'] ?? ''), DataType::TYPE_STRING);
+            if ($day['working']) {
+                $sheet->setCellValue('Q'.$row, $day['late_minutes']);
+                $sheet->setCellValue('R'.$row, $day['left_early_minutes'] ?? 0);
+                $sheet->setCellValue('S'.$row, $day['extra_minutes'] ?? 0);
+                $sheet->setCellValue('T'.$row, $day['gap_minutes'] ?? 0);
+            }
+            if (isset($day['grace_balance_seconds'])) {
+                $sheet->setCellValue('U'.$row, intdiv((int) $day['grace_balance_seconds'], 60));
             }
 
             $fill = match (true) {
@@ -214,10 +233,7 @@ class MonthlyAttendanceExcel
 
         if ($employeeReport['rows'] === []) {
             $sheet->setCellValue('A'.$row, 'No working days in this month.');
-            $sheet->setCellValue('L'.$row, $summary['worked_hours']);
-            $sheet->setCellValue('M'.$row, $summary['required_hours']);
-            $sheet->setCellValue('N'.$row, $summary['delta_hours']);
-            $sheet->setCellValue('O'.$row, $summary['penalty_percent'] / 100);
+            $this->monthTotals($sheet, $row, $summary);
             $row++;
         }
 
@@ -225,19 +241,34 @@ class MonthlyAttendanceExcel
         $this->table($sheet, $headers, $widths, $headerRow, $lastRow);
 
         $first = $headerRow + 1;
+        $sheet->getStyle('A'.$first.':U'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
         $sheet->getStyle('A'.$first.':A'.$lastRow)->getNumberFormat()->setFormatCode('d-mmm-yyyy');
         $sheet->getStyle('B'.$first.':C'.$lastRow)->getNumberFormat()->setFormatCode('h:mm:ss AM/PM');
         $sheet->getStyle('E'.$first.':F'.$lastRow)->getNumberFormat()->setFormatCode('h:mm:ss AM/PM');
+        $sheet->getStyle('G'.$first.':H'.$lastRow)->getNumberFormat()->setFormatCode('0');
         $sheet->getStyle('I'.$first.':I'.$lastRow)->getNumberFormat()->setFormatCode('[h]:mm');
+        $sheet->getStyle('J'.$first.':J'.$lastRow)->getNumberFormat()->setFormatCode('0');
         $sheet->getStyle('K'.$first.':K'.$lastRow)->getNumberFormat()->setFormatCode('[h]:mm');
         $sheet->getStyle('L'.$first.':N'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
         $sheet->getStyle('O'.$first.':O'.$lastRow)->getNumberFormat()->setFormatCode('0.00%');
+        $sheet->getStyle('Q'.$first.':U'.$lastRow)->getNumberFormat()->setFormatCode('0');
         $sheet->getStyle('D'.$first.':D'.$lastRow)->getAlignment()->setWrapText(true);
-        $sheet->getStyle('L'.$first.':O'.$first)->getFont()->setBold(true);
+        $sheet->getStyle('P'.$first.':P'.$lastRow)->getAlignment()->setWrapText(true);
+    }
+
+    /** @param  array<string, mixed>  $summary */
+    protected function monthTotals(Worksheet $sheet, int $row, array $summary): void
+    {
+        $sheet->setCellValue('L'.$row, $summary['worked_hours']);
+        $sheet->setCellValue('M'.$row, $summary['required_hours']);
+        $sheet->setCellValue('N'.$row, $summary['delta_hours']);
+        $sheet->setCellValue('O'.$row, $summary['penalty_percent'] / 100);
     }
 
     /**
-     * Bold, wrapped, bordered header row; borders on the body; filter and frozen header.
+     * Template table style: Times New Roman 10 bold header, wrapped, centred,
+     * bottom-aligned, no fill, a medium rule under it; thin light-grey
+     * borders on the body; AutoFilter on the header row and frozen below it.
      *
      * @param  array<int, string>  $headers
      * @param  array<int, int>  $widths
@@ -248,13 +279,13 @@ class MonthlyAttendanceExcel
         $sheet->fromArray([$headers], null, 'A'.$headerRow, true);
 
         $header = $sheet->getStyle('A'.$headerRow.':'.$lastColumn.$headerRow);
-        $header->getFont()->setBold(true);
-        $header->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_CENTER)->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $header->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB(self::HEADER_FILL);
-        $sheet->getRowDimension($headerRow)->setRowHeight(54);
+        $header->getFont()->setName(self::FONT)->setSize(10)->setBold(true);
+        $header->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_BOTTOM)->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getRowDimension($headerRow)->setRowHeight(60);
 
         $sheet->getStyle('A'.$headerRow.':'.$lastColumn.max($headerRow, $lastRow))
-            ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+            ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setARGB(self::GRID);
+        $header->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM)->getColor()->setARGB('FF000000');
 
         foreach ($widths as $index => $width) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index + 1))->setWidth($width);

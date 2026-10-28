@@ -239,16 +239,22 @@ it('never creates a second record for a duplicate check-in', function () {
     expect(geoRecords($f['employee']))->toHaveCount(1);
 });
 
-it('reports an already-checked-in day once the shift has been closed', function () {
+// Business rule of 2026-10-28: several check-in / check-out pairs per day. A check-in
+// after the day's shift was closed opens a new interval on the same day (it used to be
+// refused as "already checked in").
+it('opens a second interval on the same day once the shift has been closed', function () {
     $f = geoFixture();
     $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
     $this->travelTo(CarbonImmutable::parse('2026-10-05 13:00:00', 'UTC'));
     $this->service->checkOut($f['user'], geoEvidence(), geoRequest());
 
+    $this->travelTo(CarbonImmutable::parse('2026-10-05 14:00:00', 'UTC'));
     $again = $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
 
-    expect($again->result)->toBe(Result::AlreadyCheckedIn)->and($again->message)->toContain('05:00 AM');
-    expect(geoRecords($f['employee']))->toHaveCount(1);
+    expect($again->accepted)->toBeTrue();
+    $record = geoRecords($f['employee'])->sole();
+    expect($record->check_out)->toBeNull()
+        ->and($record->intervals()->whereNull('voided_at')->count())->toBe(2);
 });
 
 it('reports an already-checked-out day on a duplicate check-out', function () {

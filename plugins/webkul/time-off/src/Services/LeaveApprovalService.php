@@ -34,6 +34,17 @@ class LeaveApprovalService
         if (! in_array($leave->state, [State::CONFIRM, State::REFUSE], true)) {
             throw new RuntimeException('Only a new or refused leave request can be submitted.');
         }
+        if ($leave->request_unit_hours) {
+            // Re-checked on submit: a refused request resubmitted must still fit this month's limit.
+            app(ShortLeavePolicy::class)->validate([
+                'employee_id'        => $leave->employee_id,
+                'request_unit_hours' => true,
+                'request_hour_from'  => $leave->request_hour_from,
+                'request_hour_to'    => $leave->request_hour_to,
+                'request_date_from'  => $leave->request_date_from?->toDateString(),
+                'request_date_to'    => $leave->request_date_to ? Carbon::parse($leave->request_date_to)->toDateString() : null,
+            ], (int) $leave->id);
+        }
 
         $approval = $this->approvals->submit(
             $leave,

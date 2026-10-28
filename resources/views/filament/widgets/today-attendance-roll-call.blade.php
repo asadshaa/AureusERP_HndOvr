@@ -86,12 +86,22 @@
                             Today's Roll Call & Attendance
                         </h2>
                         <p class="text-xs text-gray-500 dark:text-gray-400">
-                            {{ $todayDate }} · Live company attendance status
+                            {{ $todayDate }} · {{ $offDay ? ($offDay['type'] === 'holiday' ? 'Public holiday: '.$offDay['name'] : 'Weekend') : 'Live company attendance status' }}
                         </p>
                     </div>
                 </div>
 
                 <div class="flex items-center gap-2">
+                    @if ($todayUrl)
+                        <x-filament::button
+                            :href="$todayUrl"
+                            tag="a"
+                            size="xs"
+                            icon="heroicon-m-user-group"
+                        >
+                            View today's attendance
+                        </x-filament::button>
+                    @endif
                     <x-filament::button
                         :href="$attendanceUrl"
                         tag="a"
@@ -109,7 +119,7 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.875rem;" class="pt-1">
             {{-- Total Workforce --}}
             <a
-                href="{{ $attendanceUrl }}"
+                href="{{ $todayUrl ?? $attendanceUrl }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -129,7 +139,7 @@
 
             {{-- Present / Checked In --}}
             <a
-                href="{{ $attendanceUrl }}?tableFilters[status][value]=present"
+                href="{{ $presentUrl ?? $attendanceUrl }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -155,7 +165,7 @@
 
             {{-- Late Arrivals --}}
             <a
-                href="{{ $attendanceUrl }}"
+                href="{{ $lateUrl ?? $attendanceUrl }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -175,7 +185,7 @@
 
             {{-- On Leave --}}
             <a
-                href="{{ url('/admin/time-off/management/time-offs') }}"
+                href="{{ $leaveUrl ?? url('/admin/time-off/management/time-offs') }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -195,7 +205,7 @@
 
             {{-- Not Checked In --}}
             <a
-                href="{{ $attendanceUrl }}?tableFilters[status][value]=absent"
+                href="{{ $absentUrl ?? $attendanceUrl }}"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">
@@ -208,14 +218,14 @@
                     {{ $notCheckedIn }}
                 </div>
                 <div class="mt-1 flex items-center justify-between text-[11px] text-rose-700/80 dark:text-rose-400/80">
-                    <span class="roll-call-sub">Pending arrival / absent</span>
+                    <span class="roll-call-sub">No check-in, no approved leave</span>
                     <x-filament::icon icon="heroicon-m-arrow-right" class="h-3.5 w-3.5 text-rose-500 opacity-0 transition-opacity group-hover:opacity-100" />
                 </div>
             </a>
 
             {{-- Needs Review --}}
             <a
-                href="{{ $attendanceUrl }}?tableFilters[verification_status][value]=needs_review"
+                href="{{ $attendanceUrl }}?filters[verification_status][value]=needs_review"
                 class="roll-call-card group relative flex flex-col justify-between shadow-sm"
             >
                 <div class="flex items-center justify-between">

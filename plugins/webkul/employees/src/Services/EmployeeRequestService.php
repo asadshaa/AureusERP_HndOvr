@@ -343,7 +343,15 @@ class EmployeeRequestService
         }
 
         $updates['approved_by'] = $request->approvalRequest?->decisions?->last()?->actor_id;
-        $record->update($updates);
+
+        // The approved pair replaces the day's check-in / check-out intervals (voided, kept for audit).
+        $previousReason = AttendanceRecord::$pendingIntervalReason;
+        AttendanceRecord::$pendingIntervalReason = "Approved attendance correction request #{$request->id}";
+        try {
+            $record->update($updates);
+        } finally {
+            AttendanceRecord::$pendingIntervalReason = $previousReason;
+        }
     }
 
     /**

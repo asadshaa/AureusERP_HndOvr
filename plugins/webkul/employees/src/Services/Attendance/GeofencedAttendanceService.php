@@ -58,6 +58,7 @@ class GeofencedAttendanceService
         private readonly ?Container $container = null,
         private readonly ?GpsGeofenceVerifier $gps = null,
         private readonly ?RemoteExemptVerifier $remote = null,
+        private readonly ?AttendanceIntervalService $intervals = null,
     ) {
         if ($this->gps !== null) {
             $this->resolvedVerifiers[Method::Gps->value] = $this->gps;
@@ -329,7 +330,9 @@ class GeofencedAttendanceService
             ->lockForUpdate()
             ->first();
 
-        if ($today?->check_in) {
+        // A day whose last interval is closed takes a new check-in (several pairs per day).
+        // A day still open but older than max_shift_hours is a forgotten check-out: refused.
+        if ($today?->check_in && $today->check_out === null) {
             return $this->reject($employee, $user, $request, Action::CheckIn, Result::AlreadyCheckedIn, $requestId, $timezone, $this->localTime($today->check_in, $timezone), $today, $mode);
         }
 
@@ -347,8 +350,28 @@ class GeofencedAttendanceService
 
         [$scheduledStart, $scheduledEnd] = $this->schedule->scheduledWindowFor($employee, $attendanceDate);
         $appTimezone = config('app.timezone');
+        $newStatus = $this->statusFor($mode, $decision)->value;
 
-        $record = $this->withAuditSuppressed(function () use ($today, $employee, $attendanceDate, $nowUtc, $mode, $verification, $decision, $user, $scheduledStart, $scheduledEnd, $appTimezone) {
+        if ($today?->check_in) {
+            $record = AttendanceIntervalService::quietly(function () use ($today, $nowUtc, $appTimezone, $mode, $verification, $newStatus): AttendanceRecord {
+                $this->intervals()->open($today, $nowUtc->setTimezone($appTimezone), $mode === 'remote' ? AttendanceSource::SelfService->value : AttendanceSource::Gps->value, $verification->id, $newStatus);
+
+                return $this->intervals()->syncSummary($today, [
+                    'check_out_verification_id' => null,
+                    'verification_status'       => $today->verification_status === Status::NeedsReview->value ? Status::NeedsReview->value : $newStatus,
+                ]);
+            });
+
+            $verification->update(['attendance_record_id' => $record->id]);
+
+            if ($decision->needsReview) {
+                $this->notifyLineManager($record, 'checkin_flagged', 'Check-in flagged', $this->flaggedSentence('check-in', $decision));
+            }
+
+            return $this->resultFor(Action::CheckIn, $decision->result, true, $this->localTime($nowUtc, $timezone), $record);
+        }
+
+        $record = AttendanceIntervalService::quietly(function () use ($today, $employee, $attendanceDate, $nowUtc, $mode, $verification, $decision, $user, $scheduledStart, $scheduledEnd, $appTimezone) {
             $record = $today ?? new AttendanceRecord;
             $record->fill([
                 'company_id'               => $employee->company_id,
@@ -369,6 +392,8 @@ class GeofencedAttendanceService
                 $record->scheduled_end = $scheduledEnd->setTimezone($appTimezone);
             }
             $record->save();
+
+            $this->intervals()->open($record, $record->check_in, $record->source, $verification->id, $record->verification_status);
 
             return $record;
         });
@@ -407,15 +432,19 @@ class GeofencedAttendanceService
         // An overnight shift keeps the assignments of the day it started on.
         ['mode' => $mode, 'candidates' => $candidates] = $this->resolveMode($employee, $open->attendance_date->toDateString());
 
-        if ($checkOutAt->lessThanOrEqualTo($open->check_in)) {
+        // The interval being closed (the day's check_in is only its first one).
+        $openInterval = $this->intervals()->openInterval($open);
+        $intervalStart = $openInterval?->check_in ?? $open->check_in;
+
+        if ($checkOutAt->lessThanOrEqualTo($intervalStart)) {
             return $this->reject($employee, $user, $request, Action::CheckOut, Result::NotCheckedIn, $requestId, $timezone, null, $open, $mode);
         }
 
         $minMinutes = (int) config('hr_attendance_geofence.min_checkout_interval_minutes', 60);
-        if ($minMinutes > 0 && $open->check_in) {
-            $elapsedMinutes = $open->check_in->diffInMinutes($checkOutAt);
+        if ($minMinutes > 0 && $intervalStart) {
+            $elapsedMinutes = $intervalStart->diffInMinutes($checkOutAt);
             if ($elapsedMinutes < $minMinutes) {
-                $availableAt = $open->check_in->copy()->addMinutes($minMinutes);
+                $availableAt = $intervalStart->copy()->addMinutes($minMinutes);
                 $availableAtLocal = $this->localTime($availableAt, $timezone);
 
                 return $this->reject($employee, $user, $request, Action::CheckOut, Result::TooEarlyForCheckOut, $requestId, $timezone, $availableAtLocal, $open, $mode);
@@ -447,7 +476,8 @@ class GeofencedAttendanceService
 
         $fullDayHours = (float) config('hr_attendance_geofence.full_day_min_hours', 7.5);
         $halfDayHours = (float) config('hr_attendance_geofence.half_day_min_hours', 4.0);
-        $workedHours = max(0, $open->check_in ? $open->check_in->diffInMinutes($checkOutAt) / 60 : 0);
+        // Worked = the closed intervals plus the one being closed (never first-in to last-out).
+        $workedHours = max(0, ($this->intervals()->workedMinutes($open) + ($intervalStart ? $intervalStart->diffInMinutes($checkOutAt) : 0)) / 60);
 
         $attendanceStatus = $open->status;
         if (! in_array($attendanceStatus, ['leave', 'holiday', 'absent'], true)) {
@@ -460,14 +490,17 @@ class GeofencedAttendanceService
             }
         }
 
-        $this->withAuditSuppressed(function () use ($open, $checkOutAt, $verification, $finalStatus, $attendanceStatus) {
-            $open->fill([
-                'check_out'                 => $checkOutAt,
+        AttendanceIntervalService::quietly(function () use ($open, $openInterval, $checkOutAt, $verification, $finalStatus, $attendanceStatus): void {
+            if ($openInterval === null) {
+                // A day written without intervals: its single pair becomes the interval.
+                $this->intervals()->open($open, $open->check_in, (string) $open->source, $open->check_in_verification_id, $open->verification_status);
+            }
+            $this->intervals()->close($open, $checkOutAt, $verification->id, $finalStatus);
+            $this->intervals()->syncSummary($open, [
                 'status'                    => $attendanceStatus,
                 'check_out_verification_id' => $verification->id,
                 'verification_status'       => $finalStatus,
             ]);
-            $open->save();
         });
 
         if ($decision->needsReview) {
@@ -557,7 +590,7 @@ class GeofencedAttendanceService
             throw new InvalidArgumentException('A correction must change the check-in or check-out time.');
         }
 
-        return DB::transaction(function () use ($record, $actor, $after, $reason): AttendanceVerification {
+        return DB::transaction(function () use ($record, $actor, $after, $reason, $employee): AttendanceVerification {
             $record = AttendanceRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
 
             $before = [
@@ -565,15 +598,23 @@ class GeofencedAttendanceService
                 'check_out' => $record->check_out?->toDateTimeString(),
             ];
 
-            $this->withAuditSuppressed(function () use ($record, $after, $actor): void {
-                $record->fill($after);
-                if ($record->check_in && $record->check_out && $record->check_out->lessThanOrEqualTo($record->check_in)) {
-                    throw new InvalidArgumentException('Check-out must be after check-in.');
-                }
-                $record->approved_by = $actor->id;
-                $record->verification_status = Status::Overridden->value;
-                $record->save();
-            });
+            $intervalsBefore = AttendanceIntervalService::describe($this->intervals()->intervalsFor($record), $this->schedule->timezoneFor($employee));
+            $previousReason = AttendanceRecord::$pendingIntervalReason;
+            AttendanceRecord::$pendingIntervalReason = 'HR correction: '.$reason;
+
+            try {
+                $this->withAuditSuppressed(function () use ($record, $after, $actor): void {
+                    $record->fill($after);
+                    if ($record->check_in && $record->check_out && $record->check_out->lessThanOrEqualTo($record->check_in)) {
+                        throw new InvalidArgumentException('Check-out must be after check-in.');
+                    }
+                    $record->approved_by = $actor->id;
+                    $record->verification_status = Status::Overridden->value;
+                    $record->save();
+                });
+            } finally {
+                AttendanceRecord::$pendingIntervalReason = $previousReason;
+            }
 
             $verification = AttendanceVerification::query()->create([
                 'company_id'           => $record->company_id,
@@ -590,8 +631,10 @@ class GeofencedAttendanceService
                         'check_in'  => $record->check_in?->toDateTimeString(),
                         'check_out' => $record->check_out?->toDateTimeString(),
                     ],
-                    'reason' => $reason,
-                    'path'   => 'hr_correction',
+                    'reason'           => $reason,
+                    'path'             => 'hr_correction',
+                    'intervals_before' => $intervalsBefore,
+                    'intervals_after'  => AttendanceIntervalService::describe($this->intervals()->intervalsFor($record), $this->schedule->timezoneFor($employee)),
                 ],
                 'server_recorded_at'   => now(),
             ]);
@@ -680,7 +723,9 @@ class GeofencedAttendanceService
         AttendanceRecord::query()
             ->whereNotNull('check_in')
             ->whereNull('check_out')
-            ->where('check_in', '<', $cutoff)
+            ->where(fn ($query) => $query
+                ->whereHas('intervals', fn ($interval) => $interval->whereNull('voided_at')->whereNull('check_out')->where('check_in', '<', $cutoff))
+                ->orWhere(fn ($legacy) => $legacy->whereDoesntHave('intervals', fn ($interval) => $interval->whereNull('voided_at'))->where('check_in', '<', $cutoff)))
             ->whereIn('source', AttendanceSource::evidenceBacked())
             ->whereDoesntHave('verifications', fn ($query) => $query->where('action', Action::SystemFlag->value))
             ->with('employee')
@@ -769,7 +814,18 @@ class GeofencedAttendanceService
                             'server_recorded_at'   => now(),
                         ]);
 
-                        $this->withAuditSuppressed(function () use ($record, $verification): void {
+                        AttendanceIntervalService::quietly(function () use ($record, $verification): void {
+                            $openInterval = $this->intervals()->openInterval($record);
+                            if ($openInterval && $record->scheduled_end->greaterThan($openInterval->check_in)) {
+                                $this->intervals()->close($record, $record->scheduled_end, $verification->id, Status::NeedsReview->value);
+                                $this->intervals()->syncSummary($record, [
+                                    'check_out_verification_id' => $verification->id,
+                                    'verification_status'       => Status::NeedsReview->value,
+                                ]);
+
+                                return;
+                            }
+
                             $record->check_out = $record->scheduled_end;
                             $record->check_out_verification_id = $verification->id;
                             $record->verification_status = Status::NeedsReview->value;
@@ -906,13 +962,19 @@ class GeofencedAttendanceService
         $progressPercent = 0;
         $isShiftComplete = false;
 
+        $dayIntervals = $record ? $this->intervals()->intervalsFor($record) : collect();
+        $closedSeconds = (int) $dayIntervals->sum(fn ($interval): int => $interval->durationMinutes() * 60);
+        $openInterval = $dayIntervals->first(fn ($interval): bool => $interval->isOpen());
+        $currentStart = $openInterval?->check_in ?? $open?->check_in;
+
         $state = 'not_checked_in';
         $worked = null;
         if ($open) {
             $state = 'checked_in';
 
-            if ($open->check_in) {
-                $elapsedSeconds = max(0, $nowUtc->getTimestamp() - $open->check_in->getTimestamp());
+            if ($currentStart) {
+                // Worked today = the closed pairs plus the running one.
+                $elapsedSeconds = $closedSeconds + max(0, $nowUtc->getTimestamp() - $currentStart->getTimestamp());
                 $elapsedHours = $elapsedSeconds / 3600;
                 $elapsedMinutes = intdiv($elapsedSeconds, 60);
                 $elapsedFormatted = intdiv($elapsedMinutes, 60).'h '.($elapsedMinutes % 60).'m';
@@ -924,7 +986,7 @@ class GeofencedAttendanceService
             }
         } elseif ($record?->check_in && $record->check_out) {
             $state = 'checked_out';
-            $minutes = (int) $record->check_in->diffInMinutes($record->check_out);
+            $minutes = $dayIntervals->isNotEmpty() ? intdiv($closedSeconds, 60) : (int) $record->check_in->diffInMinutes($record->check_out);
             $worked = intdiv($minutes, 60).'h '.($minutes % 60).'m';
         }
 
@@ -935,8 +997,8 @@ class GeofencedAttendanceService
 
         $minIntervalMinutes = (int) config('hr_attendance_geofence.min_checkout_interval_minutes', 60);
         $lockoutRemainingMinutes = 0;
-        if ($open && $open->check_in) {
-            $elapsedMin = (int) ($elapsedSeconds / 60);
+        if ($open && $currentStart) {
+            $elapsedMin = intdiv(max(0, $nowUtc->getTimestamp() - $currentStart->getTimestamp()), 60);
             $lockoutRemainingMinutes = max(0, $minIntervalMinutes - $elapsedMin);
         }
 
@@ -959,6 +1021,10 @@ class GeofencedAttendanceService
             'lockout_remaining_minutes'  => $lockoutRemainingMinutes,
             'late_minutes'               => $record?->late_minutes ?? 0,
             'is_past_start'              => $isPastStart,
+            'intervals'                  => AttendanceIntervalService::describe($dayIntervals, $timezone),
+            'interval_count'             => $dayIntervals->count(),
+            'current_check_in'           => $currentStart ? $this->localTime($currentStart, $timezone) : null,
+            'can_check_in_again'         => $state === 'checked_out',
         ];
     }
 
@@ -1066,10 +1132,19 @@ class GeofencedAttendanceService
             ->where('employee_id', $employee->id)
             ->whereNotNull('check_in')
             ->whereNull('check_out')
-            ->where('check_in', '>=', $cutoff)
+            ->where(fn ($query) => $query
+                // The open interval started recently (a later pair of a long day still counts) ...
+                ->whereHas('intervals', fn ($interval) => $interval->whereNull('voided_at')->whereNull('check_out')->where('check_in', '>=', $cutoff))
+                // ... or a day without intervals checked in recently.
+                ->orWhere(fn ($legacy) => $legacy->whereDoesntHave('intervals', fn ($interval) => $interval->whereNull('voided_at'))->where('check_in', '>=', $cutoff)))
             ->orderByDesc('check_in');
 
         return ($lock ? $query->lockForUpdate() : $query)->first();
+    }
+
+    private function intervals(): AttendanceIntervalService
+    {
+        return $this->intervals ?? app(AttendanceIntervalService::class);
     }
 
     private function statusFor(string $mode, GeofenceDecision $decision): Status

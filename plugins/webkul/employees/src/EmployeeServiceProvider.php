@@ -69,6 +69,8 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_09_30_100002_create_employees_employee_work_location_assignments_table',
                 '2026_09_30_100003_create_employees_attendance_verifications_table',
                 '2026_09_30_100004_add_verification_columns_to_employees_attendance_records_table',
+                '2026_10_28_100001_create_employees_attendance_intervals_table',
+                '2026_10_28_100002_create_employees_attendance_policies_table',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')

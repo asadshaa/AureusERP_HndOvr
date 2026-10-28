@@ -40,6 +40,12 @@
                             <th style="{{ $thNum }}">Delta</th>
                             <th style="{{ $thNum }}">Penalty</th>
                             <th style="{{ $thNum }}">Extra</th>
+                            <th style="{{ $thNum }}">Late (min)</th>
+                            <th style="{{ $thNum }}">Left early (min)</th>
+                            <th style="{{ $thNum }}">Away (min)</th>
+                            <th style="{{ $thNum }}">Earned extra (min)</th>
+                            <th style="{{ $thNum }}">Grace allowance (min)</th>
+                            <th style="{{ $thNum }}">Grace balance (min)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -62,16 +68,26 @@
                                 <td style="{{ $tdNum }}">{{ number_format($s['delta_hours'], 2) }}</td>
                                 <td style="{{ $tdNum }} {{ $s['penalty_percent'] > 0 ? 'color: rgb(220, 38, 38); font-weight: 600;' : '' }}">{{ number_format($s['penalty_percent'], 2) }}%</td>
                                 <td style="{{ $tdNum }}">{{ $hours($s['extra_minutes'] * 60) }}</td>
+                                <td style="{{ $tdNum }}">{{ $s['late_minutes'] }}</td>
+                                <td style="{{ $tdNum }}">{{ $s['left_early_minutes'] }}</td>
+                                <td style="{{ $tdNum }}">{{ $s['gap_minutes'] }}</td>
+                                <td style="{{ $tdNum }}">{{ $s['time_bank_extra_minutes'] }}</td>
+                                <td style="{{ $tdNum }}">{{ $s['grace_allowance_minutes'] + $s['grace_carry_in_minutes'] }}</td>
+                                <td style="{{ $tdNum }} {{ $s['grace_balance_minutes'] < 0 ? 'color: rgb(220, 38, 38); font-weight: 600;' : '' }}">{{ $s['grace_balance_minutes'] }}</td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="16" style="{{ $td }} text-align: center; opacity: .7;">No employees match these filters.</td>
+                                <td colspan="22" style="{{ $td }} text-align: center; opacity: .7;">No employees match these filters.</td>
                             </tr>
                         @endforelse
                     </tbody>
                 </table>
             </div>
         </x-filament::section>
+
+        @if (count($report['employees']) === 1)
+            @include('employees::filament.components.grace-ledger', ['ledgerRows' => $report['employees'][0]['rows'], 'ledgerSummary' => $report['employees'][0]['summary'], 'ledgerTitle' => 'Grace balance — '.$report['employees'][0]['employee']['name']])
+        @endif
     @else
         <x-filament::section>
             <p style="opacity: .7;">Choose a company you belong to.</p>

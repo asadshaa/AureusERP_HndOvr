@@ -4,11 +4,15 @@ namespace Webkul\TimeOff;
 
 use Filament\Panel;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
+use Throwable;
 use Webkul\Employee\Models\Employee;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
+use Webkul\Support\Models\Company;
+use Webkul\TimeOff\Database\Seeders\AttendanceLeaveTypeSeeder;
 use Webkul\TimeOff\Listeners\AllocateDefaultLeaveOnEmployeeCreated;
 
 class TimeOffServiceProvider extends PackageServiceProvider
@@ -62,5 +66,16 @@ class TimeOffServiceProvider extends PackageServiceProvider
         // relationship intact instead of the employees plugin needing to
         // know time-off exists at all.
         Event::listen('eloquent.created: '.Employee::class, AllocateDefaultLeaveOnEmployeeCreated::class);
+
+        // A new company gets the attendance leave types (Half day, Short leave, On Duty).
+        Company::created(function (Company $company): void {
+            try {
+                if (Schema::hasTable('time_off_leave_types')) {
+                    app(AttendanceLeaveTypeSeeder::class)->provisionForCompany($company);
+                }
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 }

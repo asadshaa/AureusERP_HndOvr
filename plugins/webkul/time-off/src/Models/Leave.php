@@ -5,6 +5,7 @@ namespace Webkul\TimeOff\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
@@ -17,6 +18,7 @@ use Webkul\Support\Models\Company;
 use Webkul\TimeOff\Enums\RequestDateFromPeriod;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Services\LeaveApprovalService;
+use Webkul\TimeOff\Services\ShortLeavePolicy;
 
 class Leave extends Model
 {
@@ -112,6 +114,7 @@ class Leave extends Model
         'request_date_from'        => 'date',
         'date_from'                => 'date',
         'request_unit_half'        => 'boolean',
+        'request_unit_hours'       => 'boolean',
         'number_of_hours'          => 'decimal:4',
         'submitted_at'             => 'datetime',
         'approved_at'              => 'datetime',
@@ -195,6 +198,21 @@ class Leave extends Model
             $leave->creator_id ??= $authUser?->id;
 
             $leave->company_id ??= $authUser?->default_company_id;
+        });
+
+        // Short leave limits (max hours each, max per month), whatever path writes the request.
+        static::saving(function (self $leave): void {
+            if ((bool) $leave->request_unit_hours
+                && (! $leave->exists || $leave->isDirty(['request_unit_hours', 'request_hour_from', 'request_hour_to', 'request_date_from', 'request_date_to', 'employee_id']))) {
+                app(ShortLeavePolicy::class)->validate([
+                    'employee_id'        => $leave->employee_id,
+                    'request_unit_hours' => true,
+                    'request_hour_from'  => $leave->request_hour_from,
+                    'request_hour_to'    => $leave->request_hour_to,
+                    'request_date_from'  => $leave->request_date_from?->toDateString(),
+                    'request_date_to'    => $leave->request_date_to ? Carbon::parse($leave->request_date_to)->toDateString() : null,
+                ], $leave->exists ? (int) $leave->id : null);
+            }
         });
     }
 }

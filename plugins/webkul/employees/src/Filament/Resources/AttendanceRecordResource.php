@@ -37,6 +37,7 @@ use Webkul\Employee\Filament\Resources\AttendanceRecordResource\Pages\ManageAtte
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\AttendanceVerification;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\EmployeeRequestService;
@@ -240,12 +241,20 @@ class AttendanceRecordResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
+        return $table->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['employee', 'intervals' => fn ($intervals) => $intervals->whereNull('voided_at')]))->columns([
             TextColumn::make('attendance_date')->date()->sortable(),
             TextColumn::make('employee.name')->searchable()->sortable(),
             TextColumn::make('status')->badge(),
             TextColumn::make('check_in')->dateTime()->placeholder('—'),
             TextColumn::make('check_out')->dateTime()->placeholder('—'),
+            TextColumn::make('check_ins')
+                ->label('Check-ins')
+                ->placeholder('—')
+                ->wrap()
+                ->state(fn (AttendanceRecord $record): string => AttendanceIntervalService::describe(
+                    $record->intervals->whereNull('voided_at'),
+                    $record->employee ? app(AttendanceScheduleResolver::class)->timezoneFor($record->employee) : (string) config('app.timezone'),
+                )),
             TextColumn::make('worked_hours')->numeric(decimalPlaces: 2),
             TextColumn::make('late_minutes')->label('Late (minutes)')->sortable(),
             TextColumn::make('early_departure_minutes')->label('Early (minutes)')->sortable(),

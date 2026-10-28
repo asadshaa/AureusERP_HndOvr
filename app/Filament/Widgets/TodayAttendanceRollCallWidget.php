@@ -3,16 +3,24 @@
 namespace App\Filament\Widgets;
 
 use Filament\Widgets\Widget;
-use Illuminate\Support\Carbon;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
+use Webkul\Employee\Filament\Pages\TodayAttendance as TodayAttendancePage;
 use Webkul\Employee\Filament\Resources\AttendanceRecordResource;
 use Webkul\Employee\Models\AttendanceRecord;
-use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Attendance\TodayAttendance;
 use Webkul\Employee\Support\HrPermissions;
+use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
-use Webkul\TimeOff\Models\Leave;
 
+/**
+ * Dashboard roll call for today. The numbers come from the Today's
+ * attendance page's service, so "On leave" is APPROVED time off only (a
+ * pending request no longer hides an absence), "Not checked in" is the
+ * real absent count (holidays, weekends, approved leave and On-Duty
+ * excluded), and a line manager sees only their own people.
+ */
 class TodayAttendanceRollCallWidget extends Widget
 {
     protected string $view = 'filament.widgets.today-attendance-roll-call';
@@ -42,50 +50,50 @@ class TodayAttendanceRollCallWidget extends Widget
      */
     protected function getViewData(): array
     {
-        $user = Auth::user();
-        $companyId = (int) CurrentCompany::id();
-        $today = Carbon::today(config('app.timezone', 'Asia/Karachi'))->toDateString();
+        $user = CurrentCompany::user();
+        $companyId = CurrentCompany::id($user);
+        $service = app(TodayAttendance::class);
+        $counts = [];
+        $dateLabel = now($service->timezone())->format('l, d M Y');
+        $offDay = null;
 
-        $totalEmployees = Employee::query()
-            ->where('company_id', $companyId)
-            ->where('is_active', true)
-            ->count();
+        if ($user instanceof User && $companyId !== null) {
+            try {
+                $report = $service->forCompany($user, $companyId);
+            } catch (AuthorizationException) {
+                // Admin roles that may see the widget without the attendance permissions: whole active company, as before.
+                $report = $service->forWholeCompany($companyId);
+            }
 
-        $todayRecords = AttendanceRecord::query()
-            ->where('company_id', $companyId)
-            ->whereDate('attendance_date', $today)
-            ->get();
+            $counts = $report['counts'];
+            $dateLabel = $report['date_label'];
+            $offDay = $report['off_day'];
+        }
 
-        $presentCount = $todayRecords->where('status', 'present')->count();
-        $lateCount = $todayRecords->where('late_minutes', '>', 0)->count();
-
-        // Approved leaves for today
-        $onLeaveCount = Leave::query()
-            ->where('company_id', $companyId)
-            ->where('state', 'confirm')
-            ->whereDate('date_from', '<=', $today)
-            ->whereDate('date_to', '>=', $today)
-            ->count();
-
-        // Flagged punches pending HR review
-        $needsReviewCount = AttendanceRecord::query()
+        // The review queue is not limited to one day: every flagged punch of the company still waiting for HR.
+        $needsReviewCount = $companyId === null ? 0 : AttendanceRecord::query()
             ->where('company_id', $companyId)
             ->where('verification_status', AttendanceVerificationStatus::NeedsReview->value)
             ->count();
 
-        $notCheckedIn = max(0, $totalEmployees - ($presentCount + $onLeaveCount));
-
-        $attendanceUrl = AttendanceRecordResource::getUrl('index');
+        $pageUrl = TodayAttendancePage::canAccess() ? TodayAttendancePage::getUrl() : null;
+        $statusUrl = fn (array $statuses): ?string => $pageUrl ? TodayAttendancePage::getUrl(['filters' => ['status' => ['values' => $statuses]]]) : null;
 
         return [
-            'totalEmployees'   => $totalEmployees,
-            'presentCount'     => $presentCount,
-            'lateCount'        => $lateCount,
-            'onLeaveCount'     => $onLeaveCount,
-            'notCheckedIn'     => $notCheckedIn,
+            'totalEmployees'   => $counts['total'] ?? 0,
+            'presentCount'     => $counts['present'] ?? 0,
+            'lateCount'        => $counts['late'] ?? 0,
+            'onLeaveCount'     => $counts['on_leave'] ?? 0,
+            'notCheckedIn'     => $counts['absent'] ?? 0,
             'needsReviewCount' => $needsReviewCount,
-            'attendanceUrl'    => $attendanceUrl,
-            'todayDate'        => Carbon::today()->format('l, d M Y'),
+            'attendanceUrl'    => AttendanceRecordResource::getUrl('index'),
+            'offDay'           => $offDay,
+            'todayUrl'         => $pageUrl,
+            'presentUrl'       => $statusUrl([TodayAttendance::PRESENT, TodayAttendance::LATE, TodayAttendance::HALF_DAY, TodayAttendance::SHORT_LEAVE, TodayAttendance::MISSING_CHECK_OUT]),
+            'lateUrl'          => $statusUrl([TodayAttendance::LATE]),
+            'leaveUrl'         => $statusUrl([TodayAttendance::ON_LEAVE, TodayAttendance::HALF_DAY, TodayAttendance::SHORT_LEAVE]),
+            'absentUrl'        => $statusUrl([TodayAttendance::ABSENT]),
+            'todayDate'        => $dateLabel,
         ];
     }
 }

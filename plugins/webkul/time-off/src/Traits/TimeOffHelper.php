@@ -16,6 +16,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Webkul\Employee\Models\Employee;
 use Webkul\TimeOff\Enums\RequestDateFromPeriod;
@@ -23,6 +24,7 @@ use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveAllocation;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\ShortLeavePolicy;
 
 trait TimeOffHelper
 {
@@ -31,6 +33,8 @@ trait TimeOffHelper
         $this->updateEmployeeAndCompanyData($data);
 
         $this->calculateBusinessDaysAndNumbers($data);
+
+        $this->handleShortLeave($data, $excludeRecordId, $action);
 
         $this->handleLeaveOverlap($data, $excludeRecordId, $action);
 
@@ -96,6 +100,21 @@ trait TimeOffHelper
                                 }),
                         )
                         ->required()
+                        ->live()
+                        ->afterStateUpdated(function ($state, Set $set): void {
+                            // The leave type's unit drives the form: Half day -> half day, Short leave -> hours.
+                            $unit = $state ? LeaveType::query()->whereKey($state)->value('request_unit') : null;
+                            $unit = $unit instanceof \BackedEnum ? $unit->value : $unit;
+                            if ($unit === 'hour') {
+                                $set('request_unit_hours', true);
+                                $set('request_unit_half', false);
+                            } elseif ($unit === 'half_day') {
+                                $set('request_unit_half', true);
+                                $set('request_unit_hours', false);
+                            } else {
+                                $set('request_unit_hours', false);
+                            }
+                        })
                         ->columnSpanFull()
                         ->placeholder(__('time-off::filament/widgets/calendar-widget.form.fields.time-off-type-placeholder'))
                         ->helperText(__('time-off::filament/widgets/calendar-widget.form.fields.time-off-type-helper')),
@@ -121,8 +140,8 @@ trait TimeOffHelper
                             DatePicker::make('request_date_to')
                                 ->native(false)
                                 ->label(__('time-off::traits/leave-accrual-plan.form.fields.to-date'))
-                                ->hidden(fn (Get $get) => $get('request_unit_half'))
-                                ->required(fn (Get $get) => ! $get('request_unit_half'))
+                                ->hidden(fn (Get $get) => $get('request_unit_half') || $get('request_unit_hours'))
+                                ->required(fn (Get $get) => ! $get('request_unit_half') && ! $get('request_unit_hours'))
                                 ->live()
                                 ->prefixIcon('heroicon-o-calendar')
                                 ->disabled(fn (Get $get) => blank($get('request_date_from')))
@@ -138,6 +157,7 @@ trait TimeOffHelper
                         ->schema([
                             Toggle::make('request_unit_half')
                                 ->live()
+                                ->hidden(fn (Get $get) => (bool) $get('request_unit_hours'))
                                 ->label(__('time-off::filament/widgets/calendar-widget.form.fields.half-day'))
                                 ->helperText(__('time-off::filament/widgets/calendar-widget.form.fields.half-day-helper'))
                                 ->afterStateUpdated(function ($state, Set $set, Get $get) {
@@ -158,10 +178,43 @@ trait TimeOffHelper
                                 ->prefixIcon('heroicon-o-sun'),
                         ]),
 
+                    Grid::make(3)
+                        ->schema([
+                            Toggle::make('request_unit_hours')
+                                ->live()
+                                ->label('Short leave (hours)')
+                                ->helperText(fn (): string => 'From-to time on one day, at most '.rtrim(rtrim(number_format((float) config('attendance.short_leave.max_hours', 3), 2), '0'), '.').' hours, '.(int) config('attendance.short_leave.max_per_month', 2).' per month. Longer: request a half day.')
+                                ->afterStateUpdated(function ($state, Set $set): void {
+                                    if ($state) {
+                                        $set('request_unit_half', false);
+                                    }
+                                }),
+                            Select::make('request_hour_from')
+                                ->label('From')
+                                ->options(fn (): array => $this->shortLeaveTimeOptions())
+                                ->visible(fn (Get $get) => (bool) $get('request_unit_hours'))
+                                ->required(fn (Get $get) => (bool) $get('request_unit_hours'))
+                                ->live()
+                                ->native(false),
+                            Select::make('request_hour_to')
+                                ->label('To')
+                                ->options(fn (): array => $this->shortLeaveTimeOptions())
+                                ->visible(fn (Get $get) => (bool) $get('request_unit_hours'))
+                                ->required(fn (Get $get) => (bool) $get('request_unit_hours'))
+                                ->live()
+                                ->native(false),
+                        ]),
+
                     TextEntry::make('duration_info')
                         ->label(__('time-off::filament/widgets/calendar-widget.form.fields.duration'))
                         ->live()
                         ->state(function (Get $get): string {
+                            if ($get('request_unit_hours')) {
+                                $hours = ShortLeavePolicy::hours($get('request_hour_from'), $get('request_hour_to'));
+
+                                return $hours > 0 ? rtrim(rtrim(number_format($hours, 2), '0'), '.').' hours' : 'Choose the from and to time';
+                            }
+
                             if ($get('request_unit_half')) {
                                 return '0.5 day';
                             }
@@ -202,6 +255,20 @@ trait TimeOffHelper
 
     public function getDurationInfo(array $data): array
     {
+        if (! empty($data['request_unit_hours'])) {
+            $hours = ShortLeavePolicy::hours($data['request_hour_from'] ?? null, $data['request_hour_to'] ?? null);
+            $dayHours = max(1, (int) config('attendance.monthly_report.daily_required_minutes', 480)) / 60;
+            $days = round($hours / $dayHours, 4);
+
+            return [
+                'duration_display' => rtrim(rtrim(number_format($hours, 2), '0'), '.').' hours',
+                'number_of_days'   => $days,
+                'business_days'    => $days,
+                'total_days'       => $days,
+                'weekend_days'     => 0,
+            ];
+        }
+
         if (! empty($data['request_unit_half'])) {
             return [
                 'duration_display' => '0.5 day',
@@ -234,6 +301,52 @@ trait TimeOffHelper
             'total_days'       => $totalDays,
             'weekend_days'     => $weekendDays,
         ];
+    }
+
+    /**
+     * Short leave: one day, hours from-to, limits from attendance.short_leave
+     * (ShortLeavePolicy, also enforced on the Leave model). A refused request
+     * is shown as a notification and the form stays open.
+     */
+    private function handleShortLeave(array &$data, ?int $excludeRecordId = null, ?Action $action = null): void
+    {
+        if (empty($data['request_unit_hours'])) {
+            $data['request_unit_hours'] = false;
+
+            return;
+        }
+
+        $data['request_unit_half'] = false;
+        $data['request_date_to'] = $data['request_date_from'] ?? null;
+        $data['number_of_hours'] = ShortLeavePolicy::hours($data['request_hour_from'] ?? null, $data['request_hour_to'] ?? null);
+
+        try {
+            app(ShortLeavePolicy::class)->validate($data, $excludeRecordId);
+        } catch (ValidationException $exception) {
+            Notification::make()
+                ->danger()
+                ->title('Short leave not allowed')
+                ->body(collect($exception->errors())->flatten()->first())
+                ->send();
+
+            if ($action) {
+                $action->halt();
+            } else {
+                $this->halt();
+            }
+        }
+    }
+
+    /** @return array<string, string> 30-minute steps 08:00-20:00, keyed by decimal hours */
+    private function shortLeaveTimeOptions(): array
+    {
+        $options = [];
+        for ($minutes = 8 * 60; $minutes <= 20 * 60; $minutes += 30) {
+            // Keyed like the decimal(15,4) column returns it, so an edit form shows the saved time.
+            $options[number_format($minutes / 60, 4, '.', '')] = sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
+        }
+
+        return $options;
     }
 
     private function handleLeaveOverlap(array &$data, ?int $excludeRecordId = null, ?Action $action = null): void
@@ -294,7 +407,9 @@ trait TimeOffHelper
 
         $leaveType = LeaveType::find($leaveTypeId);
 
-        if (! $leaveType || ! $leaveType->requires_allocation) {
+        // requires_allocation is the string "yes" / "no" (no cast): "no" must not demand an allocation.
+        $requiresAllocation = $leaveType?->requires_allocation instanceof \BackedEnum ? $leaveType->requires_allocation->value : $leaveType?->requires_allocation;
+        if (! $leaveType || ! $requiresAllocation || $requiresAllocation === 'no') {
             return;
         }
 

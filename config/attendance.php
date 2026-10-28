@@ -45,4 +45,35 @@ return [
         // A half-day OD (Time Off "half day", morning / afternoon) is "Half OD - first / second half".
         'on_duty_leave_type_pattern' => '/\b(on[\s\-_]?duty|o\.?d\.?)\b/i',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Short leave (Time Off by the hour, from-to time on one day)
+    |--------------------------------------------------------------------------
+    |
+    | Enforced server-side by Webkul\TimeOff\Services\ShortLeavePolicy when a
+    | request is created, edited or submitted. Longer must be a half day.
+    | Refused requests do not count towards the monthly limit.
+    |
+    */
+    'short_leave' => [
+        'max_hours'     => (float) env('ATTENDANCE_SHORT_LEAVE_MAX_HOURS', 3),
+        'max_per_month' => (int) env('ATTENDANCE_SHORT_LEAVE_MAX_PER_MONTH', 2),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Time bank / grace balance defaults
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for a company without its own policy (Attendance -> Attendance
+    | Policy, table employees_attendance_policies). The daily extra-credit cap
+    | defaults to monthly_report.max_outside_credit_minutes.
+    |
+    */
+    'time_bank' => [
+        'monthly_grace_minutes' => (int) env('ATTENDANCE_MONTHLY_GRACE_MINUTES', 0),
+        // Unused earned extra of the previous month opens the next month (one month, no chaining).
+        'carry_over' => (bool) env('ATTENDANCE_TIME_BANK_CARRY_OVER', false),
+    ],
 ];

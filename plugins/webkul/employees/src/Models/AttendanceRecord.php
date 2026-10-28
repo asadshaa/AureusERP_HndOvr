@@ -12,6 +12,7 @@ use Webkul\Employee\Enums\AttendanceVerificationAction;
 use Webkul\Employee\Enums\AttendanceVerificationMethod;
 use Webkul\Employee\Enums\AttendanceVerificationResult;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
+use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
@@ -51,6 +52,16 @@ class AttendanceRecord extends Model
 
     /** Reason recorded by the deletion audit hook; set by GeofencedAttendanceService::deleteRecord(). */
     public static ?string $pendingDeletionReason = null;
+
+    /**
+     * Set by AttendanceIntervalService while it writes the day summary from
+     * the intervals, so the hooks below neither recompute worked_hours from
+     * first-in / last-out nor replace the intervals.
+     */
+    public static bool $syncingIntervals = false;
+
+    /** Reason stored on intervals voided by a direct edit (set by GeofencedAttendanceService::recordHrCorrection()). */
+    public static ?string $pendingIntervalReason = null;
 
     protected function casts(): array
     {
@@ -102,6 +113,12 @@ class AttendanceRecord extends Model
         return $this->hasMany(AttendanceVerification::class, 'attendance_record_id');
     }
 
+    /** Every interval of the day, voided ones included (use ->active() for the live ones). */
+    public function intervals(): HasMany
+    {
+        return $this->hasMany(AttendanceInterval::class, 'attendance_record_id')->orderBy('check_in');
+    }
+
     protected static function booted(): void
     {
         // GPS / self-service times are evidence-backed. However they get
@@ -131,7 +148,14 @@ class AttendanceRecord extends Model
                 'method'               => AttendanceVerificationMethod::Manual,
                 'result'               => AttendanceVerificationResult::Overridden,
                 'accepted'             => true,
-                'metadata'             => ['before' => $before, 'after' => $after, 'reason' => null, 'path' => 'direct_model_update'],
+                'metadata'             => [
+                    'before'           => $before,
+                    'after'            => $after,
+                    'reason'           => null,
+                    'path'             => 'direct_model_update',
+                    'intervals_before' => AttendanceInterval::query()->where('attendance_record_id', $record->id)->active()->orderBy('check_in')->get(['check_in', 'check_out'])
+                        ->map(fn (AttendanceInterval $interval): array => ['check_in' => $interval->check_in?->toDateTimeString(), 'check_out' => $interval->check_out?->toDateTimeString()])->all(),
+                ],
                 'server_recorded_at'   => now(),
             ]);
 
@@ -240,8 +264,26 @@ class AttendanceRecord extends Model
             }
         });
 
+        // Intervals follow every direct edit of the day's check-in / check-out
+        // (Filament edit, HR correction, approved time-change request, import):
+        // see AttendanceIntervalService::applyDirectEdit().
+        static::created(function (self $record): void {
+            if (! self::$syncingIntervals && $record->check_in !== null) {
+                app(AttendanceIntervalService::class)->applyDirectEdit($record, true, self::$pendingIntervalReason);
+            }
+        });
+
+        static::updated(function (self $record): void {
+            if (! self::$syncingIntervals && $record->wasChanged(['check_in', 'check_out'])) {
+                app(AttendanceIntervalService::class)->applyDirectEdit($record, false, self::$pendingIntervalReason);
+            }
+        });
+
         static::saving(function (self $record): void {
-            if ($record->check_in && $record->check_out) {
+            // worked_hours is the sum of the intervals (written by AttendanceIntervalService);
+            // a direct edit of the pair is one interval, so its span is that sum.
+            if (! self::$syncingIntervals && $record->check_in && $record->check_out
+                && (! $record->exists || $record->isDirty(['check_in', 'check_out']))) {
                 $record->worked_hours = max(0, $record->check_in->diffInMinutes($record->check_out) / 60);
             }
             if ($record->scheduled_start && $record->check_in) {
