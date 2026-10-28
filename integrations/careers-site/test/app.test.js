@@ -87,11 +87,94 @@ test('a job pushed by Aureus is listed with Google job data, in the Indeed feed 
 
   const feed = await (await call('/careers/feed/indeed.xml')).text();
   assert.match(feed, /<referencenumber><!\[CDATA\[a{32}\]\]><\/referencenumber>/);
-  assert.match(feed, /<url><!\[CDATA\[https:\/\/careers.example.test\/careers\/fleet-dispatcher\]\]><\/url>/);
+  assert.match(feed, /<url><!\[CDATA\[https:\/\/careers.example.test\/careers\/fleet-dispatcher\?src=indeed\]\]><\/url>/);
   assert.match(feed, /<jobtype><!\[CDATA\[fulltime\]\]><\/jobtype>/);
 
   assert.match(await (await call('/sitemap.xml')).text(), /careers\/fleet-dispatcher/);
   assert.equal(await (await call('/robots.txt')).text(), 'User-agent: *\nDisallow: /\n');
+});
+
+const xmlOf = async (board) => {
+  const response = await call(`/careers/feed/${board}.xml`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/xml; charset=utf-8');
+
+  return response.text();
+};
+
+test('each board feed lists only the jobs whose payload enables that board, with ?src={board}', async () => {
+  await putJob({ ...PAYLOAD, boards: ['jooble', 'talent', 'recruitnet', 'expertini', 'tiptopjob', 'generic'] });
+  await putJob({ ...PAYLOAD, title: 'Indeed only', slug: 'indeed-only', boards: ['indeed'] }, 'c'.repeat(32));
+  await putJob({ ...PAYLOAD, title: 'No boards', slug: 'no-boards', boards: [] }, 'd'.repeat(32));
+
+  const indeed = await xmlOf('indeed');
+  assert.match(indeed, /careers\/indeed-only\?src=indeed/);
+  assert.doesNotMatch(indeed, /fleet-dispatcher|no-boards/);
+
+  for (const board of ['recruitnet', 'expertini', 'tiptopjob', 'generic']) {
+    const feed = await xmlOf(board);
+    assert.match(feed, /^<\?xml version="1.0" encoding="utf-8"\?>\n<source>/);
+    assert.match(feed, new RegExp(`<url><!\\[CDATA\\[https://careers.example.test/careers/fleet-dispatcher\\?src=${board}\\]\\]></url>`));
+    assert.match(feed, /<referencenumber><!\[CDATA\[a{32}\]\]><\/referencenumber>/);
+    assert.doesNotMatch(feed, /indeed-only|no-boards/);
+  }
+
+  const talent = await xmlOf('talent');
+  assert.match(talent, /<source>\n  <publisher><!\[CDATA\[Truck It In\]\]><\/publisher>/);
+  assert.match(talent, /<lastbuilddate><!\[CDATA\[\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\]\]><\/lastbuilddate>/);
+  assert.match(talent, /<dateposted><!\[CDATA\[2026-10-29T00:00:00Z\]\]><\/dateposted>/);
+  assert.match(talent, /<expirationdate><!\[CDATA\[12-31-2099T23:59:59Z\]\]><\/expirationdate>/);
+  assert.match(talent, /<url><!\[CDATA\[https:\/\/careers.example.test\/careers\/fleet-dispatcher\?src=talent\]\]><\/url>/);
+  assert.match(talent, /<jobtype><!\[CDATA\[Full time\]\]><\/jobtype>/);
+  assert.match(talent, /<isremote><!\[CDATA\[no\]\]><\/isremote>/);
+  assert.match(talent, /<salary_min><!\[CDATA\[120000\]\]><\/salary_min>/);
+  assert.match(talent, /<salary_currency><!\[CDATA\[PKR\]\]><\/salary_currency>/);
+  assert.match(talent, /<experience_min><!\[CDATA\[2\]\]><\/experience_min>/);
+  assert.doesNotMatch(talent, /indeed-only|no-boards/);
+
+  const jooble = await xmlOf('jooble');
+  assert.match(jooble, /^<\?xml version="1.0" encoding="utf-8"\?>\n<jobs>\n  <job id="a{32}">/);
+  assert.match(jooble, /<link><!\[CDATA\[https:\/\/careers.example.test\/careers\/fleet-dispatcher\?src=jooble\]\]><\/link>/);
+  assert.match(jooble, /<name><!\[CDATA\[Fleet Dispatcher <b>Karachi<\/b>\]\]><\/name>/);
+  assert.match(jooble, /<region><!\[CDATA\[Karachi, PK\]\]><\/region>/);
+  assert.match(jooble, /<pubdate><!\[CDATA\[29.10.2026\]\]><\/pubdate>/);
+  assert.match(jooble, /<expire><!\[CDATA\[31.12.2099\]\]><\/expire>/);
+  assert.match(jooble, /<salary><!\[CDATA\[PKR 120,000 - 160,000 per month\]\]><\/salary>/);
+  assert.match(jooble, /<jobtype><!\[CDATA\[full-time\]\]><\/jobtype>/);
+  assert.doesNotMatch(jooble, /indeed-only|no-boards/);
+
+  assert.equal((await call('/careers/feed/monster.xml')).status, 404);
+});
+
+test('a job pushed without "boards" stays in the Indeed and generic feeds only', async () => {
+  await putJob();
+
+  assert.match(await xmlOf('indeed'), /fleet-dispatcher\?src=indeed/);
+  assert.match(await xmlOf('generic'), /fleet-dispatcher\?src=generic/);
+
+  for (const board of ['jooble', 'talent', 'recruitnet', 'expertini', 'tiptopjob']) {
+    assert.doesNotMatch(await xmlOf(board), /fleet-dispatcher/);
+  }
+});
+
+test('an application through a board feed link carries that board as src to Aureus', async () => {
+  await putJob({ ...PAYLOAD, boards: ['jooble'] });
+
+  const page = await (await call('/careers/fleet-dispatcher?src=jooble')).text();
+  assert.match(page, /name="src" value="jooble"/);
+
+  await call('/careers/fleet-dispatcher/apply', { method: 'POST', body: applyForm({ ref: null, src: 'jooble' }) });
+  const [application] = await (await apiCall('/applications')).json();
+  assert.equal(application.src, 'jooble');
+  assert.equal(application.ref, null);
+});
+
+test('an expired job leaves every board feed', async () => {
+  await putJob({ ...PAYLOAD, valid_through: '2000-01-01', boards: ['indeed', 'jooble', 'talent', 'generic'] });
+
+  for (const board of ['indeed', 'jooble', 'talent', 'generic']) {
+    assert.doesNotMatch(await xmlOf(board), /fleet-dispatcher/);
+  }
 });
 
 test('an unlisted or removed job disappears from the site and the feed', async () => {

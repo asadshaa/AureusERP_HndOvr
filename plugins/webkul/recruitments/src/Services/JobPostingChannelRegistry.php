@@ -115,6 +115,82 @@ class JobPostingChannelRegistry
         ];
     }
 
+    /**
+     * Channels reached through the company website's XML feeds, keyed by channel.
+     *
+     * @return array<string, JobPostingChannel>
+     */
+    public function feedBoardChannels(): array
+    {
+        return array_filter($this->all(), fn (JobPostingChannel $channel): bool => $channel->isFeedBoard());
+    }
+
+    /** The channel whose website feed is /careers/feed/{board}.xml (e.g. "generic" => aggregator_feed). */
+    public function channelForFeedBoard(string $board): ?string
+    {
+        foreach ($this->channels as $channel) {
+            if ($channel->feedBoard !== null && $channel->feedBoard === $board) {
+                return $channel->key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Channels listed on the Job boards page (free feeds and free manual boards).
+     *
+     * @return array<string, JobPostingChannel>
+     */
+    public function freeJobBoards(): array
+    {
+        return array_filter($this->all(), fn (JobPostingChannel $channel): bool => $channel->freeJobBoard);
+    }
+
+    /** @return array<string, JobPostingPublisher> */
+    public function publishers(): array
+    {
+        return $this->publishers;
+    }
+
+    /**
+     * Free aggregators that read the company website's XML feed for them
+     * (integrations/careers-site/src/feed.js, FEED_BOARDS). Each follows the
+     * website listing like the Indeed feed does.
+     *
+     * @return array<int, JobPostingChannel>
+     */
+    protected static function feedBoards(): array
+    {
+        $boards = [
+            ['jooble', 'Jooble', 'https://jooble.org', 'Free listings on Jooble, read from the website\'s Jooble feed.', 'Jooble\'s "For employers" / partners contact form'],
+            ['talent', 'talent.com', 'https://www.talent.com/integrations', 'Free organic listings on talent.com, read from the website\'s talent.com feed.', 'talent.com\'s employer integrations page (organic XML feed)'],
+            ['recruitnet', 'recruit.net', 'https://www.recruit.net', 'Free listings on recruit.net, read from the website\'s feed.', 'recruit.net\'s "Contact us" / job feed submission'],
+            ['expertini', 'Expertini', 'https://www.expertini.com', 'Free listings on Expertini, read from the website\'s feed.', 'Expertini\'s employer / XML feed submission page'],
+            ['tiptopjob', 'TipTopJob', 'https://www.tiptopjob.com', 'Free listings on TipTopJob, read from the website\'s feed.', 'TipTopJob\'s recruiter / XML feed page'],
+        ];
+
+        return array_map(fn (array $board, int $index): JobPostingChannel => new JobPostingChannel(
+            key: "{$board[0]}_feed",
+            label: "{$board[1]} (XML feed)",
+            tier: ChannelTier::FEED,
+            utmSourceName: $board[1],
+            requires: ['careers_site'],
+            unavailableReason: "Goes live with the job's page on the company website, through the website's {$board[1]} feed (register the feed with {$board[1]} once).",
+            sort: 31 + $index,
+            description: $board[3],
+            icon: 'heroicon-o-rss',
+            feedBoard: $board[0],
+            freeJobBoard: true,
+            boardUrl: $board[2],
+            howTo: [
+                "Open {$board[4]} and ask them to index the company's job feed.",
+                'Give them the feed URL below. The board decides whether to accept it.',
+                'Once accepted, the board re-reads the feed itself: nothing more to do per job.',
+            ],
+        ), $boards, array_keys($boards));
+    }
+
     /** @return array<int, JobPostingChannel> */
     protected static function defaults(): array
     {
@@ -145,14 +221,35 @@ class JobPostingChannelRegistry
                 conflictsWith: ['indeed'],
                 unavailableReason: 'Goes live with the job\'s page on the company website, through the website\'s Indeed feed (register the feed with Indeed once).',
                 sort: 30,
+                description: 'Free organic Indeed listings, read from the website\'s Indeed feed.',
+                icon: 'heroicon-o-rss',
+                feedBoard: 'indeed',
+                freeJobBoard: true,
+                boardUrl: 'https://www.indeed.com/hire',
+                howTo: [
+                    'Sign in to Indeed for Employers with the company account.',
+                    'Ask Indeed (Help → Contact us, "XML feed") to index the feed URL below.',
+                    'Indeed reviews the feed; once accepted it re-reads it several times a day.',
+                ],
             ),
+            ...static::feedBoards(),
             new JobPostingChannel(
                 key: 'aggregator_feed',
-                label: 'Job aggregators (XML feed)',
+                label: 'Other job aggregators (generic XML feed)',
                 tier: ChannelTier::FEED,
                 utmSourceName: 'Job aggregator',
-                unavailableReason: 'Needs the Aureus job feed (Stage 5.1).',
+                requires: ['careers_site'],
+                unavailableReason: 'Goes live with the job\'s page on the company website, through the website\'s generic job feed (give the feed URL to any aggregator that accepts XML feeds).',
                 sort: 40,
+                description: 'One Indeed-format feed for any other aggregator that takes XML feeds (e.g. Careerjet, Adzuna, WhatJobs).',
+                icon: 'heroicon-o-queue-list',
+                feedBoard: 'generic',
+                freeJobBoard: true,
+                howTo: [
+                    'Find the aggregator\'s "submit your job feed" / "XML feed" page or support email.',
+                    'Give them the feed URL below (it uses the Indeed XML format).',
+                    'Note the aggregator\'s name in the notes here so HR knows who reads the feed.',
+                ],
             ),
             new JobPostingChannel(
                 key: 'linkedin',
@@ -163,6 +260,69 @@ class JobPostingChannelRegistry
                 liveUrlHosts: ['linkedin.com', 'lnkd.in'],
                 placementLabel: 'Post type (e.g. job post, company page)',
                 sort: 50,
+                description: 'Free "Basic" job post (one free post at a time) or a company page post; use Copy post.',
+                icon: 'heroicon-o-briefcase',
+                freeJobBoard: true,
+                boardUrl: 'https://www.linkedin.com/talent/post-a-job',
+                howTo: [
+                    'Open LinkedIn → Post a free job (Basic job post) with the company page.',
+                    'Paste the text from Job ads → Copy post; use the tracked apply link as the "external website" apply option.',
+                    'Mark the ad as posted with its LinkedIn link.',
+                ],
+            ),
+            new JobPostingChannel(
+                key: 'drjob',
+                label: 'Dr.Job',
+                tier: ChannelTier::MANUAL,
+                utmSourceName: 'Dr.Job',
+                requiresLiveUrl: true,
+                liveUrlHosts: ['drjobpro.com', 'drjobs.ae'],
+                sort: 52,
+                description: 'Free employer job posts (mainly Gulf countries); use Copy post.',
+                icon: 'heroicon-o-briefcase',
+                freeJobBoard: true,
+                boardUrl: 'https://www.drjobpro.com',
+                howTo: [
+                    'Create a free employer account on Dr.Job.',
+                    'Post the job with the text from Job ads → Copy post (the apply link is tracked).',
+                    'Mark the ad as posted with its Dr.Job link.',
+                ],
+            ),
+            new JobPostingChannel(
+                key: 'postjobfree',
+                label: 'Post Job Free',
+                tier: ChannelTier::MANUAL,
+                utmSourceName: 'Post Job Free',
+                requiresLiveUrl: true,
+                liveUrlHosts: ['postjobfree.com'],
+                sort: 54,
+                description: 'Free job posts on postjobfree.com; use Copy post.',
+                icon: 'heroicon-o-briefcase',
+                freeJobBoard: true,
+                boardUrl: 'https://www.postjobfree.com',
+                howTo: [
+                    'Create a free employer account on Post Job Free.',
+                    'Post the job with the text from Job ads → Copy post.',
+                    'Mark the ad as posted with its Post Job Free link.',
+                ],
+            ),
+            new JobPostingChannel(
+                key: 'twine',
+                label: 'Twine',
+                tier: ChannelTier::MANUAL,
+                utmSourceName: 'Twine',
+                requiresLiveUrl: true,
+                liveUrlHosts: ['twine.net'],
+                sort: 56,
+                description: 'Free job posts for freelance and creative roles on twine.net; use Copy post.',
+                icon: 'heroicon-o-briefcase',
+                freeJobBoard: true,
+                boardUrl: 'https://www.twine.net',
+                howTo: [
+                    'Create a free client account on Twine.',
+                    'Post the job with the text from Job ads → Copy post.',
+                    'Mark the ad as posted with its Twine link.',
+                ],
             ),
             new JobPostingChannel(
                 key: 'indeed',

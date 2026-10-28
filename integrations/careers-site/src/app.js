@@ -1,6 +1,6 @@
 import { randomInt, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
-import { indeedFeed } from './feed.js';
+import { FEED_BOARDS, boardFeed, inFeed } from './feed.js';
 import { jobListPage, jobPage, notFoundPage, thanksPage } from './views.js';
 
 /**
@@ -8,7 +8,8 @@ import { jobListPage, jobPage, notFoundPage, thanksPage } from './views.js';
  * the Vercel function (api/index.js) and the local server (server.js).
  *
  * Public:  /careers, /careers/{slug}, POST /careers/{slug}/apply,
- *          /careers/feed/indeed.xml, /robots.txt, /sitemap.xml
+ *          /careers/feed/{board}.xml (indeed, jooble, talent, recruitnet,
+ *          expertini, tiptopjob, generic), /robots.txt, /sitemap.xml
  * Aureus:  /wp-json/aureus/v1/... (HTTP Basic auth with the app password),
  *          the same API the WordPress plugin will offer (contract v1).
  */
@@ -49,10 +50,16 @@ export function createApp({ store, env = process.env, now = () => new Date() }) 
       return text(cfg.allowIndexing ? `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n');
     }
 
-    if (path === '/careers/feed/indeed.xml') {
-      const jobs = (await publishedJobs()).map((job) => ({ job, url: jobUrl(origin, job) }));
+    const feedMatch = path.match(/^\/careers\/feed\/([a-z]+)\.xml$/);
 
-      return new Response(indeedFeed(jobs, { siteName: cfg.siteName, siteUrl: `${origin}/careers` }), {
+    if (feedMatch && Object.hasOwn(FEED_BOARDS, feedMatch[1])) {
+      // Only the jobs HR put on this board; ?src= attributes the application to it in Aureus.
+      const board = feedMatch[1];
+      const jobs = (await publishedJobs())
+        .filter((job) => inFeed(job, board))
+        .map((job) => ({ job, url: `${jobUrl(origin, job)}?src=${board}` }));
+
+      return new Response(boardFeed(board, jobs, { siteName: cfg.siteName, siteUrl: `${origin}/careers` }), {
         headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=300' },
       });
     }

@@ -21,6 +21,7 @@ use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\JobQuestion;
 use Webkul\Recruitment\Models\WebsiteConnection;
 use Webkul\Recruitment\Services\ApplicantIntakeService;
+use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Recruitment\Services\SourceAdapters\CompanyWebsiteApplicantSourceAdapter;
 use Webkul\Recruitment\Support\WebsiteIntakeResult;
@@ -396,7 +397,8 @@ class WebsiteIntakeService
 
         if ($src !== null) {
             $key = Str::slug($src, '_');
-            $candidates = array_values(array_unique([$key, "{$key}_jobs", "{$key}_feed"]));
+            // A board feed link carries ?src={board}; "generic" is the aggregator_feed channel's feed.
+            $candidates = array_values(array_unique(array_filter([$key, "{$key}_jobs", "{$key}_feed", app(JobPostingChannelRegistry::class)->channelForFeedBoard($key)])));
 
             $bySource = JobPosting::query()
                 ->where('job_id', $job->id)

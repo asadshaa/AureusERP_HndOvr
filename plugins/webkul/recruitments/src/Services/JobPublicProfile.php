@@ -5,8 +5,10 @@ namespace Webkul\Recruitment\Services;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Webkul\Recruitment\Enums\ChannelPostingStatus;
 use Webkul\Recruitment\Enums\JobLocationType;
 use Webkul\Recruitment\Models\JobPosition;
+use Webkul\Recruitment\Models\JobPosting;
 
 /**
  * The public face of a job (Recruitment automation plan, phase A2): the payload
@@ -88,7 +90,36 @@ class JobPublicProfile
             'date_posted'       => $job->published_at ? Carbon::parse($job->published_at)->toDateString() : null,
             'valid_through'     => $this->validThrough($job)?->toDateString(),
             'questions'         => app(ScreeningService::class)->publicQuestionsFor($job),
+            'boards'            => $this->feedBoards($job),
         ];
+    }
+
+    /**
+     * The website feeds (/careers/feed/{board}.xml) the job belongs in: its
+     * feed-board ads (Indeed, Jooble, talent.com...) that are still on the job
+     * and not closed. The careers site lists the job only in these feeds.
+     *
+     * @return array<int, string>
+     */
+    public function feedBoards(JobPosition $job): array
+    {
+        $registry = app(JobPostingChannelRegistry::class);
+        $channels = array_map(fn ($channel): string => (string) $channel->feedBoard, $registry->feedBoardChannels());
+
+        if ($channels === [] || ! $job->getKey()) {
+            return [];
+        }
+
+        $active = JobPosting::query()
+            ->where('job_id', $job->getKey())
+            ->where('company_id', $job->company_id)
+            ->whereIn('channel', array_keys($channels))
+            ->whereNull('dropped_at')
+            ->where('status', '!=', ChannelPostingStatus::CLOSED->value)
+            ->pluck('channel')
+            ->all();
+
+        return array_values(array_unique(array_map(fn (string $channel): string => $channels[$channel], array_intersect(array_keys($channels), $active))));
     }
 
     /**

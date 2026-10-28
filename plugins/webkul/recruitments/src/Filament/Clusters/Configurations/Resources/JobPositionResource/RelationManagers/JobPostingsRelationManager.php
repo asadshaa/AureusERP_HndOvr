@@ -405,7 +405,11 @@ class JobPostingsRelationManager extends RelationManager
 
         return collect($this->channelOptions($withPlacement))
             ->mapWithKeys(fn (string $label, string $key): array => [
-                $key => trim($registry->resolve($key)->tier->getLabel().'. '.($registry->availabilityNote($key, $job) ?? '')),
+                $key => trim(implode(' ', array_filter([
+                    $registry->resolve($key)->tier->getLabel().'.',
+                    $registry->resolve($key)->description,
+                    $registry->availabilityNote($key, $job),
+                ]))),
             ])
             ->all();
     }

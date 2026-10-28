@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Webkul\Employee\Models\EmployeeJobPosition;
 use Webkul\Recruitment\Enums\ChannelPostingStatus;
 use Webkul\Recruitment\Models\JobPosting;
+use Webkul\Recruitment\Models\JobPostingEvent;
 use Webkul\Recruitment\Models\JobQuestion;
 use Webkul\Recruitment\Services\JobPostingChannelRegistry;
 use Webkul\Recruitment\Services\JobPostingLifecycle;
@@ -38,6 +39,29 @@ class WebsiteListingRefresher
     {
         if ($question->job_id) {
             static::refresh((int) $question->job_id);
+        }
+    }
+
+    /** Events that add a feed-board ad to the job or take it off (JobPublicProfile "boards"). */
+    public const FEED_BOARD_MEMBERSHIP_EVENTS = ['added', 'revived', 'dropped'];
+
+    /**
+     * JobPostingEvent "created" hook: a feed board (Jooble, talent.com...) was
+     * added to or removed from a job, so the website must learn the job's new
+     * "boards" list. Status syncs of the feed ad itself never re-push, so the
+     * website and feed ads cannot loop.
+     */
+    public static function feedBoardChanged(JobPostingEvent $event): void
+    {
+        if (! in_array($event->event, self::FEED_BOARD_MEMBERSHIP_EVENTS, true)) {
+            return;
+        }
+
+        $posting = JobPosting::query()->whereKey($event->job_posting_id)->first(['id', 'job_id', 'channel']);
+        $registry = app(JobPostingChannelRegistry::class);
+
+        if ($posting && $registry->has($posting->channel) && $registry->resolve($posting->channel)->isFeedBoard()) {
+            static::refresh((int) $posting->job_id);
         }
     }
 

@@ -66,6 +66,8 @@ return [
         'pull_limit'          => 50,
         'auto_retry_attempts' => 3,
         'indeed_feed_path'    => '/careers/feed/indeed.xml',
+        // Free job-board feeds served by the careers site ({board} = jooble, talent, recruitnet, expertini, tiptopjob, generic).
+        'feed_path'           => '/careers/feed/{board}.xml',
     ],
 
     /*

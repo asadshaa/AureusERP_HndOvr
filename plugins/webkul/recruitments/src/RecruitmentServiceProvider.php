@@ -71,6 +71,7 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_10_28_000001_add_public_job_fields_to_job_positions',
                 '2026_10_29_000001_create_recruitments_website_tables',
                 '2026_10_30_000001_create_recruitments_interviews_tables',
+                '2026_10_31_000001_create_recruitments_job_board_registrations_table',
             ])
             ->runsMigrations()
             ->hasCommands([
@@ -121,7 +122,9 @@ class RecruitmentServiceProvider extends PackageServiceProvider
     /**
      * Company careers website (automation plan A3): the "Company website"
      * channel lists jobs through the company's WordPress connection; Google
-     * for Jobs and the Indeed feed follow that listing. Edits of a listed job
+     * for Jobs and the job-board feeds (Indeed, Jooble, talent.com...) follow
+     * that listing, and adding or removing a feed board re-pushes the job so
+     * its "boards" stay right. Edits of a listed job
      * (or of its screening questions) are pushed again after commit.
      */
     protected function registerWebsitePublishers(): void
@@ -129,7 +132,10 @@ class RecruitmentServiceProvider extends PackageServiceProvider
         $registry = $this->app->make(JobPostingChannelRegistry::class);
         $registry->registerPublisher($this->app->make(CompanyWebsitePublisher::class));
         $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::GOOGLE));
-        $registry->registerPublisher(new WebsiteDerivedChannelPublisher(WebsiteDerivedChannelPublisher::INDEED_FEED));
+
+        foreach ($registry->feedBoardChannels() as $channel) {
+            $registry->registerPublisher(new WebsiteDerivedChannelPublisher($channel->key, $channel->feedBoard));
+        }
 
         // Ads added before the company had a website connection wait for it: send them once it is switched on.
         WebsiteConnection::saved(function (WebsiteConnection $connection): void {
@@ -152,6 +158,7 @@ class RecruitmentServiceProvider extends PackageServiceProvider
         });
 
         JobPostingEvent::created(fn (JobPostingEvent $event) => WebsiteDerivedChannelPublisher::followWebsiteListing($event));
+        JobPostingEvent::created(fn (JobPostingEvent $event) => WebsiteListingRefresher::feedBoardChanged($event));
 
         $tableExists = null;
         $ready = function () use (&$tableExists): bool {
