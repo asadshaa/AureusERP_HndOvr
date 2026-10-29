@@ -9,11 +9,12 @@ use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Move;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Security\Models\User;
+use Webkul\Support\Contracts\ReturnableApprovalSubject;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
 
-class EmployeeRequest extends Model
+class EmployeeRequest extends Model implements ReturnableApprovalSubject
 {
     protected $table = 'employees_requests';
 
@@ -98,6 +99,19 @@ class EmployeeRequest extends Model
         if ((int) $this->approval_request_id === (int) $request->id) {
             app(EmployeeRequestService::class)->synchronize($this);
         }
+    }
+
+    /**
+     * Where an approval notification sends the requester (ApprovalLinks): the
+     * Employee Requests list with this request open -- the edit form while it
+     * is returned for changes, its details otherwise.
+     */
+    public function approvalSubjectUrl(?User $recipient = null): ?string
+    {
+        return route('filament.admin.resources.employee-requests.index', [
+            'tableAction'       => $this->status === 'returned' ? 'edit' : 'view',
+            'tableActionRecord' => $this->getKey(),
+        ]);
     }
 
     protected static function booted(): void

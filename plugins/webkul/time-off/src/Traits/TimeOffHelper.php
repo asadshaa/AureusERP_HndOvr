@@ -23,6 +23,7 @@ use Webkul\TimeOff\Enums\RequestDateFromPeriod;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\LeaveApprovalService;
 use Webkul\TimeOff\Services\LeaveBalanceService;
 use Webkul\TimeOff\Services\ShortLeavePolicy;
 
@@ -40,7 +41,9 @@ trait TimeOffHelper
 
         $this->handleLeaveAllocation($data, $action, $excludeRecordId);
 
-        $data['state'] = State::CONFIRM->value;
+        // A leave returned for changes stays "refuse" (out of the balance) while it
+        // is edited; resubmitting it puts it back to "confirm" (LeaveApprovalService).
+        $data['state'] = LeaveApprovalService::isReturnedLeaveId($excludeRecordId) ? State::REFUSE->value : State::CONFIRM->value;
         $data['date_from'] = $data['request_date_from'] ?? null;
         $data['date_to'] = $data['request_date_to'] ?? null;
 

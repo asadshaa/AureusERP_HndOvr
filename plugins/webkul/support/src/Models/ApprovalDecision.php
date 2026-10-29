@@ -13,6 +13,7 @@ class ApprovalDecision extends Model
     protected $fillable = [
         'request_id',
         'step_id',
+        'submission_round',
         'actor_id',
         'decision',
         'reason',
@@ -24,9 +25,10 @@ class ApprovalDecision extends Model
     protected function casts(): array
     {
         return [
-            'previous_values' => 'array',
-            'new_values'      => 'array',
-            'decided_at'      => 'datetime',
+            'submission_round' => 'integer',
+            'previous_values'  => 'array',
+            'new_values'       => 'array',
+            'decided_at'       => 'datetime',
         ];
     }
 

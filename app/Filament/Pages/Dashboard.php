@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Widgets\AnnouncementsWidget;
+use App\Filament\Widgets\CelebrationsWidget;
 use App\Filament\Widgets\CompanySnapshotWidget;
 use App\Filament\Widgets\EmployeeDashboardOverviewWidget;
 use App\Filament\Widgets\HomeGreetingWidget;
@@ -37,11 +39,13 @@ class Dashboard extends BaseDashboard
             HomeGreetingWidget::class,
             $context->isCeo() ? CompanySnapshotWidget::class : null,
             PendingActionsCenterWidget::class,
+            $context->isEmployee() || $context->isHr() || $context->isCeo() ? AnnouncementsWidget::class : null,
             $context->isEmployee() ? MyDayWidget::class : null,
             $context->isLineManager() ? TeamTodayWidget::class : null,
             $context->isHr() || $context->isCeo() ? TodayAttendanceRollCallWidget::class : null,
             $context->isRecruiter() ? RecruitmentPipelineWidget::class : null,
             $context->isEmployee() ? EmployeeDashboardOverviewWidget::class : null,
+            $context->isEmployee() || $context->isHr() || $context->isCeo() ? CelebrationsWidget::class : null,
         ]));
     }
 

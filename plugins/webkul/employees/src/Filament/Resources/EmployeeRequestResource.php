@@ -42,6 +42,7 @@ use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\EmployeeRequestKinds;
@@ -289,6 +290,24 @@ class EmployeeRequestResource extends Resource
                                 ])
                                 ->columns(2),
 
+                            Section::make('Overtime')
+                                ->visible(fn (EmployeeRequest $record): bool => OvertimeService::isOvertime($record->requestType))
+                                ->schema([
+                                    TextEntry::make('payload.overtime_date')->label('Day worked')->date('d M Y (l)'),
+                                    TextEntry::make('payload.schedule')->label('Schedule that day')->placeholder('—'),
+                                    TextEntry::make('overtime_requested')->label('Requested')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => OvertimeService::hours((int) data_get($record->payload, 'requested_minutes', 0))),
+                                    TextEntry::make('overtime_recorded')->label('Extra time recorded')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => OvertimeService::hours((int) data_get($record->payload, 'recorded_extra_minutes', 0))
+                                            .' (worked '.OvertimeService::hours((int) data_get($record->payload, 'worked_minutes', 0)).', required '.OvertimeService::hours((int) data_get($record->payload, 'required_minutes', 0)).')'),
+                                    TextEntry::make('overtime_approved')->label('Approved')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => data_get($record->payload, 'approved_minutes') !== null
+                                            ? OvertimeService::hours((int) data_get($record->payload, 'approved_minutes'))
+                                            : 'Not yet'),
+                                    TextEntry::make('payload.overtime_reason')->label('What it was for')->placeholder('—')->columnSpanFull(),
+                                ])
+                                ->columns(2),
+
                             Section::make('Approval Trail')
                                 ->visible(fn (EmployeeRequest $record): bool => $record->approvalRequest !== null)
                                 ->schema([
@@ -343,6 +362,7 @@ class EmployeeRequestResource extends Resource
                                             'approved'         => 'success',
                                             'rejected'         => 'danger',
                                             'pending_approval' => 'warning',
+                                            'returned'         => 'info',
                                             default            => 'gray',
                                         }),
                                     TextEntry::make('routing_info')
@@ -353,6 +373,12 @@ class EmployeeRequestResource extends Resource
                                             }
                                             if ($record->status === 'rejected') {
                                                 return 'Rejected (Reason: '.($record->rejection_reason ?? '—').')';
+                                            }
+                                            if ($record->status === 'returned') {
+                                                return 'Returned for changes: '.(static::returnComment($record) ?? '—');
+                                            }
+                                            if ($record->status === 'withdrawn') {
+                                                return 'Withdrawn';
                                             }
                                             if ($record->approvalRequest) {
                                                 return app(ApprovalEngine::class)->describeCurrentApprover($record->approvalRequest);
@@ -414,6 +440,7 @@ class EmployeeRequestResource extends Resource
         $isAdvance = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::SalaryAdvanceCategory;
         $isLetter = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::HrLetterCategory;
         $isSelfService = fn (Get $get): bool => EmployeeRequestKinds::isSelfServiceCategory(static::selectedRequestType($get)?->category);
+        $isOvertime = fn (Get $get): bool => OvertimeService::isOvertime(static::selectedRequestType($get));
         $companyCurrency = $companyId ? Company::query()->with('currency')->find($companyId)?->currency?->code : null;
         $advanceCap = fn (Get $get): ?string => EmployeeRequestKinds::advanceCap(
             Employee::query()->where('company_id', $companyId)->find($get('employee_id')),
@@ -491,6 +518,7 @@ class EmployeeRequestResource extends Resource
                         $isLoan($get)                   => 'Loan: line manager, then HR'.(static::loanHasFinanceStep($companyId) ? ', then finance' : ''),
                         $isAdvance($get)                => 'Salary advance: line manager, then HR',
                         $isLetter($get)                 => 'HR letter: handled by HR',
+                        $isOvertime($get)               => 'Overtime: line manager, then HR',
                         filled($get('request_type_id')) => 'Standard Approval',
                         default                         => '—',
                     })
@@ -702,6 +730,32 @@ class EmployeeRequestResource extends Resource
                         ->required($isLetter),
                 ]),
 
+            Section::make('Overtime')
+                ->columns(2)
+                ->visible($isOvertime)
+                ->schema([
+                    DatePicker::make('payload.overtime_date')
+                        ->label('Day worked')
+                        ->native(false)
+                        ->maxDate(fn (): string => now(config('attendance.monthly_report.timezone'))->toDateString())
+                        ->live()
+                        ->required($isOvertime),
+                    TextInput::make('payload.requested_minutes')
+                        ->label('Overtime (minutes)')
+                        ->integer()
+                        ->minValue(OvertimeService::MinimumMinutes)
+                        ->step(OvertimeService::StepMinutes)
+                        ->helperText('At least 30, in steps of 15, and not more than the extra time recorded that day.')
+                        ->required($isOvertime),
+                    Placeholder::make('overtime_recorded')
+                        ->label('Recorded that day')
+                        ->content(fn (Get $get): string => static::overtimeRecordedText($get, $companyId))
+                        ->columnSpanFull(),
+                    Textarea::make('payload.overtime_reason')
+                        ->label('What was the overtime for?')
+                        ->columnSpanFull(),
+                ]),
+
             Select::make('currency_id')
                 ->relationship('currency', 'name')
                 ->default(fn (): ?int => Auth::user()?->defaultCompany?->currency_id)
@@ -725,7 +779,7 @@ class EmployeeRequestResource extends Resource
             KeyValue::make('payload_details')
                 ->label('Additional request details')->columnSpanFull()
                 ->formatStateUsing(fn ($state, ?EmployeeRequest $record): ?array => $state ?? (is_array($record?->payload) ? array_filter($record->payload, 'is_scalar') : null))
-                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get)),
+                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get) && ! $isOvertime($get)),
 
             Section::make('Financial Details')->columns(2)
                 ->visible($isFinancial)
@@ -790,8 +844,28 @@ class EmployeeRequestResource extends Resource
             EmployeeRequestKinds::SalaryAdvanceCategory => 'Deduct from '.(EmployeeRequestKinds::monthLabel($payload['deduct_month'] ?? null) ?? '?'),
             EmployeeRequestKinds::HrLetterCategory      => EmployeeRequestKinds::letterTypeLabel($payload['letter_type'] ?? null)
                 .(filled($payload['letter_issued_at'] ?? null) ? ' (issued)' : ' (needed by '.(filled($payload['needed_by'] ?? null) ? Carbon::parse($payload['needed_by'])->format('d M Y') : '?').')'),
+            OvertimeService::Category => 'Overtime '.OvertimeService::hours((int) ($payload['requested_minutes'] ?? 0))
+                .(isset($payload['recorded_extra_minutes']) ? ' of '.OvertimeService::hours((int) $payload['recorded_extra_minutes']).' recorded' : '')
+                .(isset($payload['approved_minutes']) ? ' · approved '.OvertimeService::hours((int) $payload['approved_minutes']) : ''),
             default => null,
         };
+    }
+
+    /** The overtime form's "recorded that day" line for the chosen employee and day. */
+    protected static function overtimeRecordedText(Get $get, int $companyId): string
+    {
+        $employee = Employee::query()->where('company_id', $companyId)->find($get('employee_id'));
+        $date = $get('payload.overtime_date');
+
+        if (! $employee || blank($date)) {
+            return 'Choose the employee and the day to see the extra time attendance recorded.';
+        }
+
+        try {
+            return app(OvertimeService::class)->describeDay($employee, Carbon::parse((string) $date)->toDateString());
+        } catch (RuntimeException $e) {
+            return $e->getMessage();
+        }
     }
 
     public static function instalmentScheduleHtml(EmployeeRequest $record): string
@@ -813,6 +887,14 @@ class EmployeeRequestResource extends Resource
             .'</tr></thead><tbody>'.$rows.'</tbody></table>';
     }
 
+    /** The approver's comment of the latest "return to requester". */
+    public static function returnComment(EmployeeRequest $record): ?string
+    {
+        $return = $record->approvalRequest?->decisions?->where('decision', 'returned')->sortBy('id')->last();
+
+        return $return ? trim(($return->actor?->name ? $return->actor->name.': ' : '').$return->reason) : null;
+    }
+
     /** Every decision so far, then who the request is waiting on. */
     public static function approvalTrailHtml(EmployeeRequest $record): string
     {
@@ -831,6 +913,9 @@ class EmployeeRequestResource extends Resource
 
         if ($approval->status === 'pending') {
             $lines->push('<li><em>Waiting: '.e(($approval->currentStep()?->name ?? 'Approval').' &middot; '.app(ApprovalEngine::class)->describeCurrentApprover($approval)).'</em></li>');
+        }
+        if ($approval->status === 'returned') {
+            $lines->push('<li><em>Returned for changes: waiting for the requester to edit and resubmit (approval then restarts at step 1).</em></li>');
         }
 
         return '<ul class="space-y-1 text-sm">'.$lines->implode('').'</ul>';
@@ -993,7 +1078,7 @@ class EmployeeRequestResource extends Resource
             TextColumn::make('billed_amount')->label('Claim/budget')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->placeholder('—')->sortable()->toggleable(),
             TextColumn::make('amount')->label('Net payment')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->placeholder('—')->sortable()->toggleable(),
             TextColumn::make('status')->badge()->color(fn (string $state): string => match ($state) {
-                'approved' => 'success', 'rejected' => 'danger', 'pending_approval' => 'warning', default => 'gray',
+                'approved' => 'success', 'rejected' => 'danger', 'pending_approval' => 'warning', 'returned' => 'info', default => 'gray',
             }),
             TextColumn::make('current_approver')
                 ->label('Current Approver')
@@ -1003,6 +1088,12 @@ class EmployeeRequestResource extends Resource
                     }
                     if ($record->status === 'rejected') {
                         return 'Rejected';
+                    }
+                    if ($record->status === 'returned') {
+                        return 'Returned to requester';
+                    }
+                    if ($record->status === 'withdrawn') {
+                        return 'Withdrawn';
                     }
                     if ($record->approvalRequest) {
                         return app(ApprovalEngine::class)->describeCurrentApprover($record->approvalRequest);
@@ -1018,6 +1109,7 @@ class EmployeeRequestResource extends Resource
                 SelectFilter::make('status')->options([
                     'draft'    => 'Draft', 'pending_approval' => 'Pending approval',
                     'approved' => 'Approved', 'rejected' => 'Rejected',
+                    'returned' => 'Returned for changes', 'withdrawn' => 'Withdrawn',
                 ]),
             ])->recordActions([
                 ViewAction::make()->modalHeading('Employee Request Details'),
@@ -1129,12 +1221,26 @@ class EmployeeRequestResource extends Resource
                         && Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
                     )
-                    ->schema([
+                    ->schema(fn (EmployeeRequest $record): array => [
+                        TextInput::make('approved_minutes')
+                            ->label('Overtime to approve (minutes)')
+                            ->integer()
+                            ->minValue(OvertimeService::MinimumMinutes)
+                            ->maxValue((int) data_get($record->payload, 'requested_minutes', 0))
+                            ->step(OvertimeService::StepMinutes)
+                            ->default((int) data_get($record->payload, 'requested_minutes', 0))
+                            ->helperText('Recorded that day: '.OvertimeService::hours((int) data_get($record->payload, 'recorded_extra_minutes', 0)).'. You can lower it, not raise it.')
+                            ->visible(OvertimeService::isOvertime($record->requestType))
+                            ->required(OvertimeService::isOvertime($record->requestType)),
                         Textarea::make('reason')->label('Approval note'),
                     ])
                     ->action(function (EmployeeRequest $record, array $data): void {
                         try {
-                            app(EmployeeRequestService::class)->approve($record, Auth::user(), $data['reason'] ?? null);
+                            if (OvertimeService::isOvertime($record->requestType)) {
+                                app(OvertimeService::class)->approve($record, Auth::user(), (int) $data['approved_minutes'], $data['reason'] ?? null);
+                            } else {
+                                app(EmployeeRequestService::class)->approve($record, Auth::user(), $data['reason'] ?? null);
+                            }
                             Notification::make()->success()->title('Request approved successfully')->send();
                         } catch (RuntimeException $e) {
                             Notification::make()->danger()->title('Could not approve')->body($e->getMessage())->send();
@@ -1159,6 +1265,65 @@ class EmployeeRequestResource extends Resource
                             Notification::make()->success()->title('Request rejected')->send();
                         } catch (RuntimeException $e) {
                             Notification::make()->danger()->title('Could not reject')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('return_request')
+                    ->label('Return to requester')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('info')
+                    ->modalDescription('The requester is asked to change the request and resubmit it. Approval then starts again from the first step.')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
+                        && $record->approvalRequest !== null
+                        && Auth::user() !== null
+                        && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
+                    )
+                    ->schema([
+                        Textarea::make('comment')->label('What needs to change')->required()->maxLength(2000),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->returnToRequester($record, Auth::user(), (string) $data['comment']);
+                            Notification::make()->success()->title('Returned to the requester for changes')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not return the request')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('resubmit_request')
+                    ->label('Resubmit')
+                    ->icon('heroicon-o-paper-airplane')
+                    ->color('primary')
+                    ->requiresConfirmation()
+                    ->modalDescription('The changed request goes back to approval and starts again from the first step.')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                        && app(EmployeeRequestService::class)->canResubmit($record, Auth::user()))
+                    ->action(function (EmployeeRequest $record): void {
+                        try {
+                            $request = app(EmployeeRequestService::class)->submit($record, Auth::user());
+                            Notification::make()->success()
+                                ->title('Request resubmitted for approval')
+                                ->body(app(ApprovalEngine::class)->describeCurrentApprover($request))
+                                ->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not resubmit')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('withdraw_request')
+                    ->label('Withdraw')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalDescription('The request is taken back and nobody needs to approve it any more. This cannot be undone; create a new request if needed.')
+                    ->schema([
+                        Textarea::make('reason')->label('Reason (optional)')->maxLength(2000),
+                    ])
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
+                        && app(EmployeeRequestService::class)->canWithdraw($record, Auth::user()))
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(EmployeeRequestService::class)->withdraw($record, Auth::user(), $data['reason'] ?? null);
+                            Notification::make()->success()->title('Request withdrawn')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not withdraw')->body($e->getMessage())->send();
                         }
                     }),
                 Action::make('generate_letter')
@@ -1224,6 +1389,7 @@ class EmployeeRequestResource extends Resource
                     }),
                 EditAction::make()
                     ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true)
+                        || (Auth::user() instanceof User && app(EmployeeRequestService::class)->canResubmit($record, Auth::user()))
                         || ($record->status === 'pending_approval' && static::isFinanceUser(Auth::user()))
                     )
                     ->mutateFormDataUsing(fn (array $data): array => static::formatAttendancePayload($data))
@@ -1269,15 +1435,25 @@ class EmployeeRequestResource extends Resource
 
         $companyId = (int) $user->default_company_id;
 
+        // Everything the columns and row actions read, once per page: the
+        // employee's hierarchy chain and the approval requester's chain feed
+        // ApprovalEngine::canAct() (approve / reject / return visibility).
         $withRelations = [
-            'employee.department',
+            'employee.department.manager.user',
             'employee.job',
-            'employee.parent',
+            'employee.user',
+            'employee.parent.user',
+            'employee.team.manager.user',
             'requester',
             'requestType',
             'currency',
-            'approvalRequest.workflow.steps',
+            'approvalRequest.workflow.steps.approverUser',
+            'approvalRequest.workflow.steps.approverRole',
             'approvalRequest.decisions.actor',
+            'approvalRequest.decisions.step',
+            'approvalRequest.requester.employee.parent.user',
+            'approvalRequest.requester.employee.department.manager.user',
+            'approvalRequest.requester.employee.team.manager.user',
         ];
 
         if (
@@ -1301,7 +1477,7 @@ class EmployeeRequestResource extends Resource
             || $user->can('hr_approve_leave')
             || static::isFinanceUser($user)
         ) {
-            return parent::getEloquentQuery()->where('company_id', $companyId)->with($withRelations);
+            return static::withApprovalSubject(parent::getEloquentQuery()->where('company_id', $companyId)->with($withRelations));
         }
 
         $visible = app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId);
@@ -1328,12 +1504,33 @@ class EmployeeRequestResource extends Resource
             ->where('actor_id', $user->id)
             ->pluck('request_id');
 
-        return parent::getEloquentQuery()->where('company_id', $companyId)
+        return static::withApprovalSubject(parent::getEloquentQuery()->where('company_id', $companyId)
             ->with($withRelations)
             ->where(fn (Builder $query) => $query
                 ->whereIn('employee_id', $visible)
                 ->orWhereIn('approval_request_id', $pendingOnMe)
-                ->orWhereIn('approval_request_id', $decidedByMe));
+                ->orWhereIn('approval_request_id', $decidedByMe)));
+    }
+
+    /**
+     * The approval request's subject is the row itself: set it from the row
+     * instead of loading every request again.
+     *
+     * @param  Builder<EmployeeRequest>  $query
+     * @return Builder<EmployeeRequest>
+     */
+    protected static function withApprovalSubject(Builder $query): Builder
+    {
+        return $query->afterQuery(function ($requests) {
+            foreach ($requests as $request) {
+                $approval = $request instanceof EmployeeRequest ? $request->approvalRequest : null;
+                if ($approval && $approval->subject_type === $request->getMorphClass() && (int) $approval->subject_id === (int) $request->getKey()) {
+                    $approval->setRelation('subject', $request);
+                }
+            }
+
+            return $requests;
+        });
     }
 
     public static function getPages(): array

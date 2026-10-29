@@ -5,4 +5,5 @@ return [
     'approved'  => 'Aprobado',
     'rejected'  => 'Rechazado',
     'withdrawn' => 'Retirado',
+    'returned'  => 'Devuelto para cambios',
 ];

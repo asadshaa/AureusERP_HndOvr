@@ -522,6 +522,8 @@ class GeofencedAttendanceService
 
         DB::transaction(function () use ($record, $reviewer, $approve, $note): void {
             $record = AttendanceRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            // The status below is a query-builder write: check the month lock explicitly.
+            app(AttendanceMonthLockService::class)->guardAttendanceRecord($record);
 
             $pending = $record->verifications()->where('review_status', 'pending')->get();
             if ($pending->isEmpty()) {
@@ -731,6 +733,11 @@ class GeofencedAttendanceService
             ->with('employee')
             ->chunkById(200, function ($records) use (&$flagged): void {
                 foreach ($records as $record) {
+                    // A day of a finalised month is not touched (the flag is a query-builder write).
+                    if (app(AttendanceMonthLockService::class)->isLocked((int) $record->company_id, (string) $record->attendance_date?->toDateString())) {
+                        continue;
+                    }
+
                     DB::transaction(function () use ($record): void {
                         AttendanceVerification::query()->create([
                             'company_id'           => $record->company_id,

@@ -10,6 +10,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Cache\Store;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection as SupportCollection;
 use Spatie\Permission\Contracts\Permission;
 use Spatie\Permission\Contracts\PermissionsTeamResolver;
 use Spatie\Permission\Contracts\Role;
@@ -50,6 +51,20 @@ class PermissionRegistrar
     private array $except = [];
 
     private array $wildcardPermissionsIndex = [];
+
+    /**
+     * Loaded permissions grouped by lookup attribute, guard and value (keyed by their position in
+     * the collection). Built lazily and only valid for the collection it was built from; null marks
+     * an attribute whose values cannot be indexed exactly.
+     *
+     * @var array<string, array<string, array<int|string, array<int|string, array<string, mixed>>>>|null>
+     */
+    private array $permissionLookupIndex = [];
+
+    /**
+     * The permissions collection the lookup index was built from.
+     */
+    private ?SupportCollection $indexedPermissions = null;
 
     /**
      * PermissionRegistrar constructor.
@@ -140,6 +155,7 @@ class PermissionRegistrar
     public function forgetCachedPermissions()
     {
         $this->permissions = null;
+        $this->forgetPermissionLookupIndex();
         $this->forgetWildcardPermissionIndex();
 
         return $this->cache->forget($this->cacheKey);
@@ -173,6 +189,7 @@ class PermissionRegistrar
     public function clearPermissionsCollection(): void
     {
         $this->permissions = null;
+        $this->forgetPermissionLookupIndex();
         $this->wildcardPermissionsIndex = [];
     }
 
@@ -216,21 +233,27 @@ class PermissionRegistrar
     {
         $this->loadPermissions();
 
-        $method = $onlyOne ? 'first' : 'filter';
+        $indexedMatches = $this->findIndexedPermissions($params);
 
-        $permissions = $this->permissions->$method(static function ($permission) use ($params) {
-            foreach ($params as $attr => $value) {
-                if ($permission[$attr] != $value) {
-                    return false;
+        if ($indexedMatches !== null) {
+            $permissions = new Collection($onlyOne ? array_slice(array_values($indexedMatches), 0, 1) : $indexedMatches);
+        } else {
+            $method = $onlyOne ? 'first' : 'filter';
+
+            $permissions = $this->permissions->$method(static function ($permission) use ($params) {
+                foreach ($params as $attr => $value) {
+                    if ($permission[$attr] != $value) {
+                        return false;
+                    }
                 }
-            }
 
-            return true;
-        });
+                return true;
+            });
 
-        $permissions = new Collection(
-            $onlyOne ? ($permissions ? [$permissions] : []) : $permissions->all()
-        );
+            $permissions = new Collection(
+                $onlyOne ? ($permissions ? [$permissions] : []) : $permissions->all()
+            );
+        }
 
         $permissions = $permissions->map(function ($permission) {
             $permissionInstance = (new ($this->getPermissionClass())())->newInstance([], true);
@@ -244,6 +267,105 @@ class PermissionRegistrar
         });
 
         return $permissions;
+    }
+
+    /**
+     * Drop the name/id lookup index so it is rebuilt from the next loaded collection.
+     */
+    public function forgetPermissionLookupIndex(): void
+    {
+        $this->permissionLookupIndex = [];
+        $this->indexedPermissions = null;
+    }
+
+    /**
+     * Resolve a `name + guard_name` or `id + guard_name` lookup from the index.
+     *
+     * Returns null when the params cannot be answered by an exact key match with the same
+     * result as the loose (`!=`) linear filter, so the caller falls back to that filter.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array<int|string, array<string, mixed>>|null
+     */
+    private function findIndexedPermissions(array $params): ?array
+    {
+        if (count($params) !== 2 || ! array_key_exists('guard_name', $params)) {
+            return null;
+        }
+
+        $attribute = match (true) {
+            array_key_exists('name', $params) => 'name',
+            array_key_exists('id', $params)   => 'id',
+            default                           => null,
+        };
+
+        if ($attribute === null) {
+            return null;
+        }
+
+        $value = $params[$attribute];
+        $guard = $params['guard_name'];
+
+        if (! $this->isExactLookupString($guard)) {
+            return null;
+        }
+
+        if ($attribute === 'name' ? ! $this->isExactLookupString($value) : ! is_int($value)) {
+            return null;
+        }
+
+        $index = $this->permissionLookupIndexFor($attribute);
+
+        if ($index === null) {
+            return null;
+        }
+
+        return $index[$guard][(string) $value] ?? [];
+    }
+
+    /**
+     * Build (once per loaded collection) the index for one lookup attribute.
+     *
+     * @return array<string, array<int|string, array<int|string, array<string, mixed>>>>|null
+     */
+    private function permissionLookupIndexFor(string $attribute): ?array
+    {
+        if ($this->indexedPermissions !== $this->permissions) {
+            $this->permissionLookupIndex = [];
+            $this->indexedPermissions = $this->permissions instanceof SupportCollection ? $this->permissions : null;
+        }
+
+        if ($this->indexedPermissions === null) {
+            return null;
+        }
+
+        if (array_key_exists($attribute, $this->permissionLookupIndex)) {
+            return $this->permissionLookupIndex[$attribute];
+        }
+
+        $index = [];
+
+        foreach ($this->indexedPermissions as $position => $permission) {
+            $key = $permission[$attribute];
+            $guard = $permission['guard_name'];
+
+            // Values the loose filter could match in more than one spelling are not indexable.
+            if (! is_string($guard) || ($attribute === 'id' ? ! is_int($key) : ! is_string($key))) {
+                return $this->permissionLookupIndex[$attribute] = null;
+            }
+
+            $index[$guard][(string) $key][$position] = $permission;
+        }
+
+        return $this->permissionLookupIndex[$attribute] = $index;
+    }
+
+    /**
+     * A string whose loose comparison with another string is exact (non-numeric).
+     */
+    private function isExactLookupString(mixed $value): bool
+    {
+        return is_string($value) && ! is_numeric($value);
     }
 
     public function getPermissionClass(): string

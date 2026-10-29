@@ -5,6 +5,7 @@ namespace Webkul\Employee;
 use Filament\Contracts\Plugin;
 use Filament\Navigation\NavigationItem;
 use Filament\Panel;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\WorkLocationResource;
 use Webkul\Employee\Filament\Resources\AttendanceRecordResource;
@@ -49,7 +50,9 @@ class EmployeePlugin implements Plugin
                         in: __DIR__.'/Filament/Widgets',
                         for: 'Webkul\\Employee\\Filament\\Widgets'
                     )
-                    ->navigationItems($this->attendanceNavigationItems());
+                    ->navigationItems($this->attendanceNavigationItems())
+                    // The installable "Aureus" check-in app: manifest, theme colour, service worker.
+                    ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => view('employees::pwa.head')->render());
             });
     }
 

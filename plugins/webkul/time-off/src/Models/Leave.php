@@ -11,7 +11,9 @@ use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
 use Webkul\Security\Models\User;
+use Webkul\Support\Contracts\ReturnableApprovalSubject;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Models\Calendar;
 use Webkul\Support\Models\Company;
@@ -21,7 +23,7 @@ use Webkul\TimeOff\Services\LeaveApprovalService;
 use Webkul\TimeOff\Services\LeaveBalanceService;
 use Webkul\TimeOff\Services\ShortLeavePolicy;
 
-class Leave extends Model
+class Leave extends Model implements ReturnableApprovalSubject
 {
     use HasChatter, HasFactory, HasLogActivity;
 
@@ -208,6 +210,12 @@ class Leave extends Model
         }
     }
 
+    /** Where an approval notification (e.g. "returned for changes") opens this leave (ApprovalLinks). */
+    public function approvalSubjectUrl(?User $recipient = null): ?string
+    {
+        return app(LeaveApprovalService::class)->recordUrl($this, $recipient);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'creator_id');
@@ -216,6 +224,11 @@ class Leave extends Model
     protected static function boot()
     {
         parent::boot();
+
+        // A finalised attendance month is locked: no leave state change (or change to
+        // an approved leave) may touch its days, whatever path writes the request.
+        static::saving(fn (self $leave) => app(AttendanceMonthLockService::class)->guardLeave($leave));
+        static::deleting(fn (self $leave) => app(AttendanceMonthLockService::class)->guardLeave($leave, deleting: true));
 
         static::creating(function ($leave) {
             $authUser = Auth::user();

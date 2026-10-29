@@ -216,3 +216,39 @@ Schedule::command('time-off:yearly-allocation')
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
     ->withoutOverlapping(120)
     ->onOneServer();
+
+/*
+| approvals:send-reminders reminds the approvers of a request left waiting at
+| a step (default after 24 h, every 24 h, 3 times; per workflow on the
+| Approval Workflows screen), then escalates once to the company HR. Nothing
+| goes out 20:00-09:00 Karachi time or on Saturday / Sunday: it waits for the
+| next 09:00 run. Idempotent per request, step, round and reminder number.
+*/
+Schedule::command('approvals:send-reminders')
+    ->hourly()
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
+| Onboarding / exit checklists (HR Parity 2.4):
+|
+| hr:checklist-reminders -- 09:30 Karachi, overdue checklist tasks to their
+| assignee (or the company HR for unassigned ones), at most once per task per
+| day (claimed on the task), so an overlap or a re-run never reminds twice.
+|
+| hr:checklist-disable-users -- 18:30 Karachi, after office hours: switches
+| off the logins HR scheduled with "Disable user on last working day", on or
+| after that day only (a missed run catches up the next day). Idempotent and
+| recorded on the task, the checklist and the employee's chatter.
+*/
+Schedule::command('hr:checklist-reminders')
+    ->dailyAt('09:30')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('hr:checklist-disable-users')
+    ->dailyAt('18:30')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();

@@ -36,12 +36,15 @@ class ViewMyTimeOff extends ViewRecord
             // LeaveApprovalService::submit() call, same eligible-state
             // check), just reachable from the employee's own record here.
             Action::make('submit_for_approval')
-                ->label('Submit for approval')
+                ->label(fn (): string => LeaveApprovalService::isReturned($this->getRecord()) ? 'Resubmit' : 'Submit for approval')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('primary')
                 ->visible(function (): bool {
                     /** @var Leave $record */
                     $record = $this->getRecord();
+                    if (LeaveApprovalService::isReturned($record)) {
+                        return Auth::user() !== null && app(LeaveApprovalService::class)->canResubmit($record, Auth::user());
+                    }
                     $canSubmit = (int) $record->employee?->user_id === (int) Auth::id()
                         || (bool) Auth::user()?->can('hr_approve_leave');
                     $approvalStatus = $record->approvalRequest?->status;

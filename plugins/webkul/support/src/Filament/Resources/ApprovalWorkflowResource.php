@@ -24,6 +24,7 @@ use Webkul\Support\Filament\Resources\ApprovalWorkflowResource\Pages\CreateAppro
 use Webkul\Support\Filament\Resources\ApprovalWorkflowResource\Pages\EditApprovalWorkflow;
 use Webkul\Support\Filament\Resources\ApprovalWorkflowResource\Pages\ListApprovalWorkflows;
 use Webkul\Support\Models\ApprovalWorkflow;
+use Webkul\Support\Services\ApprovalReminderService;
 
 class ApprovalWorkflowResource extends Resource
 {
@@ -73,6 +74,33 @@ class ApprovalWorkflowResource extends Resource
                 TextInput::make('maximum_amount')->numeric()->minValue(0)->gte('minimum_amount'),
                 Toggle::make('is_active')->default(true),
             ]),
+            Section::make('Reminders')
+                ->description(fn (): string => sprintf(
+                    'Approvers of a request left waiting at a step are reminded, then HR is told once (and a line manager\'s own manager). Calendar hours; nothing is sent %s-%s %s or on Saturday / Sunday -- it waits for the next working morning. A step waiting more than %d days is no longer chased. Empty fields use the defaults: after %d h, every %d h, %d reminders.',
+                    config('approvals.reminders.quiet_start', '20:00'),
+                    config('approvals.reminders.quiet_end', '09:00'),
+                    config('approvals.reminders.timezone', 'Asia/Karachi'),
+                    (int) config('approvals.reminders.max_age_days', 14),
+                    (int) config('approvals.reminders.after_hours', 24),
+                    (int) config('approvals.reminders.every_hours', 24),
+                    (int) config('approvals.reminders.max_reminders', 3),
+                ))
+                ->columns(4)
+                ->schema([
+                    Toggle::make('reminders_enabled')->label('Send reminders')->default(true),
+                    TextInput::make('remind_after_hours')
+                        ->label('First reminder after (hours)')
+                        ->numeric()->integer()->minValue(1)->maxValue(720)
+                        ->placeholder((string) (int) config('approvals.reminders.after_hours', 24)),
+                    TextInput::make('remind_every_hours')
+                        ->label('Then every (hours)')
+                        ->numeric()->integer()->minValue(1)->maxValue(720)
+                        ->placeholder((string) (int) config('approvals.reminders.every_hours', 24)),
+                    TextInput::make('max_reminders')
+                        ->label('Reminders before escalating to HR')
+                        ->numeric()->integer()->minValue(0)->maxValue(20)
+                        ->placeholder((string) (int) config('approvals.reminders.max_reminders', 3)),
+                ]),
             Section::make('Workflow conditions')
                 ->description('Every configured condition must match. Context fields may include department_id, location_id, account_id, role, or other submitted request metadata.')
                 ->schema([
@@ -155,6 +183,16 @@ class ApprovalWorkflowResource extends Resource
                 TextColumn::make('steps_count')->counts('steps')->label('Steps'),
                 TextColumn::make('minimum_amount')->numeric(decimalPlaces: 2)->placeholder('Any'),
                 TextColumn::make('maximum_amount')->numeric(decimalPlaces: 2)->placeholder('Any'),
+                TextColumn::make('reminders')
+                    ->label('Reminders')
+                    ->getStateUsing(function (ApprovalWorkflow $record): string {
+                        $settings = app(ApprovalReminderService::class)->settingsFor($record);
+
+                        return $settings['enabled']
+                            ? "after {$settings['after_hours']}h, every {$settings['every_hours']}h, {$settings['max_reminders']}× then HR"
+                            : 'Off';
+                    })
+                    ->toggleable(),
                 IconColumn::make('is_active')->boolean(),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()->requiresConfirmation()]);

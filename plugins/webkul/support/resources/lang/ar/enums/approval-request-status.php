@@ -5,4 +5,5 @@ return [
     'approved'  => 'تمت الموافقة',
     'rejected'  => 'مرفوض',
     'withdrawn' => 'مسحوب',
+    'returned'  => 'أُعيد لإجراء تعديلات',
 ];

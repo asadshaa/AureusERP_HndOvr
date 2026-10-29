@@ -58,9 +58,10 @@ class MyTimeOffResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()
+        // Same table and row actions as Time Off management: same relations, loaded once per page.
+        return TimeOffResource::withListRelations(parent::getEloquentQuery()
             ->where('company_id', Auth::user()?->default_company_id)
-            ->whereHas('employee', fn (Builder $query): Builder => $query->where('user_id', Auth::id()));
+            ->whereHas('employee', fn (Builder $query): Builder => $query->where('user_id', Auth::id())));
     }
 
     public static function getPages(): array

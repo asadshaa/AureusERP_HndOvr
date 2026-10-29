@@ -47,9 +47,10 @@ class LeaveCancellationService
         protected HierarchicalNotificationService $notifications,
     ) {}
 
+    /** Pending, or returned for changes by an approver (LeaveApprovalService::isReturned()). */
     public function canWithdraw(Leave $leave, User $actor): bool
     {
-        return $leave->isPending() && $this->isOwnerOrRequester($leave, $actor);
+        return ($leave->isPending() || LeaveApprovalService::isReturned($leave)) && $this->isOwnerOrRequester($leave, $actor);
     }
 
     public function canRequestCancellation(Leave $leave, User $actor): bool
@@ -82,7 +83,7 @@ class LeaveCancellationService
 
             $approval = $locked->approvalRequest;
             $wasSubmitted = $approval && $approval->status === 'pending';
-            if ($wasSubmitted) {
+            if ($approval && in_array($approval->status, ['pending', 'returned'], true)) {
                 $approval->update(['status' => self::WITHDRAWN_STATUS, 'completed_at' => now()]);
             }
 

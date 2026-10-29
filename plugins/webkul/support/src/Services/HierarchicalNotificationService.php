@@ -2,6 +2,7 @@
 
 namespace Webkul\Support\Services;
 
+use Filament\Actions\Action;
 use Filament\Notifications\Events\DatabaseNotificationsSent;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Support\Collection;
@@ -53,7 +54,7 @@ class HierarchicalNotificationService
             $body = "A request ({$approval->request_type}) has been submitted and is awaiting your review at step '{$currentStep->name}'.{$routingNote}";
 
             foreach ($approvers as $approver) {
-                $idempotencyKey = "approval_submit_{$approval->id}_step_{$currentStep->id}_{$approver->id}";
+                $idempotencyKey = "approval_submit_{$approval->id}{$this->roundSuffix($approval)}_step_{$currentStep->id}_{$approver->id}";
 
                 $notification = FilamentNotification::make()
                     ->warning()
@@ -96,7 +97,7 @@ class HierarchicalNotificationService
             $body = "A request ({$approval->request_type}) completed preceding stage '{$previousStep->name}' (approved by {$actor->name}) and requires your decision.";
 
             foreach ($approvers as $approver) {
-                $idempotencyKey = "approval_advance_{$approval->id}_step_{$nextStep->id}_{$approver->id}";
+                $idempotencyKey = "approval_advance_{$approval->id}{$this->roundSuffix($approval)}_step_{$nextStep->id}_{$approver->id}";
 
                 $notification = FilamentNotification::make()
                     ->warning()
@@ -161,6 +162,108 @@ class HierarchicalNotificationService
         } catch (Throwable $e) {
             report($e);
             Log::error("HierarchicalNotification: Failed to notify rejection: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Tells the requester (and the employee the request is about) that an
+     * approver returned the request for changes, with the comment and a link
+     * to the request, once per submission round.
+     */
+    public function notifyRequestReturned(
+        ApprovalRequest $approval,
+        User $actor,
+        string $comment,
+        ?ApprovalStep $step = null,
+    ): void {
+        try {
+            // Reloaded: the subject was synchronised (made editable) after it was first loaded.
+            $approval->load(['requester', 'subject']);
+            $recipients = collect([$approval->requester]);
+
+            $subject = $approval->subject;
+            if ($subject && method_exists($subject, 'employee') && $subject->employee?->user) {
+                $recipients->push($subject->employee->user);
+            }
+
+            $recipients = $recipients
+                ->filter(fn (?User $u): bool => $u && $u->is_active && (int) $u->id !== (int) $actor->id
+                    && $this->approvalEngine->userCanAccessCompany($u, (int) $approval->company_id))
+                ->unique('id');
+
+            $label = ApprovalLinks::label($approval);
+            $at = $step ? " at step '{$step->name}'" : '';
+            $title = "{$label} returned for changes";
+            $commentText = rtrim(trim($comment), '.').'.';
+            $body = "{$actor->name} returned your {$label}{$at} for changes: {$commentText} Edit it and resubmit; it then starts again from the first approval step.";
+            $round = (int) ($approval->submission_round ?: 1);
+
+            foreach ($recipients as $recipient) {
+                $notification = FilamentNotification::make()
+                    ->info()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->title($title)
+                    ->body($body);
+
+                $url = ApprovalLinks::forRequester($approval, $recipient);
+                if ($url) {
+                    $notification->actions([
+                        Action::make('open')->button()->label('Open request')->url($url),
+                    ]);
+                }
+
+                $this->sendIdempotentNotification($recipient, $notification, "approval_returned_{$approval->id}_r{$round}_{$recipient->id}", [
+                    'event'               => 'request_returned',
+                    'approval_request_id' => $approval->id,
+                    'step_id'             => $step?->id,
+                    'actor_id'            => $actor->id,
+                    'comment'             => $comment,
+                    'company_id'          => $approval->company_id,
+                ]);
+            }
+        } catch (Throwable $e) {
+            report($e);
+            Log::error("HierarchicalNotification: Failed to notify return: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Tells the approvers of a still-pending step that the requester withdrew
+     * the request, so nothing is left for them to decide.
+     *
+     * @param  Collection<int, User>  $approvers
+     */
+    public function notifyRequestWithdrawn(
+        ApprovalRequest $approval,
+        User $actor,
+        ?string $reason,
+        Collection $approvers,
+    ): void {
+        try {
+            $label = ApprovalLinks::label($approval);
+            $reasonText = trim((string) $reason) !== '' ? ' Reason: '.trim((string) $reason) : '';
+
+            foreach ($approvers as $approver) {
+                if (! $approver->is_active || ! $this->approvalEngine->userCanAccessCompany($approver, (int) $approval->company_id)) {
+                    continue;
+                }
+
+                $notification = FilamentNotification::make()
+                    ->color('gray')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->title("{$label} withdrawn")
+                    ->body("{$actor->name} withdrew the {$label}. Nothing is left to approve.{$reasonText}");
+
+                $this->sendIdempotentNotification($approver, $notification, "approval_withdrawn_{$approval->id}_{$approver->id}", [
+                    'event'               => 'request_withdrawn',
+                    'approval_request_id' => $approval->id,
+                    'actor_id'            => $actor->id,
+                    'company_id'          => $approval->company_id,
+                ]);
+            }
+        } catch (Throwable $e) {
+            report($e);
+            Log::error("HierarchicalNotification: Failed to notify withdrawal: {$e->getMessage()}");
         }
     }
 
@@ -392,6 +495,18 @@ class HierarchicalNotificationService
             report($e);
             Log::error("HierarchicalNotification: Failed to notify manager review completion: {$e->getMessage()}");
         }
+    }
+
+    /**
+     * Empty on the first submission (the keys stay what they always were),
+     * "_r2", "_r3"... after a return and resubmit, so a restarted step notifies
+     * its approvers again.
+     */
+    private function roundSuffix(ApprovalRequest $approval): string
+    {
+        $round = (int) ($approval->submission_round ?: 1);
+
+        return $round > 1 ? "_r{$round}" : '';
     }
 
     /**

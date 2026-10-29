@@ -13,6 +13,8 @@ use InvalidArgumentException;
 use Webkul\Employee\Models\AttendancePolicy;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Models\WorkSchedule;
+use Webkul\Employee\Services\Attendance\Data\DaySchedule;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
@@ -69,12 +71,33 @@ use Webkul\Support\Models\Company;
  * public holidays from calendar_leaves.
  *
  * Every figure is kept in seconds internally; punches count to the minute.
+ *
+ * Work schedules (HR parity plan 2.2): the office window, required minutes
+ * and working weekdays above are the day's schedule, resolved by date by
+ * AttendanceScheduleResolver (an employee's effective-dated WorkSchedule, or
+ * the company default = the config office hours). A schedule with a flexible
+ * window lets the day slide with a later first check-in, by up to that many
+ * minutes (the end slides with it); not on a day with part-day leave or OD.
+ *
+ * Overtime (no pay calculation): recorded extra = minutes worked (closed
+ * intervals, plus OD) beyond the day's required minutes; on a weekend,
+ * public holiday or full-day leave every worked minute. Approved overtime
+ * (OvertimeService, Employee Requests) is excluded from that day's time
+ * bank so it is never counted twice: it comes out of the minutes worked
+ * outside the window first (before the daily credit cap), then out of the
+ * minutes inside it. "Final working hours", the grace balance and the
+ * off-day hours of that day are therefore net of approved overtime.
+ *
+ * Finalised months (AttendanceMonthLockService): forCompany() and
+ * forEmployee() read the snapshot HR froze when finalising, so the export
+ * stays stable; a re-opened month is calculated live again.
  */
 class MonthlyAttendanceReport
 {
     public function __construct(
         protected HrHierarchyService $hierarchy,
         protected AttendanceIntervalService $intervals,
+        protected AttendanceScheduleResolver $schedules,
     ) {}
 
     /** HR (view or manage attendance). Line managers hold ManageAttendance too, but only see their own people. */
@@ -104,23 +127,28 @@ class MonthlyAttendanceReport
      *
      * @param  string  $month  Y-m
      * @param  array<int, int>  $employeeIds  empty = every reportable employee
-     * @return array{company: array{id: int, name: string}, month: string, month_label: string, generated_at: CarbonImmutable, generated_by: ?string, policy: array<string, mixed>, employees: array<int, array<string, mixed>>}
+     * @return array{company: array{id: int, name: string}, month: string, month_label: string, generated_at: CarbonImmutable, generated_by: ?string, policy: array<string, mixed>, finalised: ?array{at: CarbonImmutable, by: ?string}, employees: array<int, array<string, mixed>>}
      *
      * @throws AuthorizationException
      */
     public function forCompany(User $user, int $companyId, string $month, ?int $departmentId = null, array $employeeIds = []): array
     {
         $monthStart = $this->monthStart($month);
+        $lock = $this->locks()->finalisedLock($companyId, $monthStart->format('Y-m'));
 
-        $employees = $this->reportableEmployees($user, $companyId, $departmentId)
-            ->when($employeeIds !== [], fn (Builder $query) => $query->whereIn('id', array_map('intval', $employeeIds)))
-            ->where(fn (Builder $query) => $query->whereNull('departure_date')->orWhereDate('departure_date', '>=', $monthStart->toDateString()))
-            ->where(fn (Builder $query) => $query->whereNull('joining_date')->orWhereDate('joining_date', '<=', $monthStart->endOfMonth()->toDateString()))
-            ->where(fn (Builder $query) => $query->where('is_active', true)->orWhereNotNull('departure_date'))
-            ->with(['department', 'job'])
-            ->orderBy('name')
-            ->orderBy('id')
-            ->get();
+        if ($lock !== null) {
+            // A finalised month: the frozen snapshot, limited to who this user may see.
+            $visible = $this->reportableEmployees($user, $companyId, $departmentId)
+                ->when($employeeIds !== [], fn (Builder $query) => $query->whereIn('id', array_map('intval', $employeeIds)))
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+
+            $reports = array_values($this->locks()->snapshotsFor($companyId, $monthStart->format('Y-m'), $visible));
+        } else {
+            $reports = $this->build($this->monthEmployees($companyId, $monthStart, $this->reportableEmployees($user, $companyId, $departmentId)
+                ->when($employeeIds !== [], fn (Builder $query) => $query->whereIn('id', array_map('intval', $employeeIds)))), $companyId, $monthStart);
+        }
 
         return [
             'company'      => $this->companyInfo($companyId),
@@ -129,13 +157,38 @@ class MonthlyAttendanceReport
             'generated_at' => CarbonImmutable::now($this->timezone()),
             'generated_by' => $user->name,
             'policy'       => $this->policyFor($companyId),
-            'employees'    => $this->build($employees, $companyId, $monthStart),
+            'finalised'    => $lock !== null ? [
+                'at' => CarbonImmutable::parse($lock->finalised_at)->setTimezone($this->timezone()),
+                'by' => $lock->finaliser?->name,
+            ] : null,
+            'employees'    => $reports,
         ];
     }
 
     /**
+     * Every employee of the company in the month, calculated live (never the
+     * snapshot, no user scope): what AttendanceMonthLockService freezes when
+     * HR finalises the month.
+     *
+     * @return array<int, array{employee: array<string, mixed>, rows: array<int, array<string, mixed>>, summary: array<string, mixed>}>
+     */
+    public function liveCompanyMonth(int $companyId, string $month): array
+    {
+        $monthStart = $this->monthStart($month);
+
+        return $this->build($this->monthEmployees($companyId, $monthStart, Employee::query()->where('company_id', $companyId)), $companyId, $monthStart);
+    }
+
+    /** How many employees liveCompanyMonth() reports on. */
+    public function companyMonthEmployeeCount(int $companyId, string $month): int
+    {
+        return $this->monthEmployees($companyId, $this->monthStart($month), Employee::query()->where('company_id', $companyId))->count();
+    }
+
+    /**
      * One employee's month (no user authorisation: callers authorise). An
-     * employee of another company is refused.
+     * employee of another company is refused. A finalised month returns the
+     * employee's snapshot when there is one.
      *
      * @return array{employee: array<string, mixed>, rows: array<int, array<string, mixed>>, summary: array<string, mixed>}
      *
@@ -147,7 +200,64 @@ class MonthlyAttendanceReport
             throw new AuthorizationException('This employee does not belong to the selected company.');
         }
 
-        return $this->build(collect([$employee->loadMissing(['department', 'job'])]), $companyId, $this->monthStart($month))[0];
+        $monthStart = $this->monthStart($month);
+        $snapshot = $this->locks()->snapshotsFor($companyId, $monthStart->format('Y-m'), [(int) $employee->id])[(int) $employee->id] ?? null;
+        if ($snapshot !== null) {
+            return $snapshot;
+        }
+
+        return $this->build(collect([$employee->loadMissing(['department', 'job'])]), $companyId, $monthStart)[0];
+    }
+
+    /**
+     * One day of one employee, calculated live with the same inputs as the
+     * month (schedule, intervals, leave, holidays, approved overtime). Used
+     * for the overtime request's recorded extra minutes.
+     *
+     * @return array<string, mixed> calculateDay() plus date, schedule and overtime_pending_minutes
+     */
+    public function dayRow(Employee $employee, string $date): array
+    {
+        $companyId = (int) $employee->company_id;
+        $day = CarbonImmutable::createFromFormat('Y-m-d', $date, $this->timezone())->startOfDay();
+        $key = $day->toDateString();
+        $employeeIds = [(int) $employee->id];
+
+        $context = [
+            'punches'  => $this->punches($companyId, $employeeIds, $key, $key, $this->timezone()),
+            'leaves'   => $this->leaves($employeeIds, $key, $key),
+            'holidays' => $this->holidays($companyId, $key, $key),
+            'periods'  => $this->schedules->periodsFor($employeeIds, $key, $key),
+            'overtime' => OvertimeService::minutesByDay($companyId, $employeeIds, $key, $key),
+            'policy'   => $this->policyFor($companyId),
+            'today'    => CarbonImmutable::now($this->timezone())->toDateString(),
+        ];
+
+        return ['date' => $key] + $this->calculateEmployeeDay($employee, $key, $context);
+    }
+
+    /**
+     * Employees of the company to report on for the month: employed during
+     * it, active or departed.
+     *
+     * @return Collection<int, Employee>
+     */
+    protected function monthEmployees(int $companyId, CarbonImmutable $monthStart, Builder $query): Collection
+    {
+        return $query
+            ->where('company_id', $companyId)
+            ->where(fn (Builder $query) => $query->whereNull('departure_date')->orWhereDate('departure_date', '>=', $monthStart->toDateString()))
+            ->where(fn (Builder $query) => $query->whereNull('joining_date')->orWhereDate('joining_date', '<=', $monthStart->endOfMonth()->toDateString()))
+            ->where(fn (Builder $query) => $query->where('is_active', true)->orWhereNotNull('departure_date'))
+            ->with(['department', 'job'])
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get();
+    }
+
+    protected function locks(): AttendanceMonthLockService
+    {
+        return app(AttendanceMonthLockService::class);
     }
 
     /**
@@ -262,17 +372,21 @@ class MonthlyAttendanceReport
      * od is null | full | first_half | second_half; a leave portion is full |
      * first_half | second_half | hours (with an optional window [from, to] in
      * seconds and an approver name). leaves lists several part-day leaves.
+     * schedule is the day's window (seconds), required and flexible minutes
+     * (DaySchedule::forCalculation(); default: the config office hours);
+     * overtime_minutes is the day's approved overtime (see the class docs).
      *
-     * @param  array{in?: ?int, out?: ?int, intervals?: array<int, array{0: int, 1: ?int}>, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}, leaves?: array<int, array<string, mixed>>, credit_cap_minutes?: int}  $day
+     * @param  array{in?: ?int, out?: ?int, intervals?: array<int, array{0: int, 1: ?int}>, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}, leaves?: array<int, array<string, mixed>>, credit_cap_minutes?: int, schedule?: array{start: int, end: int, required: int, flexible?: int}, overtime_minutes?: int}  $day
      * @return array<string, mixed>
      */
     public function calculateDay(array $day): array
     {
         $settings = $this->settings();
-        $start = $settings['start'];
-        $end = $settings['end'];
-        $middle = $start + intdiv($end - $start, 2);
-        $required = $settings['required'] * 60;
+        $start = (int) ($day['schedule']['start'] ?? $settings['start']);
+        $end = (int) ($day['schedule']['end'] ?? $settings['end']);
+        $requiredMinutes = (int) ($day['schedule']['required'] ?? $settings['required']);
+        $flexibleSeconds = max(0, (int) ($day['schedule']['flexible'] ?? 0)) * 60;
+        $required = $requiredMinutes * 60;
         $creditCap = (int) ($day['credit_cap_minutes'] ?? $settings['credit']) * 60;
 
         [$pairs, $in, $out, $missingCheckIn] = $this->normalisePairs($day);
@@ -280,6 +394,14 @@ class MonthlyAttendanceReport
         $parts = array_values(array_filter($day['leaves'] ?? (isset($day['leave']) && $day['leave'] !== null ? [$day['leave']] : [])));
         $fullLeave = collect($parts)->first(fn (array $part): bool => $part['portion'] === 'full');
         $remarks = [];
+
+        // Flexible schedule: a later first check-in moves the whole day, up to the flexible window.
+        if ($flexibleSeconds > 0 && $in !== null && $in > $start && $parts === [] && $od === null) {
+            $shift = min($flexibleSeconds, $in - $start);
+            $start += $shift;
+            $end += $shift;
+        }
+        $middle = $start + intdiv($end - $start, 2);
 
         $type = 'working';
         if (! ($day['employed'] ?? true)) {
@@ -364,8 +486,22 @@ class MonthlyAttendanceReport
             $before += max(0, min($pairOut, $start) - $pairIn);
             $after += max(0, $pairOut - max($pairIn, $end));
         }
-        $credit = min($creditCap, $before + $after);
-        $final = $inside + $credit;
+        $outside = $before + $after;
+        $requiredSeconds = $isWorking ? max(0, $required - $excusedSeconds) : 0;
+
+        // Overtime: recorded extra, and approved overtime taken out of the time bank (outside first, then inside).
+        $workedTotal = $inside + $outside;
+        $recordedExtra = match (true) {
+            $isWorking                                             => max(0, $workedTotal - $requiredSeconds),
+            in_array($type, ['weekend', 'holiday', 'leave'], true) => $workedTotal,
+            default                                                => 0,
+        };
+        $overtime = min(max(0, (int) ($day['overtime_minutes'] ?? 0)) * 60, $recordedExtra);
+        $overtimeOutside = min($overtime, $outside);
+        $overtimeInside = $overtime - $overtimeOutside;
+
+        $credit = min($creditCap, $outside - $overtimeOutside);
+        $final = $inside - $overtimeInside + $credit;
 
         $lastClosedOut = $hasPair ? max(array_column($closed, 1)) : null;
         $clampedIn = $in !== null ? max($in, $start) : null;
@@ -375,7 +511,6 @@ class MonthlyAttendanceReport
             $clampedOut = $clampedOut === null ? $odInterval[1] : max($clampedOut, $odInterval[1]);
         }
 
-        $requiredSeconds = $isWorking ? max(0, $required - $excusedSeconds) : 0;
         $hasPunch = $in !== null || $out !== null;
 
         $absent = $isWorking && $requiredSeconds > 0 && ! $hasPunch && $odInterval === null;
@@ -414,7 +549,7 @@ class MonthlyAttendanceReport
                 }
             }
 
-            $workedInLeave = max(0, $inside - $this->measure($this->intersect($due, $this->merge($work))));
+            $workedInLeave = max(0, $inside - $this->measure($this->intersect($due, $this->merge($work))) - $overtimeInside);
         }
 
         $netSeconds = $isWorking ? $final - $requiredSeconds : 0;
@@ -479,9 +614,17 @@ class MonthlyAttendanceReport
             'due_start_seconds'       => $dueStartSeconds,
             'od'                      => $odInterval !== null ? $od : null,
             'od_days'                 => $odInterval === null ? 0.0 : ($od === 'full' ? 1.0 : 0.5),
-            'leave_days'              => $this->leaveDays($type, $isWorking, $parts, $settings['required']),
+            'leave_days'              => $this->leaveDays($type, $isWorking, $parts, $requiredMinutes),
             'off_day_work'            => $offDayWork,
             'off_day_seconds'         => $offDayWork ? $final : 0,
+            // Every minute worked on a weekend / public holiday (before any overtime is taken out).
+            'weekend_holiday_seconds' => in_array($type, ['weekend', 'holiday'], true) ? $workedTotal : 0,
+            'worked_total_seconds'    => $workedTotal,
+            'recorded_extra_minutes'  => intdiv($recordedExtra, 60),
+            'overtime_minutes'        => intdiv($overtime, 60),
+            // The day's window after a flexible start (seconds after midnight).
+            'schedule_start_seconds'  => $start,
+            'schedule_end_seconds'    => $end,
         ];
     }
 
@@ -515,6 +658,9 @@ class MonthlyAttendanceReport
         $bankExtraMinutes = (int) $working->sum(fn (array $row): int => (int) ($row['extra_minutes'] ?? 0))
             + ($countOffDayWork ? intdiv($offDaySeconds, 60) : 0);
         $netBalanceMinutes = (int) round(($workedSeconds - $requiredSeconds) / 60);
+        $overtimeApprovedMinutes = (int) $rows->sum(fn (array $row): int => (int) ($row['overtime_minutes'] ?? 0));
+        $overtimePendingMinutes = (int) $rows->sum(fn (array $row): int => (int) ($row['overtime_pending_minutes'] ?? 0));
+        $weekendHolidaySeconds = (int) $rows->sum(fn (array $row): int => (int) ($row['weekend_holiday_seconds'] ?? 0));
 
         return [
             'working_days'            => $working->where('required_seconds', '>', 0)->count(),
@@ -542,20 +688,31 @@ class MonthlyAttendanceReport
             'grace_allowance_minutes' => $allowanceMinutes,
             'grace_carry_in_minutes'  => $carryInMinutes,
             'grace_balance_minutes'   => $allowanceMinutes + $carryInMinutes + $netBalanceMinutes,
+            // Overtime (no pay calculation): approved minutes are already out of the time bank above.
+            'recorded_extra_minutes'    => (int) $rows->sum(fn (array $row): int => (int) ($row['recorded_extra_minutes'] ?? 0)),
+            'overtime_approved_minutes' => $overtimeApprovedMinutes,
+            'overtime_approved_hours'   => round($overtimeApprovedMinutes / 60, 2),
+            'overtime_pending_minutes'  => $overtimePendingMinutes,
+            'overtime_pending_hours'    => round($overtimePendingMinutes / 60, 2),
+            'weekend_holiday_seconds'   => $weekendHolidaySeconds,
+            'weekend_holiday_hours'     => round($weekendHolidaySeconds / 3600, 2),
         ];
     }
 
     /**
      * Template column headers, worded from the configured office window
-     * (at the defaults this is the sheet's exact wording).
+     * (at the defaults this is the sheet's exact wording), or from the
+     * employee's schedule (an employee report's "schedule": start / end).
      *
+     * @param  array{start?: string, end?: string}|null  $schedule
      * @return array<int, string>
      */
-    public function dailyHeaders(?int $creditMinutes = null): array
+    public function dailyHeaders(?int $creditMinutes = null, ?array $schedule = null): array
     {
         $settings = $this->settings();
-        $start = $settings['start'];
-        $end = $settings['end'];
+        $toSeconds = fn (string $time): int => (int) explode(':', $time)[0] * 3600 + (int) (explode(':', $time)[1] ?? 0) * 60;
+        $start = isset($schedule['start']) ? $toSeconds((string) $schedule['start']) : $settings['start'];
+        $end = isset($schedule['end']) ? $toSeconds((string) $schedule['end']) : $settings['end'];
         $credit = $creditMinutes ?? $settings['credit'];
 
         $short = fn (int $seconds): string => ltrim(CarbonImmutable::today()->addSeconds($seconds)->format(intdiv($seconds % 3600, 60) === 0 ? 'g' : 'g:i'));
@@ -590,7 +747,10 @@ class MonthlyAttendanceReport
      */
     public function extraHeaders(): array
     {
-        return ['Check-ins', 'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Grace balance (mins)'];
+        return [
+            'Check-ins', 'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Grace balance (mins)',
+            'Schedule', 'OT approved (mins)', 'OT pending (mins)',
+        ];
     }
 
     public function timezone(): string
@@ -612,24 +772,22 @@ class MonthlyAttendanceReport
         $monthEnd = $monthStart->endOfMonth()->startOfDay();
         $from = $monthStart->toDateString();
         $to = $monthEnd->toDateString();
-        $today = CarbonImmutable::now($timezone)->toDateString();
         $employeeIds = $employees->pluck('id')->map(fn ($id): int => (int) $id)->all();
         $policy = $this->policyFor($companyId);
         $countOffDayWork = (bool) config('attendance.monthly_report.count_off_day_work', false);
-
-        $punches = $this->punches($companyId, $employeeIds, $from, $to, $timezone);
-        $leaves = $this->leaves($employeeIds, $from, $to);
-        $holidays = $this->holidays($companyId, $from, $to);
-        $weekendDays = array_map('intval', (array) config('attendance.monthly_report.weekend_days', [6, 7]));
         $showOffDays = (bool) config('attendance.monthly_report.show_off_days', false);
 
-        $carryIn = [];
-        if ($withCarry && $policy['carry_over']) {
-            foreach ($this->build($employees, $companyId, $monthStart->subMonthNoOverflow()->startOfMonth(), false) as $previous) {
-                $summary = $previous['summary'];
-                $carryIn[$previous['employee']['id']] = max(0, min($summary['grace_balance_minutes'], $summary['time_bank_extra_minutes']));
-            }
-        }
+        $context = [
+            'punches'  => $this->punches($companyId, $employeeIds, $from, $to, $timezone),
+            'leaves'   => $this->leaves($employeeIds, $from, $to),
+            'holidays' => $this->holidays($companyId, $from, $to),
+            'periods'  => $this->schedules->periodsFor($employeeIds, $from, $to),
+            'overtime' => OvertimeService::minutesByDay($companyId, $employeeIds, $from, $to),
+            'policy'   => $policy,
+            'today'    => CarbonImmutable::now($timezone)->toDateString(),
+        ];
+
+        $carryIn = $withCarry && $policy['carry_over'] ? $this->carryIn($employees, $companyId, $monthStart) : [];
 
         $reports = [];
 
@@ -638,28 +796,21 @@ class MonthlyAttendanceReport
             $allowance = $policy['monthly_grace_minutes'];
             $carry = (int) ($carryIn[$employee->id] ?? 0);
             $running = ($allowance + $carry) * 60;
+            $scheduleDays = [];
 
             for ($date = $monthStart; $date->lte($monthEnd); $date = $date->addDay()) {
                 $key = $date->toDateString();
-                $punch = $punches[$employee->id][$key] ?? null;
-                [$od, $parts] = $this->dayLeave($leaves[$employee->id] ?? [], $key);
-
-                $row = $this->calculateDay([
-                    'intervals'          => $punch['intervals'] ?? [],
-                    'weekend'            => in_array($date->dayOfWeekIso, $weekendDays, true),
-                    'holiday'            => $this->holidayOn($holidays, $key, $employee->calendar_id ? (int) $employee->calendar_id : null),
-                    'employed'           => $this->isEmployedOn($employee, $key),
-                    'future'             => $key > $today,
-                    'od'                 => $od,
-                    'leaves'             => $parts,
-                    'credit_cap_minutes' => $policy['daily_extra_credit_cap_minutes'],
-                ]);
+                $row = $this->calculateEmployeeDay($employee, $key, $context);
 
                 // Running grace balance: working days move it by final - required; off-day work only when it counts.
                 $change = $row['working'] ? $row['net_seconds'] : ($countOffDayWork ? $row['off_day_seconds'] : 0);
                 $running += $change;
                 $row['ledger_seconds'] = $change;
                 $row['grace_balance_seconds'] = $running;
+
+                if ($row['working']) {
+                    $scheduleDays[$row['schedule_key']] = ($scheduleDays[$row['schedule_key']] ?? 0) + 1;
+                }
 
                 // Like the template: working days, weekday leave and holidays; weekends only when worked (or configured).
                 $visible = $row['working']
@@ -674,6 +825,10 @@ class MonthlyAttendanceReport
                 $rows[] = ['date' => $key] + $row;
             }
 
+            // The schedule of most of the month's working days (headers of the employee's sheet).
+            arsort($scheduleDays);
+            $mainSchedule = $this->scheduleByKey($context['periods'][$employee->id] ?? [], (string) (array_key_first($scheduleDays) ?? 'default'));
+
             $reports[] = [
                 'employee' => [
                     'id'          => (int) $employee->id,
@@ -682,12 +837,84 @@ class MonthlyAttendanceReport
                     'department'  => (string) ($employee->department?->name ?? ''),
                     'designation' => (string) ($employee->job_title ?: $employee->job?->name ?: ''),
                 ],
-                'rows'    => $rows,
-                'summary' => $this->summarize($rows, $allowance, $carry),
+                'schedule' => $mainSchedule->toArray() + ['changes_in_month' => count($scheduleDays) > 1],
+                'rows'     => $rows,
+                'summary'  => $this->summarize($rows, $allowance, $carry),
             ];
         }
 
         return $reports;
+    }
+
+    /**
+     * One employee's day with the month's preloaded inputs.
+     *
+     * @param  array{punches: array<int, array<string, mixed>>, leaves: array<int, array<int, object>>, holidays: Collection<int, CalendarLeave>, periods: array<int, array<int, WorkSchedule>>, overtime: array{approved: array<int, array<string, int>>, pending: array<int, array<string, int>>}, policy: array<string, mixed>, today: string}  $context
+     * @return array<string, mixed>
+     */
+    protected function calculateEmployeeDay(Employee $employee, string $key, array $context): array
+    {
+        $employeeId = (int) $employee->id;
+        $schedule = $this->schedules->pick($context['periods'][$employeeId] ?? [], $key);
+        $punch = $context['punches'][$employeeId][$key] ?? null;
+        [$od, $parts] = $this->dayLeave($context['leaves'][$employeeId] ?? [], $key);
+
+        $row = $this->calculateDay([
+            'intervals'          => $punch['intervals'] ?? [],
+            'weekend'            => ! $schedule->isWorkingDay($key),
+            'holiday'            => $this->holidayOn($context['holidays'], $key, $employee->calendar_id ? (int) $employee->calendar_id : null),
+            'employed'           => $this->isEmployedOn($employee, $key),
+            'future'             => $key > $context['today'],
+            'od'                 => $od,
+            'leaves'             => $parts,
+            'credit_cap_minutes' => $context['policy']['daily_extra_credit_cap_minutes'],
+            'schedule'           => $schedule->forCalculation(),
+            'overtime_minutes'   => (int) ($context['overtime']['approved'][$employeeId][$key] ?? 0),
+        ]);
+
+        $row['overtime_pending_minutes'] = (int) ($context['overtime']['pending'][$employeeId][$key] ?? 0);
+        $row['schedule'] = $schedule->label();
+        $row['schedule_key'] = $schedule->scheduleId !== null ? (string) $schedule->scheduleId : 'default';
+
+        return $row;
+    }
+
+    /** @param  array<int, WorkSchedule>  $periods */
+    protected function scheduleByKey(array $periods, string $key): DaySchedule
+    {
+        foreach ($periods as $period) {
+            if ((string) $period->id === $key) {
+                return $this->schedules->fromPeriod($period);
+            }
+        }
+
+        return $this->schedules->defaultSchedule();
+    }
+
+    /**
+     * Unused earned extra of the previous month per employee (carry-over):
+     * from the snapshot when the previous month is finalised, else live.
+     *
+     * @param  Collection<int, Employee>  $employees
+     * @return array<int, int> employee id => minutes
+     */
+    protected function carryIn(Collection $employees, int $companyId, CarbonImmutable $monthStart): array
+    {
+        $previousMonth = $monthStart->subMonthNoOverflow()->startOfMonth();
+        $carry = fn (array $summary): int => max(0, min((int) $summary['grace_balance_minutes'], (int) $summary['time_bank_extra_minutes']));
+        $carryIn = [];
+
+        $snapshots = $this->locks()->snapshotsFor($companyId, $previousMonth->format('Y-m'), $employees->pluck('id')->map(fn ($id): int => (int) $id)->all());
+        foreach ($snapshots as $employeeId => $snapshot) {
+            $carryIn[$employeeId] = $carry($snapshot['summary']);
+        }
+
+        $live = $employees->reject(fn (Employee $employee): bool => array_key_exists((int) $employee->id, $snapshots))->values();
+        foreach ($this->build($live, $companyId, $previousMonth, false) as $previous) {
+            $carryIn[$previous['employee']['id']] = $carry($previous['summary']);
+        }
+
+        return $carryIn;
     }
 
     /**

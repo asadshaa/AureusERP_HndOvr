@@ -18,6 +18,12 @@ class MyTimeOffWidget extends BaseWidget
 {
     use HasWidgetShield;
 
+    /**
+     * Balances only change when a leave is decided, so the widget refreshes on page load
+     * instead of inheriting Filament's 5s poll (a full request per open tab every 5 seconds).
+     */
+    protected ?string $pollingInterval = null;
+
     protected static function getPagePermission(): ?string
     {
         return 'widget_time_off_my_time_off_widget';

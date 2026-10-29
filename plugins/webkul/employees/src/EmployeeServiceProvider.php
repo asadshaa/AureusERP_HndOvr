@@ -2,18 +2,23 @@
 
 namespace Webkul\Employee;
 
+use Filament\Notifications\Notification;
 use Filament\Panel;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
 use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
+use Webkul\Employee\Database\Seeders\OvertimeWorkflowSeeder;
 use Webkul\Employee\Database\Seeders\SelfServiceRequestWorkflowSeeder;
+use Webkul\Employee\Exceptions\AttendanceMonthLockedException;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\AnnouncementService;
 use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\DefaultDocumentTypes;
+use Webkul\Employee\Support\EmployeeLifecycleHooks;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
@@ -79,6 +84,18 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_10_29_100002_create_employees_employee_documents_table',
                 '2026_10_29_100003_add_pakistan_fields_to_employees_employees_table',
                 '2026_10_29_100004_create_employees_employee_code_sequences_table',
+                '2026_10_30_100001_create_employees_work_schedules_table',
+                '2026_10_30_100002_create_employees_attendance_month_locks_tables',
+                '2026_10_30_100003_provision_overtime_request_workflows',
+                '2026_10_30_200001_add_biometric_id_to_employees_employees_table',
+                '2026_10_30_200002_add_punch_pairing_mode_to_employees_attendance_policies_table',
+                '2026_10_30_200003_create_employees_attendance_import_batches_table',
+                '2026_10_30_200004_create_employees_attendance_import_rows_table',
+                '2026_10_30_200005_create_employees_attendance_import_days_table',
+                '2026_10_30_300001_create_employees_checklist_templates_tables',
+                '2026_10_30_300002_create_employees_employee_checklists_tables',
+                '2026_10_30_300003_create_employees_announcements_tables',
+                '2026_10_30_300004_add_show_birthday_to_employees_employees_table',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')
@@ -108,6 +125,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 if (Schema::hasTable('employees_request_types') && Schema::hasTable('support_approval_workflows')) {
                     app(AttendanceWorkflowSeeder::class)->provisionForCompany($company);
                     app(SelfServiceRequestWorkflowSeeder::class)->provisionForCompany($company);
+                    app(OvertimeWorkflowSeeder::class)->provisionForCompany($company);
                 }
             } catch (Throwable $e) {
                 report($e);
@@ -124,11 +142,26 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 report($e);
             }
         });
+
+        // Onboarding / exit checklists and dashboard celebrations (HR Parity 2.4, 2.6).
+        EmployeeLifecycleHooks::register();
+
+        // A write refused because its attendance month is finalised shows as a
+        // notification on any Livewire / Filament screen instead of an error page.
+        if (function_exists('Livewire\on')) {
+            \Livewire\on('exception', function ($component, Throwable $exception, callable $stopPropagation): void {
+                if ($exception instanceof AttendanceMonthLockedException) {
+                    Notification::make()->danger()->title('Attendance month is finalised')->body($exception->getMessage())->persistent()->send();
+                    $stopPropagation();
+                }
+            });
+        }
     }
 
     public function packageRegistered(): void
     {
         $this->app->scoped(HrHierarchyService::class);
+        $this->app->scoped(AnnouncementService::class);
 
         $this->app->tag([
             GpsGeofenceVerifier::class,

@@ -80,6 +80,7 @@ class Employee extends Model
         'lang',
         'gender',
         'birthday',
+        'show_birthday',
         'joining_date',
         'leaving_date',
         'marital',
@@ -109,6 +110,7 @@ class Employee extends Model
         'salary_grade',
         'base_salary',
         'barcode',
+        'biometric_id',
         'pin',
         'address_id',
         'time_zone',
@@ -132,6 +134,7 @@ class Employee extends Model
         'is_flexible'                    => 'boolean',
         'is_fully_flexible'              => 'boolean',
         'work_permit_scheduled_activity' => 'boolean',
+        'show_birthday'                  => 'boolean',
         'joining_date'                   => 'date',
         'leaving_date'                   => 'date',
         'probation_end_date'             => 'date',
@@ -300,6 +303,17 @@ class Employee extends Model
         return $this->hasMany(EmployeeDocument::class, 'employee_id');
     }
 
+    /** Onboarding and exit checklists (EmployeeChecklistService). */
+    public function checklists(): HasMany
+    {
+        return $this->hasMany(EmployeeChecklist::class, 'employee_id');
+    }
+
+    public function checklistTasks(): HasMany
+    {
+        return $this->hasMany(EmployeeChecklistTask::class, 'employee_id');
+    }
+
     /**
      * Active "required for new hires" document types of the employee's
      * company that this employee has no (non-deleted) document of.
@@ -372,6 +386,12 @@ class Employee extends Model
     public function workLocationAssignments(): HasMany
     {
         return $this->hasMany(EmployeeWorkLocationAssignment::class, 'employee_id');
+    }
+
+    /** Effective-dated work schedules (AttendanceScheduleResolver), newest first. */
+    public function workSchedules(): HasMany
+    {
+        return $this->hasMany(WorkSchedule::class, 'employee_id')->orderByDesc('effective_from');
     }
 
     public function attendanceManager(): BelongsTo

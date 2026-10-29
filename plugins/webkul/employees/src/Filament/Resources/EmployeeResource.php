@@ -62,10 +62,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Unique;
 use Webkul\Chatter\Filament\Actions\ActivityTableAction;
 use Webkul\Employee\Enums\DistanceUnit;
 use Webkul\Employee\Enums\Gender;
 use Webkul\Employee\Enums\MaritalStatus;
+use Webkul\Employee\Filament\Actions\WorkScheduleActions;
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\DepartureReasonResource;
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\EmployeeCategoryResource;
 use Webkul\Employee\Filament\Clusters\Configurations\Resources\JobPositionResource;
@@ -77,11 +79,13 @@ use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageResume;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ManageSkill;
 use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ViewEmployee;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\AttendanceRecordsRelationManager;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ChecklistTasksRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\DocumentsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ResumeRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\SkillsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\TimeOffRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\WorkLocationAssignmentsRelationManager;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\WorkSchedulesRelationManager;
 use Webkul\Employee\Models\Department;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeJobPosition;
@@ -801,6 +805,10 @@ class EmployeeResource extends Resource
                                                             ->suffixIcon('heroicon-o-calendar')
                                                             ->native(false)
                                                             ->maxDate(now()),
+                                                        Toggle::make('show_birthday')
+                                                            ->label('Show birthday on the home page')
+                                                            ->helperText('Day and month only, never the year. The employee can switch it off too.')
+                                                            ->default(true),
                                                         Select::make('country_of_birth')
                                                             ->relationship('countryOfBirth', 'name')
                                                             ->searchable()
@@ -982,6 +990,20 @@ class EmployeeResource extends Resource
                                                                         $set('barcode', $barcode);
                                                                     })
                                                             ),
+                                                        TextInput::make('biometric_id')
+                                                            ->label('Biometric / device ID')
+                                                            ->helperText('User number on the attendance device (ZKTeco "AC-No." / "User ID"). Device file imports match punches on it.')
+                                                            ->prefixIcon('heroicon-o-finger-print')
+                                                            ->maxLength(32)
+                                                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? trim($state) : null)
+                                                            ->unique(
+                                                                table: 'employees_employees',
+                                                                column: 'biometric_id',
+                                                                ignoreRecord: true,
+                                                                modifyRuleUsing: fn (Unique $rule, Get $get, ?Model $record): Unique => $rule->where('company_id', $get('company_id') ?? $record?->company_id),
+                                                            )
+                                                            ->validationMessages(['unique' => 'Another employee of this company already has this device ID.'])
+                                                            ->visible(fn (): bool => Auth::user()?->can(HrPermissions::ManageAttendance) ?? false),
                                                         TextInput::make('pin')
                                                             ->label(__('employees::filament/resources/employee.form.tabs.settings.fields.pin')),
                                                     ])->columns(1),
@@ -1578,6 +1600,7 @@ class EmployeeResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    WorkScheduleActions::bulkAssign(),
                     DeleteBulkAction::make()
                         ->action(function (Collection $records) {
                             // deleteAny() (which gates whether this bulk action even renders)
@@ -2118,6 +2141,11 @@ class EmployeeResource extends Resource
                                                             ->placeholder('—')
                                                             ->label(__('employees::filament/resources/employee.infolist.tabs.settings.entries.badge-id'))
                                                             ->icon('heroicon-o-qr-code'),
+                                                        TextEntry::make('biometric_id')
+                                                            ->placeholder('—')
+                                                            ->label('Biometric / device ID')
+                                                            ->icon('heroicon-o-finger-print')
+                                                            ->visible(fn (): bool => Auth::user()?->can(HrPermissions::ManageAttendance) ?? false),
                                                         TextEntry::make('pin')
                                                             ->placeholder('—')
                                                             ->label(__('employees::filament/resources/employee.infolist.tabs.settings.entries.pin')),
@@ -2252,6 +2280,14 @@ class EmployeeResource extends Resource
                 DocumentsRelationManager::class,
             ])
                 ->icon('heroicon-o-document-text'),
+            RelationGroup::make('Onboarding & exit', [
+                ChecklistTasksRelationManager::class,
+            ])
+                ->icon('heroicon-o-clipboard-document-check'),
+            RelationGroup::make('Work Schedule', [
+                WorkSchedulesRelationManager::class,
+            ])
+                ->icon('heroicon-o-calendar'),
         ];
 
         return $relations;

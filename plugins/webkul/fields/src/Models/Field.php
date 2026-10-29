@@ -2,6 +2,7 @@
 
 namespace Webkul\Field\Models;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\EloquentSortable\Sortable;
@@ -56,4 +57,42 @@ class Field extends Model implements Sortable
         'order_column_name'  => 'sort',
         'sort_when_creating' => true,
     ];
+
+    /**
+     * Active field definitions (code, type, is_multiselect) grouped by customizable type.
+     * Loaded with one query and reused until a field is saved, deleted or restored.
+     *
+     * @var array<string, Collection<int, static>>|null
+     */
+    protected static ?array $definitionsByCustomizableType = null;
+
+    protected static function booted(): void
+    {
+        $flush = fn () => static::flushDefinitionCache();
+
+        static::saved($flush);
+        static::deleted($flush);
+        static::restored($flush);
+        static::forceDeleted($flush);
+    }
+
+    /**
+     * The active custom field definitions for one customizable model class.
+     *
+     * @return Collection<int, static>
+     */
+    public static function definitionsFor(string $customizableType): Collection
+    {
+        static::$definitionsByCustomizableType ??= static::query()
+            ->get(['code', 'type', 'is_multiselect', 'customizable_type'])
+            ->groupBy('customizable_type')
+            ->all();
+
+        return static::$definitionsByCustomizableType[$customizableType] ?? new Collection;
+    }
+
+    public static function flushDefinitionCache(): void
+    {
+        static::$definitionsByCustomizableType = null;
+    }
 }

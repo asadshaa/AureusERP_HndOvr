@@ -8,8 +8,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use WeakMap;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Contracts\ReturnableApprovalSubject;
+use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
@@ -65,8 +68,22 @@ final class ApprovalEngine
         'hr_manage_attendance',
     ];
 
-    /** @var array<string, bool> */
-    private array $companyHrApproverCache = [];
+    /**
+     * Per-object memos for the checks list screens repeat for every row and
+     * action (canAct() for approve / reject / return, the HR approver and
+     * company access checks of the same signed-in user). Keyed by the model
+     * instance, so they live as long as that instance -- one page render --
+     * and a re-fetched request or user is always checked afresh.
+     *
+     * @var WeakMap<ApprovalRequest, array<string, bool>>|null
+     */
+    private static ?WeakMap $canActMemo = null;
+
+    /** @var WeakMap<User, array<int, bool>>|null */
+    private static ?WeakMap $hrApproverMemo = null;
+
+    /** @var WeakMap<User, array<int, bool>>|null */
+    private static ?WeakMap $companyAccessMemo = null;
 
     /** @param array<string, mixed> $context */
     public function matchingWorkflow(int $companyId, string $requestType, ?string $amount = null, array $context = []): ?ApprovalWorkflow
@@ -113,10 +130,16 @@ final class ApprovalEngine
                 ->where('request_type', $requestType)
                 ->where('subject_type', $subject->getMorphClass())
                 ->where('subject_id', $subject->getKey())
-                ->where('status', 'pending')
+                ->whereIn('status', [ApprovalRequestStatus::Pending->value, ApprovalRequestStatus::Returned->value])
                 ->lockForUpdate()
                 ->latest('id')
                 ->first();
+            // A request returned for changes is the same request coming back:
+            // resubmitting it keeps one audit trail instead of opening a second
+            // request next to the returned one (resubmit() checks the requester).
+            if ($existing?->status === ApprovalRequestStatus::Returned->value) {
+                return $this->resubmit($existing, $requester, $amount, $context);
+            }
             if ($existing) {
                 // A pending request already exists for this exact subject. Returning it
                 // unchanged used to silently discard whatever new $context/$amount this
@@ -129,19 +152,220 @@ final class ApprovalEngine
             }
 
             return ApprovalRequest::query()->create([
-                'company_id'            => $companyId,
-                'workflow_id'           => $workflow->id,
-                'requester_id'          => $requester->id,
-                'subject_type'          => $subject->getMorphClass(),
-                'subject_id'            => $subject->getKey(),
-                'request_type'          => $requestType,
-                'amount'                => $amount,
-                'context'               => $context,
-                'status'                => 'pending',
-                'current_step_sequence' => $firstStep->sequence,
-                'submitted_at'          => now(),
+                'company_id'              => $companyId,
+                'workflow_id'             => $workflow->id,
+                'requester_id'            => $requester->id,
+                'subject_type'            => $subject->getMorphClass(),
+                'subject_id'              => $subject->getKey(),
+                'request_type'            => $requestType,
+                'amount'                  => $amount,
+                'context'                 => $context,
+                'status'                  => 'pending',
+                'current_step_sequence'   => $firstStep->sequence,
+                'submission_round'        => 1,
+                'submitted_at'            => now(),
+                'current_step_started_at' => now(),
             ])->fresh(['workflow.steps', 'requester']);
         });
+    }
+
+    /**
+     * Sends a request that was returned for changes back into approval. It
+     * restarts at the FIRST applicable step of the workflow (re-matched, as the
+     * changed amount or context may now match another one) in a new
+     * submission round: approvals given before the return no longer count, so
+     * every step sees the changed request. Only the original requester may
+     * resubmit. Recorded as a "resubmitted" decision -- with what changed when
+     * the caller passes it -- so the whole return / edit / resubmit cycle stays
+     * in the audit trail. A null $amount or $context keeps the submitted one.
+     *
+     * @param  array<string, mixed>|null  $context
+     * @param  array<string, mixed>  $previousValues
+     * @param  array<string, mixed>  $newValues
+     */
+    public function resubmit(
+        ApprovalRequest $request,
+        User $requester,
+        ?string $amount = null,
+        ?array $context = null,
+        ?string $note = null,
+        array $previousValues = [],
+        array $newValues = [],
+    ): ApprovalRequest {
+        return DB::transaction(function () use ($request, $requester, $amount, $context, $note, $previousValues, $newValues): ApprovalRequest {
+            $locked = ApprovalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== ApprovalRequestStatus::Returned->value) {
+                throw new RuntimeException('Only a request returned for changes can be resubmitted.');
+            }
+            if (! $this->canResubmit($locked, $requester)) {
+                throw new RuntimeException('Only the person who submitted this request can resubmit it.');
+            }
+
+            $context ??= (array) $locked->context;
+            $amount ??= $locked->amount !== null ? (string) $locked->amount : null;
+
+            $workflow = $this->matchingWorkflow((int) $locked->company_id, (string) $locked->request_type, $amount, $context);
+            if (! $workflow || $workflow->steps->isEmpty()) {
+                throw new RuntimeException("No active approval workflow is configured for [{$locked->request_type}] in this company.");
+            }
+
+            $firstStep = $workflow->steps
+                ->first(fn (ApprovalStep $step): bool => $this->conditionsMatch((array) $step->conditions, $context + ['amount' => $amount]));
+            if (! $firstStep) {
+                throw new RuntimeException('The approval workflow has no applicable approval step.');
+            }
+
+            $round = (int) ($locked->submission_round ?: 1) + 1;
+
+            $locked->update([
+                'workflow_id'             => $workflow->id,
+                'amount'                  => $amount,
+                'context'                 => $context,
+                'status'                  => ApprovalRequestStatus::Pending->value,
+                'current_step_sequence'   => $firstStep->sequence,
+                'submission_round'        => $round,
+                'current_step_started_at' => now(),
+                'completed_at'            => null,
+            ]);
+
+            $locked->decisions()->create([
+                'step_id'          => $firstStep->id,
+                'submission_round' => $round,
+                'actor_id'         => $requester->id,
+                'decision'         => 'resubmitted',
+                'reason'           => $this->cleanText($note),
+                'previous_values'  => $previousValues,
+                'new_values'       => $newValues,
+                'decided_at'       => now(),
+            ]);
+
+            return $locked->fresh(['workflow.steps', 'requester']);
+        });
+    }
+
+    /**
+     * Whether the request's subject is wired for "Return to requester"
+     * (editable while returned, with a resubmit path). returnToRequester()
+     * itself works for any subject; the screens only offer it for these.
+     */
+    public function supportsReturn(ApprovalRequest $request): bool
+    {
+        return $request->subject instanceof ReturnableApprovalSubject;
+    }
+
+    /** A current-step approver of a request whose subject supports being returned. */
+    public function canReturn(ApprovalRequest $request, User $actor): bool
+    {
+        return $this->canAct($request, $actor) && $this->supportsReturn($request);
+    }
+
+    /** The original requester, while the request is returned for changes. */
+    public function canResubmit(ApprovalRequest $request, User $actor): bool
+    {
+        return $request->status === ApprovalRequestStatus::Returned->value
+            && $request->requester_id !== null
+            && (int) $request->requester_id === (int) $actor->id
+            && $this->userCanAccessCompany($actor, (int) $request->company_id);
+    }
+
+    /**
+     * The requester, or the employee the request is about, while it is still
+     * pending or returned for changes.
+     */
+    public function canWithdraw(ApprovalRequest $request, User $actor): bool
+    {
+        if (! in_array($request->status, [ApprovalRequestStatus::Pending->value, ApprovalRequestStatus::Returned->value], true)
+            || ! $this->userCanAccessCompany($actor, (int) $request->company_id)) {
+            return false;
+        }
+
+        if ($request->requester_id !== null && (int) $request->requester_id === (int) $actor->id) {
+            return true;
+        }
+
+        $subject = $request->subject;
+        $employeeUserId = $subject && method_exists($subject, 'employee') ? $subject->employee?->user_id : null;
+
+        return $employeeUserId !== null && (int) $employeeUserId === (int) $actor->id;
+    }
+
+    /**
+     * Takes back a pending or returned request: closed as "withdrawn" (no one
+     * can act on it any more), recorded as a "withdrawn" decision, the
+     * subject synchronised, and the approvers of a pending step told.
+     */
+    public function withdraw(ApprovalRequest $request, User $actor, ?string $reason = null): ApprovalRequest
+    {
+        return DB::transaction(function () use ($request, $actor, $reason): ApprovalRequest {
+            $locked = ApprovalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+            $locked->loadMissing(['workflow.steps', 'subject']);
+            if (! $this->canWithdraw($locked, $actor)) {
+                throw new RuntimeException('Only the requester can withdraw a request, and only while it is pending or returned for changes.');
+            }
+
+            $step = $locked->currentStep() ?? $locked->workflow?->steps?->first();
+            $approvers = $locked->status === ApprovalRequestStatus::Pending->value
+                ? $this->resolveAuthorizedApprovers($locked)->reject(fn (User $user): bool => (int) $user->id === (int) $actor->id)->values()
+                : collect();
+
+            if ($step) {
+                $locked->decisions()->create([
+                    'step_id'          => $step->id,
+                    'submission_round' => (int) ($locked->submission_round ?: 1),
+                    'actor_id'         => $actor->id,
+                    'decision'         => 'withdrawn',
+                    'reason'           => $this->cleanText($reason),
+                    'decided_at'       => now(),
+                ]);
+            }
+
+            $locked->update(['status' => ApprovalRequestStatus::Withdrawn->value, 'completed_at' => now()]);
+
+            DB::afterCommit(function () use ($locked, $actor, $reason, $approvers): void {
+                app(HierarchicalNotificationService::class)->notifyRequestWithdrawn($locked, $actor, $reason, $approvers);
+            });
+
+            $fresh = $locked->fresh(['workflow.steps', 'decisions.actor']);
+            app(ApprovalSubjectSynchronizer::class)->synchronize($fresh);
+
+            return $fresh->fresh(['workflow.steps', 'decisions.actor']);
+        });
+    }
+
+    /**
+     * The manager a hierarchy step routes to (line, department or team
+     * manager), or null when the step is not a hierarchy step or falls back
+     * to HR because there is no such manager.
+     */
+    public function hierarchyManagerFor(ApprovalRequest $request, ApprovalStep $step): ?User
+    {
+        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+        $techHeadUserId = $step->hierarchy_route === 'department_manager' && $request->request_type === 'claim_tech'
+            ? $this->resolveTechHeadUserId($request)
+            : null;
+
+        $manager = match ($step->hierarchy_route) {
+            'requester_manager'  => $subjectEmployee?->parent?->user,
+            'department_manager' => $techHeadUserId ? User::query()->find($techHeadUserId) : $subjectEmployee?->department?->manager?->user,
+            'team_manager'       => $subjectEmployee?->team?->manager?->user,
+            default              => null,
+        };
+
+        if (! $manager instanceof User || ! $manager->is_active
+            || (int) $manager->id === (int) $subjectEmployee?->user_id
+            || ! $this->userCanAccessCompany($manager, (int) $request->company_id)) {
+            return null;
+        }
+
+        return $manager;
+    }
+
+    /** User id of the employee the request is about (the subject's employee, else the requester's). */
+    public function subjectEmployeeUserId(ApprovalRequest $request): ?int
+    {
+        $userId = $this->resolveHierarchySubjectEmployee($request)?->user_id;
+
+        return $userId !== null ? (int) $userId : null;
     }
 
     public function resolveAuthorizedApprovers(ApprovalRequest $request, ?ApprovalStep $step = null): Collection
@@ -245,9 +469,15 @@ final class ApprovalEngine
     /** Whether $user is one of $companyId's HR approvers (see resolveHrApproversForCompany()). */
     public function isCompanyHrApprover(User $user, int $companyId): bool
     {
-        return $this->companyHrApproverCache[$companyId.':'.$user->id] ??= $this->hrApproversQuery($companyId)
-            ->whereKey($user->id)
-            ->exists();
+        self::$hrApproverMemo ??= new WeakMap;
+        $memo = self::$hrApproverMemo[$user] ?? [];
+
+        if (! array_key_exists($companyId, $memo)) {
+            $memo[$companyId] = $this->hrApproversQuery($companyId)->whereKey($user->id)->exists();
+            self::$hrApproverMemo[$user] = $memo;
+        }
+
+        return $memo[$companyId];
     }
 
     /** @return Builder<User> */
@@ -321,7 +551,26 @@ final class ApprovalEngine
         return $requests->filter(fn (ApprovalRequest $request): bool => $this->canAct($request, $actor))->values();
     }
 
+    /**
+     * Memoised per request instance, actor and request state (status, step,
+     * round): a list row asks it for each of its approve / reject / return
+     * buttons, and Filament evaluates visibility more than once per render.
+     */
     public function canAct(ApprovalRequest $request, User $actor): bool
+    {
+        self::$canActMemo ??= new WeakMap;
+        $key = implode(':', [(int) $actor->id, (string) $request->status, (int) $request->current_step_sequence, (int) ($request->submission_round ?: 1)]);
+        $memo = self::$canActMemo[$request] ?? [];
+
+        if (! array_key_exists($key, $memo)) {
+            $memo[$key] = $this->resolveCanAct($request, $actor);
+            self::$canActMemo[$request] = $memo;
+        }
+
+        return $memo[$key];
+    }
+
+    private function resolveCanAct(ApprovalRequest $request, User $actor): bool
     {
         if ($request->status !== 'pending' || ! $this->userCanAccessCompany($actor, (int) $request->company_id)) {
             return false;
@@ -558,9 +807,11 @@ final class ApprovalEngine
         $subject = $request->subject;
 
         if ($subject && method_exists($subject, 'employee')) {
-            $employee = $subject->relationLoaded('employee')
-                ? $subject->employee?->loadMissing(['parent.user', 'department.manager.user', 'team.manager.user'])
-                : $subject->employee()->with(['parent.user', 'department.manager.user', 'team.manager.user'])->first();
+            if (! $subject->relationLoaded('employee')) {
+                // Kept on the subject so the next check of this request does not query again.
+                $subject->setRelation('employee', $subject->employee()->with(['parent.user', 'department.manager.user', 'team.manager.user'])->first());
+            }
+            $employee = $subject->employee?->loadMissing(['parent.user', 'department.manager.user', 'team.manager.user']);
             if ($employee) {
                 return $employee;
             }
@@ -595,6 +846,30 @@ final class ApprovalEngine
         return $this->decide($request, $actor, 'rejected', $reason, $previousValues, $newValues);
     }
 
+    /**
+     * "Return to requester": instead of approving or rejecting, a current-step
+     * approver sends the request back for changes with a required comment.
+     * The request becomes "returned" (nobody can act on it, it is not
+     * pending), the requester is told, and the subject is synchronised so it
+     * becomes editable again. resubmit() restarts it at the first step.
+     *
+     * @param  array<string, mixed>  $previousValues
+     * @param  array<string, mixed>  $newValues
+     */
+    public function returnToRequester(
+        ApprovalRequest $request,
+        User $actor,
+        string $comment,
+        array $previousValues = [],
+        array $newValues = [],
+    ): ApprovalRequest {
+        if (trim($comment) === '') {
+            throw new RuntimeException('Say what needs to change: a comment is required to return a request.');
+        }
+
+        return $this->decide($request, $actor, 'returned', trim($comment), $previousValues, $newValues);
+    }
+
     /** @param array<string, mixed> $previousValues @param array<string, mixed> $newValues */
     private function decide(
         ApprovalRequest $request,
@@ -612,18 +887,27 @@ final class ApprovalEngine
             }
 
             $step = $request->currentStep() ?? throw new RuntimeException('The approval request has no current step.');
-            if ($request->decisions()->where('step_id', $step->id)->where('actor_id', $actor->id)->exists()) {
+            // Only this submission round counts: after a return and resubmit the
+            // same approver decides the restarted step again.
+            $round = (int) ($request->submission_round ?: 1);
+            if ($request->decisions()
+                ->where('step_id', $step->id)
+                ->where('submission_round', $round)
+                ->where('actor_id', $actor->id)
+                ->whereIn('decision', ['approved', 'rejected', 'returned'])
+                ->exists()) {
                 throw new RuntimeException('This user has already decided the current approval step.');
             }
 
             $request->decisions()->create([
-                'step_id'         => $step->id,
-                'actor_id'        => $actor->id,
-                'decision'        => $decision,
-                'reason'          => $reason,
-                'previous_values' => $previousValues,
-                'new_values'      => $newValues,
-                'decided_at'      => now(),
+                'step_id'          => $step->id,
+                'submission_round' => $round,
+                'actor_id'         => $actor->id,
+                'decision'         => $decision,
+                'reason'           => $reason,
+                'previous_values'  => $previousValues,
+                'new_values'       => $newValues,
+                'decided_at'       => now(),
             ]);
 
             if ($decision === 'rejected') {
@@ -632,9 +916,17 @@ final class ApprovalEngine
                 DB::afterCommit(function () use ($request, $actor, $reason): void {
                     app(HierarchicalNotificationService::class)->notifyRequestRejected($request, $actor, $reason ?? '');
                 });
+            } elseif ($decision === 'returned') {
+                // current_step_sequence is kept: it records the step that returned it.
+                $request->update(['status' => ApprovalRequestStatus::Returned->value]);
+
+                DB::afterCommit(function () use ($request, $actor, $reason, $step): void {
+                    app(HierarchicalNotificationService::class)->notifyRequestReturned($request, $actor, (string) $reason, $step);
+                });
             } else {
                 $approvalCount = $request->decisions()
                     ->where('step_id', $step->id)
+                    ->where('submission_round', $round)
                     ->where('decision', 'approved')
                     ->distinct('actor_id')
                     ->count('actor_id');
@@ -647,7 +939,8 @@ final class ApprovalEngine
                             (array) $request->context + ['amount' => $request->amount],
                         ));
                     $request->update($nextStep ? [
-                        'current_step_sequence' => $nextStep->sequence,
+                        'current_step_sequence'   => $nextStep->sequence,
+                        'current_step_started_at' => now(),
                     ] : [
                         'status'                => 'approved',
                         'current_step_sequence' => null,
@@ -721,7 +1014,33 @@ final class ApprovalEngine
 
     public function userCanAccessCompany(User $user, int $companyId): bool
     {
-        return (int) $user->default_company_id === $companyId
-            || $user->allowedCompanies()->whereKey($companyId)->exists();
+        if ((int) $user->default_company_id === $companyId) {
+            return true;
+        }
+
+        self::$companyAccessMemo ??= new WeakMap;
+        $memo = self::$companyAccessMemo[$user] ?? [];
+
+        if (! array_key_exists($companyId, $memo)) {
+            $memo[$companyId] = $user->allowedCompanies()->whereKey($companyId)->exists();
+            self::$companyAccessMemo[$user] = $memo;
+        }
+
+        return $memo[$companyId];
+    }
+
+    /** Forgets the per-object memos (after changing roles or company access of an already loaded user). */
+    public static function flushMemo(): void
+    {
+        self::$canActMemo = null;
+        self::$hrApproverMemo = null;
+        self::$companyAccessMemo = null;
+    }
+
+    private function cleanText(?string $text): ?string
+    {
+        $text = trim((string) $text);
+
+        return $text === '' ? null : $text;
     }
 }

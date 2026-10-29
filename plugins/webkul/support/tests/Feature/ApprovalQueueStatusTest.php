@@ -49,7 +49,7 @@ function approvalQueueFixture(): array
 
 it('labels each approval status and only treats pending as waiting', function (): void {
     expect(ApprovalRequestStatus::options())->toBe([
-        'pending' => 'Pending', 'approved' => 'Approved', 'rejected' => 'Rejected', 'withdrawn' => 'Withdrawn',
+        'pending' => 'Pending', 'approved' => 'Approved', 'rejected' => 'Rejected', 'withdrawn' => 'Withdrawn', 'returned' => 'Returned for changes',
     ])
         ->and(ApprovalRequestStatus::labelFor('withdrawn'))->toBe('Withdrawn')
         ->and(ApprovalRequestStatus::colorFor('withdrawn'))->toBe('gray')

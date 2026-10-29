@@ -39,11 +39,12 @@ trait HasCustomFields
     protected function loadCustomFields()
     {
         try {
-            $customFields = $this->getCustomFields();
+            // One shared query per request for every customizable model, instead of two per class.
+            $customFields = Field::definitionsFor(get_class($this));
 
             $this->mergeFillable(self::$customFillable ??= $customFields->pluck('code')->toArray());
 
-            $this->mergeCasts(self::$customCasts ??= $customFields->select('code', 'type', 'is_multiselect')->get());
+            $this->mergeCasts(self::$customCasts ??= $customFields);
         } catch (Exception $e) {
             // do nothing
         }

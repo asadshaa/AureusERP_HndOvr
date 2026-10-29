@@ -24,8 +24,10 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
+use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Security\Models\User;
+use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
@@ -51,22 +53,37 @@ class EmployeeRequestService
         }
         $this->assertClaimTaxConsistency($request);
         $this->prepareSelfServicePayload($request);
+        if (OvertimeService::isOvertime($request->requestType)) {
+            app(OvertimeService::class)->prepareSubmission($request);
+        }
 
-        $approval = $this->approvals->submit(
-            $request,
-            $requester,
-            $request->requestType->approval_request_type,
-            $request->amount !== null ? (string) $request->amount : null,
-            [
-                'company_id'      => (int) $request->company_id,
-                'employee_id'     => (int) $request->employee_id,
-                'department_id'   => $request->employee->department_id,
-                'team_id'         => $request->employee->team_id,
-                'request_type_id' => (int) $request->request_type_id,
-                'request_code'    => $request->requestType->code,
-                'category'        => $request->requestType->category,
-            ],
-        );
+        $amount = $request->amount !== null ? (string) $request->amount : null;
+        $context = [
+            'company_id'      => (int) $request->company_id,
+            'employee_id'     => (int) $request->employee_id,
+            'department_id'   => $request->employee->department_id,
+            'team_id'         => $request->employee->team_id,
+            'request_type_id' => (int) $request->request_type_id,
+            'request_code'    => $request->requestType->code,
+            'category'        => $request->requestType->category,
+        ];
+
+        // A request returned for changes goes back into the SAME approval
+        // request, restarted at step 1 (ApprovalEngine::resubmit), with what the
+        // requester changed since the return kept in the audit trail.
+        $returned = $request->status === 'returned' ? $request->approvalRequest : null;
+        if ($returned && $returned->status === ApprovalRequestStatus::Returned->value) {
+            [$before, $after] = $this->changesSinceReturn($request, $returned);
+            $approval = $this->approvals->resubmit($returned, $requester, $amount, $context, null, $before, $after);
+        } else {
+            $approval = $this->approvals->submit(
+                $request,
+                $requester,
+                $request->requestType->approval_request_type,
+                $amount,
+                $context,
+            );
+        }
         $request->update([
             'approval_request_id' => $approval->id,
             'reference'           => $request->reference ?: 'HR-'.$request->company_id.'-'.$request->id,
@@ -260,10 +277,11 @@ class EmployeeRequestService
         });
     }
 
-    public function approve(EmployeeRequest $request, User $actor, ?string $reason = null): EmployeeRequest
+    /** @param  array<string, mixed>  $decisionValues  kept on the approval decision (e.g. overtime approved_minutes) */
+    public function approve(EmployeeRequest $request, User $actor, ?string $reason = null, array $decisionValues = []): EmployeeRequest
     {
         $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
-        $this->approvals->approve($approval, $actor, $reason, ['status' => $request->status], ['status' => 'approved']);
+        $this->approvals->approve($approval, $actor, $reason, ['status' => $request->status], ['status' => 'approved'] + $decisionValues);
 
         return $this->synchronize($request);
     }
@@ -276,12 +294,82 @@ class EmployeeRequestService
         return $this->synchronize($request);
     }
 
+    /**
+     * A current-step approver sends the request back to the requester for
+     * changes (required comment). The request becomes "returned": editable by
+     * the requester, then resubmitted with submit(), which restarts the
+     * approval at step 1. What it looked like when returned is kept on the
+     * "returned" decision so the resubmission records what changed.
+     */
+    public function returnToRequester(EmployeeRequest $request, User $actor, string $comment): EmployeeRequest
+    {
+        $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
+        $this->approvals->returnToRequester(
+            $approval,
+            $actor,
+            $comment,
+            ['status' => $request->status, 'snapshot' => $this->auditSnapshot($request)],
+            ['status' => 'returned'],
+        );
+
+        return $this->synchronize($request);
+    }
+
+    /** The requester, while the request is returned for changes. */
+    public function canResubmit(EmployeeRequest $request, User $user): bool
+    {
+        return $request->status === 'returned'
+            && $request->approvalRequest !== null
+            && $this->approvals->canResubmit($request->approvalRequest, $user);
+    }
+
+    /** The employee or whoever filed it, while it is pending approval or returned for changes. */
+    public function canWithdraw(EmployeeRequest $request, User $user): bool
+    {
+        if (! in_array($request->status, ['pending_approval', 'returned'], true) || ! $request->approvalRequest) {
+            return false;
+        }
+
+        $isOwner = (int) $request->requested_by === (int) $user->id
+            || ($request->employee?->user_id !== null && (int) $request->employee->user_id === (int) $user->id);
+
+        return $isOwner && $this->approvals->canWithdraw($request->approvalRequest, $user);
+    }
+
+    /** Takes back a pending or returned request: nobody needs to decide it any more. */
+    public function withdraw(EmployeeRequest $request, User $actor, ?string $reason = null): EmployeeRequest
+    {
+        $request->loadMissing(['approvalRequest', 'employee']);
+        if (! $this->canWithdraw($request, $actor)) {
+            throw new RuntimeException('Only the employee or the person who filed it can withdraw a request, and only while it is pending or returned for changes.');
+        }
+
+        $this->approvals->withdraw($request->approvalRequest, $actor, $reason);
+
+        return $this->synchronize($request);
+    }
+
     public function synchronize(EmployeeRequest $request): EmployeeRequest
     {
         $request->load(['approvalRequest.decisions', 'requestType', 'company']);
         $approval = $request->approvalRequest;
         if (! $approval) {
             return $request;
+        }
+        if ($approval->status === ApprovalRequestStatus::Returned->value) {
+            if ($request->status !== 'returned') {
+                $this->recordReturnSnapshot($approval, $this->auditSnapshot($request));
+                $request->update(['status' => 'returned']);
+            }
+
+            return $request->fresh();
+        }
+        if ($approval->status === ApprovalRequestStatus::Withdrawn->value) {
+            if ($request->status !== 'withdrawn') {
+                $request->update(['status' => 'withdrawn']);
+            }
+
+            return $request->fresh();
         }
         if ($approval->status === 'rejected') {
             $reason = $approval->decisions->last()?->reason;
@@ -297,6 +385,11 @@ class EmployeeRequestService
         }
         if ($approval->status !== 'approved') {
             return $request;
+        }
+
+        // Overtime: the approved minutes are checked against the day again (and refused in a finalised month).
+        if (OvertimeService::isOvertime($request->requestType)) {
+            app(OvertimeService::class)->applyApproval($request);
         }
 
         $request->update(['status' => 'approved', 'approved_at' => $approval->completed_at ?? now()]);
@@ -827,10 +920,67 @@ class EmployeeRequestService
         }
     }
 
+    /**
+     * The fields a requester may change after a return, as stored on the
+     * "returned" decision and compared on resubmission.
+     *
+     * @return array<string, mixed>
+     */
+    private function auditSnapshot(EmployeeRequest $request): array
+    {
+        $snapshot = [];
+        foreach (['title', 'description', 'amount', 'billed_amount', 'tax_deduction_rate', 'income_tax_deduction', 'sales_tax_deduction', 'nature_of_expense', 'payload', 'attachments'] as $field) {
+            $value = $request->getAttribute($field);
+            $snapshot[$field] = is_array($value) || $value === null ? $value : (string) $value;
+        }
+
+        return $snapshot;
+    }
+
+    /**
+     * Keeps what the request looked like when it was returned on the
+     * "returned" decision, when the return came from elsewhere (the Approval
+     * Queue) without it. Runs in the same transaction as the return.
+     *
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function recordReturnSnapshot(ApprovalRequest $approval, array $snapshot): void
+    {
+        $returned = $approval->decisions->where('decision', 'returned')->sortBy('id')->last();
+
+        if ($returned && ! array_key_exists('snapshot', (array) $returned->previous_values)) {
+            $returned->update(['previous_values' => (array) $returned->previous_values + ['snapshot' => $snapshot]]);
+        }
+    }
+
+    /**
+     * What changed between the return and now: [before, after], changed
+     * fields only.
+     *
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    private function changesSinceReturn(EmployeeRequest $request, ApprovalRequest $approval): array
+    {
+        $returned = $approval->decisions()->where('decision', 'returned')->latest('id')->first();
+        $before = (array) data_get($returned?->previous_values, 'snapshot', []);
+        $now = $this->auditSnapshot($request);
+
+        $changedBefore = [];
+        $changedAfter = [];
+        foreach ($now as $field => $value) {
+            if (json_encode($before[$field] ?? null) !== json_encode($value)) {
+                $changedBefore[$field] = $before[$field] ?? null;
+                $changedAfter[$field] = $value;
+            }
+        }
+
+        return [$changedBefore, $changedAfter];
+    }
+
     private function assertRequestIntegrity(EmployeeRequest $request, User $requester): void
     {
-        if (! in_array($request->status, ['draft', 'rejected'], true)) {
-            throw new RuntimeException('Only draft or rejected employee requests can be submitted.');
+        if (! in_array($request->status, ['draft', 'rejected', 'returned'], true)) {
+            throw new RuntimeException('Only draft, rejected or returned employee requests can be submitted.');
         }
         if ((int) $request->employee?->company_id !== (int) $request->company_id
             || (int) $request->requestType?->company_id !== (int) $request->company_id

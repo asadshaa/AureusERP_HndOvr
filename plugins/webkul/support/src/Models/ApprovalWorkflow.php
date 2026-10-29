@@ -23,15 +23,23 @@ class ApprovalWorkflow extends Model
         'conditions',
         'priority',
         'is_active',
+        'reminders_enabled',
+        'remind_after_hours',
+        'remind_every_hours',
+        'max_reminders',
     ];
 
     protected function casts(): array
     {
         return [
-            'minimum_amount' => 'decimal:4',
-            'maximum_amount' => 'decimal:4',
-            'conditions'     => 'array',
-            'is_active'      => 'boolean',
+            'minimum_amount'     => 'decimal:4',
+            'maximum_amount'     => 'decimal:4',
+            'conditions'         => 'array',
+            'is_active'          => 'boolean',
+            'reminders_enabled'  => 'boolean',
+            'remind_after_hours' => 'integer',
+            'remind_every_hours' => 'integer',
+            'max_reminders'      => 'integer',
         ];
     }
 

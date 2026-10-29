@@ -8,10 +8,13 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\TimeOff\Enums\State;
+use Webkul\TimeOff\Models\Leave;
+use Webkul\TimeOff\Services\LeaveApprovalService;
 
 class TimeOffRelationManager extends RelationManager
 {
@@ -55,6 +58,7 @@ class TimeOffRelationManager extends RelationManager
         $balanceDescription = "Balance: {$totalLeft} / {$totalAlloc} Days (".implode(' • ', $cardSummaries).')';
 
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['holidayStatus', 'approvalRequest']))
             ->description($balanceDescription)
             ->defaultSort('request_date_from', 'desc')
             ->columns([
@@ -78,8 +82,13 @@ class TimeOffRelationManager extends RelationManager
                 TextColumn::make('state')
                     ->label('Status')
                     ->badge()
-                    ->formatStateUsing(function ($state): string {
+                    ->formatStateUsing(function ($state, Leave $record): string {
                         $val = $state instanceof State ? $state->value : (string) $state;
+
+                        // Returned for changes by an approver: kept as "refuse" (out of the balance) but not refused.
+                        if (LeaveApprovalService::isReturned($record)) {
+                            return 'Returned for changes';
+                        }
 
                         return match ($val) {
                             'validate_two' => 'Approved',
@@ -89,8 +98,12 @@ class TimeOffRelationManager extends RelationManager
                             default        => ucfirst($val),
                         };
                     })
-                    ->color(function ($state): string {
+                    ->color(function ($state, Leave $record): string {
                         $val = $state instanceof State ? $state->value : (string) $state;
+
+                        if (LeaveApprovalService::isReturned($record)) {
+                            return 'info';
+                        }
 
                         return match ($val) {
                             'validate_two' => 'success',

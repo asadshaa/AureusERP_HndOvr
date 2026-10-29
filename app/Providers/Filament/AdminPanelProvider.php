@@ -3,6 +3,8 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\Dashboard;
+use App\Filament\Widgets\AnnouncementsWidget;
+use App\Filament\Widgets\CelebrationsWidget;
 use App\Filament\Widgets\CompanySnapshotWidget;
 use App\Filament\Widgets\EmployeeDashboardOverviewWidget;
 use App\Filament\Widgets\HomeGreetingWidget;
@@ -83,6 +85,8 @@ class AdminPanelProvider extends PanelProvider
                 TodayAttendanceRollCallWidget::class,
                 RecruitmentPipelineWidget::class,
                 EmployeeDashboardOverviewWidget::class,
+                AnnouncementsWidget::class,
+                CelebrationsWidget::class,
             ])
             ->plugins([
                 ManufacturingPlugin::make(),

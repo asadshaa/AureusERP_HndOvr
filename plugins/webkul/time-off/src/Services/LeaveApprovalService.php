@@ -4,10 +4,12 @@ namespace Webkul\TimeOff\Services;
 
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Security\Models\User;
+use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
@@ -46,6 +48,9 @@ class LeaveApprovalService
                 'request_date_to'    => $leave->request_date_to ? Carbon::parse($leave->request_date_to)->toDateString() : null,
             ], (int) $leave->id);
         }
+        if (self::isReturned($leave)) {
+            return $this->resubmit($leave, $requester);
+        }
 
         $approval = $this->approvals->submit(
             $leave,
@@ -76,6 +81,153 @@ class LeaveApprovalService
         return $approval;
     }
 
+    /**
+     * Whether the leave was returned for changes by an approver. A returned
+     * leave is kept in state "refuse" (no new Leave state): the balance does
+     * not count it as pending (LeaveBalanceService::PENDING_STATES), attendance
+     * ignores it, the employee can edit it, and resubmitting puts it back to
+     * "confirm" -- which re-checks the balance on the Leave model.
+     */
+    public static function isReturned(?Leave $leave): bool
+    {
+        return $leave !== null
+            && $leave->state === State::REFUSE
+            && $leave->approval_request_id !== null
+            && $leave->approvalRequest?->status === ApprovalRequestStatus::Returned->value;
+    }
+
+    /** isReturned() for a leave id (the Time Off forms keep a returned leave out of the balance while it is edited). */
+    public static function isReturnedLeaveId(?int $leaveId): bool
+    {
+        return $leaveId !== null && self::isReturned(Leave::query()->with('approvalRequest')->find($leaveId));
+    }
+
+    /** The person who submitted the leave, while it is returned for changes. */
+    public function canResubmit(Leave $leave, User $user): bool
+    {
+        return self::isReturned($leave) && $this->approvals->canResubmit($leave->approvalRequest, $user);
+    }
+
+    /**
+     * "Return to requester" from the Time Off screens: a current-step approver
+     * sends the leave back for changes with a comment. The leave becomes
+     * editable (state refuse, see isReturned()) until it is resubmitted.
+     */
+    public function returnToRequester(Leave $leave, User $actor, string $comment): Leave
+    {
+        $approval = $leave->approvalRequest
+            ?? throw new RuntimeException('The leave request has not been submitted.');
+        $this->approvals->returnToRequester(
+            $approval,
+            $actor,
+            $comment,
+            ['state' => $leave->state?->value, 'snapshot' => $this->auditSnapshot($leave)],
+            ['state' => State::REFUSE->value, 'returned' => true],
+        );
+
+        return $this->synchronize($leave);
+    }
+
+    /**
+     * Sends a returned leave back to approval: the same approval request,
+     * restarted at the first step in a new round, with what changed since the
+     * return in the audit trail. The leave goes back to "confirm", which
+     * re-checks the balance; if it no longer fits, nothing is resubmitted.
+     */
+    public function resubmit(Leave $leave, User $requester): ApprovalRequest
+    {
+        $leave->loadMissing(['employee', 'approvalRequest']);
+        if (! self::isReturned($leave)) {
+            throw new RuntimeException('Only a leave request returned for changes can be resubmitted.');
+        }
+
+        $approval = DB::transaction(function () use ($leave, $requester): ApprovalRequest {
+            [$before, $after] = $this->changesSinceReturn($leave);
+
+            $approval = $this->approvals->resubmit(
+                $leave->approvalRequest,
+                $requester,
+                null,
+                [
+                    'company_id'    => (int) $leave->company_id,
+                    'employee_id'   => (int) $leave->employee_id,
+                    'department_id' => $leave->department_id,
+                    'team_id'       => $leave->employee?->team_id,
+                    'leave_type_id' => $leave->holiday_status_id,
+                    'days'          => (string) $leave->number_of_days,
+                ],
+                null,
+                $before,
+                $after,
+            );
+
+            $leave->update([
+                'state'              => State::CONFIRM,
+                'submitted_at'       => now(),
+                'approved_at'        => null,
+                'rejected_at'        => null,
+                'rejection_reason'   => null,
+                'first_approver_id'  => null,
+                'second_approver_id' => null,
+            ]);
+
+            return $approval;
+        });
+
+        $this->notifyApprovers($leave->fresh(), $requester);
+
+        return $approval;
+    }
+
+    /**
+     * Where an approval notification sends someone about this leave: the
+     * employee to My Time Off, anyone else (HR who filed it) to Time Off
+     * management.
+     */
+    public function recordUrl(Leave $leave, ?User $recipient = null): ?string
+    {
+        $mine = $recipient && (int) $leave->employee?->user_id === (int) $recipient->id;
+
+        return route($mine
+            ? 'filament.admin.time-off.dashboard.resources.my-time-offs.view'
+            : 'filament.admin.time-off.management.resources.time-offs.view', ['record' => $leave->getKey()]);
+    }
+
+    /** @return array<string, mixed> */
+    private function auditSnapshot(Leave $leave): array
+    {
+        return [
+            'holiday_status_id'  => $leave->holiday_status_id,
+            'request_date_from'  => $leave->request_date_from?->toDateString(),
+            'request_date_to'    => $leave->request_date_to ? Carbon::parse($leave->request_date_to)->toDateString() : null,
+            'request_unit_half'  => (bool) $leave->request_unit_half,
+            'request_unit_hours' => (bool) $leave->request_unit_hours,
+            'request_hour_from'  => $leave->request_hour_from !== null ? (string) $leave->request_hour_from : null,
+            'request_hour_to'    => $leave->request_hour_to !== null ? (string) $leave->request_hour_to : null,
+            'number_of_days'     => $leave->number_of_days !== null ? (string) (float) $leave->number_of_days : null,
+            'private_name'       => $leave->private_name,
+        ];
+    }
+
+    /** @return array{0: array<string, mixed>, 1: array<string, mixed>} changed fields only, before and after */
+    private function changesSinceReturn(Leave $leave): array
+    {
+        $returned = $leave->approvalRequest?->decisions()->where('decision', 'returned')->latest('id')->first();
+        $before = (array) data_get($returned?->previous_values, 'snapshot', []);
+        $now = $this->auditSnapshot($leave);
+
+        $changedBefore = [];
+        $changedAfter = [];
+        foreach ($now as $field => $value) {
+            if (json_encode($before[$field] ?? null) !== json_encode($value)) {
+                $changedBefore[$field] = $before[$field] ?? null;
+                $changedAfter[$field] = $value;
+            }
+        }
+
+        return [$changedBefore, $changedAfter];
+    }
+
     public function approve(Leave $leave, User $actor, ?string $reason = null): Leave
     {
         $approval = $leave->approvalRequest
@@ -103,8 +255,33 @@ class LeaveApprovalService
             return $leave;
         }
 
-        $firstApprover = $approval->decisions->first()?->actor?->employee;
-        $lastApprover = $approval->decisions->last()?->actor?->employee;
+        // Returned for changes: out of the balance and editable until resubmitted (isReturned()).
+        if ($approval->status === ApprovalRequestStatus::Returned->value) {
+            if ($leave->state !== State::REFUSE) {
+                // Kept on the "returned" decision when the return came from the Approval Queue.
+                $returned = $approval->decisions->where('decision', 'returned')->sortBy('id')->last();
+                if ($returned && ! array_key_exists('snapshot', (array) $returned->previous_values)) {
+                    $returned->update(['previous_values' => (array) $returned->previous_values + ['snapshot' => $this->auditSnapshot($leave)]]);
+                }
+
+                $leave->update([
+                    'state'            => State::REFUSE,
+                    'approved_at'      => null,
+                    'rejected_at'      => null,
+                    'rejection_reason' => null,
+                ]);
+            }
+
+            return $leave->fresh(['approvalRequest.decisions']);
+        }
+
+        // Only this submission round's approvals: a resubmitted leave starts over.
+        $decisions = $approval->decisions
+            ->where('submission_round', (int) ($approval->submission_round ?: 1))
+            ->whereIn('decision', ['approved', 'rejected'])
+            ->values();
+        $firstApprover = $decisions->first()?->actor?->employee;
+        $lastApprover = $decisions->last()?->actor?->employee;
         if ($approval->status === 'approved') {
             $leave->update([
                 'state'              => State::VALIDATE_TWO,
@@ -128,7 +305,7 @@ class LeaveApprovalService
             ]);
 
             $this->notifyDecision($leave, 'rejected', $reason);
-        } elseif ($approval->decisions->isNotEmpty()) {
+        } elseif ($decisions->isNotEmpty()) {
             $leave->update([
                 'state'             => State::VALIDATE_ONE,
                 'first_approver_id' => $firstApprover?->id,

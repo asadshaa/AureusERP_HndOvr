@@ -10,7 +10,9 @@ use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 use Webkul\Security\Models\User;
+use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Models\Leave;
+use Webkul\TimeOff\Services\LeaveApprovalService;
 use Webkul\TimeOff\Services\LeaveCancellationService;
 
 /**
@@ -101,7 +103,18 @@ class LeaveCancellationActions
             TextEntry::make('state')
                 ->label('Status')
                 ->badge()
+                ->formatStateUsing(fn (State $state, ?Leave $record): string => LeaveApprovalService::isReturned($record) ? 'Returned for changes' : (string) $state->getLabel())
+                ->color(fn (State $state, ?Leave $record): string|array|null => LeaveApprovalService::isReturned($record) ? 'info' : $state->getColor())
                 ->icon('heroicon-o-flag'),
+            TextEntry::make('returned_for_changes')
+                ->label('Returned for changes')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->visible(fn (?Leave $record): bool => LeaveApprovalService::isReturned($record))
+                ->getStateUsing(function (?Leave $record): ?string {
+                    $return = $record?->approvalRequest?->decisions()->with('actor')->where('decision', 'returned')->latest('id')->first();
+
+                    return $return ? trim(($return->actor?->name ?? 'An approver').' on '.$return->decided_at?->format('d M Y H:i').': '.$return->reason).' Edit the request and resubmit it.' : null;
+                }),
             TextEntry::make('cancellation_request_reason')
                 ->label('Cancellation requested')
                 ->icon('heroicon-o-no-symbol')

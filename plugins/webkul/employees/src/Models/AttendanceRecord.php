@@ -13,6 +13,7 @@ use Webkul\Employee\Enums\AttendanceVerificationMethod;
 use Webkul\Employee\Enums\AttendanceVerificationResult;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
 use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
+use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\EmployeeAttendanceNotifier;
 use Webkul\Security\Models\User;
@@ -122,6 +123,12 @@ class AttendanceRecord extends Model
 
     protected static function booted(): void
     {
+        // A finalised attendance month is locked: no day in it may be created,
+        // changed or deleted, whatever the path. Registered first, so it runs
+        // before the audit hooks below write anything.
+        static::saving(fn (self $record) => app(AttendanceMonthLockService::class)->guardAttendanceRecord($record));
+        static::deleting(fn (self $record) => app(AttendanceMonthLockService::class)->guardAttendanceRecord($record, deleting: true));
+
         // GPS / self-service times are evidence-backed. However they get
         // edited later (Filament edit, an approved time-change request,
         // tinker), the change must leave an audit row -- never a silent edit.

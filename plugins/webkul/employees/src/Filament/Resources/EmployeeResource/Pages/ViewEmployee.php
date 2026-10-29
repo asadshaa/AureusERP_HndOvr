@@ -6,7 +6,9 @@ use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Webkul\Chatter\Filament\Actions\ChatterAction;
+use Webkul\Employee\Filament\Checklists\ChecklistActions;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
+use Webkul\Employee\Models\Employee;
 use Webkul\Support\Models\ActivityPlan;
 
 class ViewEmployee extends ViewRecord
@@ -16,6 +18,8 @@ class ViewEmployee extends ViewRecord
     protected function getHeaderActions(): array
     {
         return EmployeeResource::actionsForRecordCompany([
+            // Start onboarding / Start exit / Undo exit (HR only, checked again by EmployeeChecklistService).
+            ...ChecklistActions::make(fn (): Employee => $this->getRecord()),
             ChatterAction::make()
                 ->resource(static::$resource)
                 ->activityPlans($this->getActivityPlans()),

@@ -17,17 +17,21 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Filament\Resources\ApprovalRequestResource\Pages\ListApprovalRequests;
+use Webkul\Support\Models\ApprovalReminder;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Services\ApprovalEngine;
+use Webkul\Support\Services\ApprovalReminderService;
 use Webkul\TimeOff\Models\Leave;
 
 class ApprovalRequestResource extends Resource
@@ -76,9 +80,114 @@ class ApprovalRequestResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        $employeeChain = ['employee.department.manager.user', 'employee.job', 'employee.user', 'employee.parent.user', 'employee.team.manager.user'];
+
+        // Everything the columns and row actions read, once per page: each
+        // subject with its employee (the "For Employee" / "Details" columns
+        // and the engine's hierarchy routing), the requester chain (canAct),
+        // decisions and reminders.
         return parent::getEloquentQuery()
             ->where('company_id', Auth::user()?->default_company_id)
-            ->with(['workflow', 'requester', 'decisions.actor', 'decisions.step', 'subject']);
+            ->with([
+                'workflow.steps.approverUser',
+                'workflow.steps.approverRole',
+                'requester.employee.parent.user',
+                'requester.employee.department.manager.user',
+                'requester.employee.team.manager.user',
+                'decisions.actor',
+                'decisions.step',
+                'reminders',
+                'subject' => fn (MorphTo $subject) => $subject->morphWith([
+                    EmployeeRequest::class => $employeeChain,
+                    Leave::class           => [...$employeeChain, 'holidayStatus'],
+                    Employee::class        => ['department', 'job', 'user', 'parent.user', 'team.manager.user'],
+                ]),
+            ])
+            ->afterQuery(function ($requests) {
+                static::preloadAttendanceDates($requests);
+
+                return $requests;
+            });
+    }
+
+    /** @var array<int, ?string> attendance record id => date (Y-m-d), for the attendance corrections on screen */
+    protected static array $attendanceDates = [];
+
+    /** One query for the attendance dates of the attendance correction requests on the page. */
+    protected static function preloadAttendanceDates(iterable $requests): void
+    {
+        $ids = collect($requests)
+            ->map(fn ($request) => $request instanceof ApprovalRequest && $request->subject instanceof EmployeeRequest ? (array) ($request->subject->payload ?? []) : [])
+            ->filter(fn (array $payload): bool => empty($payload['attendance_date']) && ! empty($payload['attendance_record_id']))
+            ->map(fn (array $payload): int => (int) $payload['attendance_record_id'])
+            ->reject(fn (int $id): bool => array_key_exists($id, static::$attendanceDates))
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return;
+        }
+
+        $dates = AttendanceRecord::query()->whereKey($ids->all())->get(['id', 'attendance_date'])
+            ->mapWithKeys(fn (AttendanceRecord $record): array => [(int) $record->id => $record->attendance_date?->toDateString()]);
+
+        foreach ($ids as $id) {
+            static::$attendanceDates[$id] = $dates[$id] ?? null;
+        }
+    }
+
+    protected static function attendanceDate(int $attendanceRecordId): ?string
+    {
+        if (! array_key_exists($attendanceRecordId, static::$attendanceDates)) {
+            static::$attendanceDates[$attendanceRecordId] = AttendanceRecord::query()->find($attendanceRecordId)?->attendance_date?->toDateString();
+        }
+
+        return static::$attendanceDates[$attendanceRecordId];
+    }
+
+    /** "waiting for 26h" while pending at a step, else null. */
+    public static function waitingText(ApprovalRequest $record): ?string
+    {
+        $hours = $record->waitingHours();
+
+        return $hours === null ? null : "waiting for {$hours}h";
+    }
+
+    /** "reminded 2×", "reminded 3× · escalated" for the current step, else null. */
+    public static function remindersText(ApprovalRequest $record): ?string
+    {
+        if ($record->status !== ApprovalRequestStatus::Pending->value) {
+            return null;
+        }
+
+        $sent = $record->currentStepReminders();
+        $count = $sent->where('kind', ApprovalReminder::KIND_REMINDER)->count();
+        $escalated = $sent->contains('kind', ApprovalReminder::KIND_ESCALATION);
+
+        if ($count === 0 && ! $escalated) {
+            return null;
+        }
+
+        return "reminded {$count}×".($escalated ? ' · escalated' : '');
+    }
+
+    /** Every reminder and escalation of the request, oldest first. */
+    public static function reminderHistoryText(ApprovalRequest $record): string
+    {
+        $record->loadMissing(['reminders.step']);
+
+        if ($record->reminders->isEmpty()) {
+            return 'No reminders sent.';
+        }
+
+        return $record->reminders->sortBy('id')->map(function (ApprovalReminder $reminder): string {
+            $what = $reminder->kind === ApprovalReminder::KIND_ESCALATION ? 'Escalated to HR' : "Reminder {$reminder->reminder_number}";
+            $step = $reminder->step ? "Step {$reminder->step->sequence}: {$reminder->step->name}" : 'Step #'.$reminder->step_id;
+            $round = $reminder->submission_round > 1 ? " (round {$reminder->submission_round})" : '';
+            $recipients = count((array) $reminder->recipient_ids);
+
+            return "• {$what} at {$step}{$round} on ".$reminder->sent_at?->format('d M Y, h:i A')." to {$recipients} person(s)";
+        })->join("\n");
     }
 
     /**
@@ -103,9 +212,29 @@ class ApprovalRequestResource extends Resource
             $who = $decision->actor?->name ?? 'User #'.$decision->actor_id;
             $date = ($decision->decided_at ?? $decision->created_at)?->format('d M Y, h:i A') ?? '';
             $note = $decision->reason ? " (Note: {$decision->reason})" : '';
+            $round = (int) $decision->submission_round > 1 ? " (round {$decision->submission_round})" : '';
+            $changes = $decision->decision === 'resubmitted' ? static::changesText((array) $decision->previous_values, (array) $decision->new_values) : '';
 
-            return "• [{$action}] {$step} by {$who} on {$date}{$note}";
+            return "• [{$action}] {$step}{$round} by {$who} on {$date}{$note}{$changes}";
         })->join("\n");
+    }
+
+    /**
+     * " -- changed: Amount 100 → 80, Description ..." for a resubmission.
+     *
+     * @param  array<string, mixed>  $previous
+     * @param  array<string, mixed>  $new
+     */
+    public static function changesText(array $previous, array $new): string
+    {
+        $changes = collect($new)
+            ->map(function (mixed $value, string $field) use ($previous): string {
+                $format = fn (mixed $v): string => is_array($v) ? json_encode($v) : (filled($v) ? (string) $v : '—');
+
+                return str($field)->headline()->toString().': '.Str::limit($format($previous[$field] ?? null), 40).' → '.Str::limit($format($value), 40);
+            });
+
+        return $changes->isEmpty() ? '' : ' — changed: '.$changes->join('; ');
     }
 
     public static function form(Schema $schema): Schema
@@ -272,10 +401,39 @@ class ApprovalRequestResource extends Resource
                                         ->color('warning')
                                         ->icon('heroicon-o-user-circle')
                                         ->visible(fn (ApprovalRequest $record): bool => $record->status === ApprovalRequestStatus::Pending->value),
+                                    TextEntry::make('returned_comment')
+                                        ->label('Returned for changes')
+                                        ->getStateUsing(function (ApprovalRequest $record): ?string {
+                                            $return = $record->decisions->where('decision', 'returned')->sortBy('id')->last();
+
+                                            return $return ? trim(($return->actor?->name ?? 'An approver').': '.$return->reason) : null;
+                                        })
+                                        ->badge()
+                                        ->color('info')
+                                        ->icon('heroicon-o-arrow-uturn-left')
+                                        ->visible(fn (ApprovalRequest $record): bool => $record->status === ApprovalRequestStatus::Returned->value),
+                                    TextEntry::make('waiting_for')
+                                        ->label('Waiting')
+                                        ->getStateUsing(fn (ApprovalRequest $record): ?string => static::waitingText($record))
+                                        ->icon('heroicon-o-clock')
+                                        ->visible(fn (ApprovalRequest $record): bool => $record->status === ApprovalRequestStatus::Pending->value),
+                                    TextEntry::make('reminders_sent')
+                                        ->label('Reminders')
+                                        ->getStateUsing(fn (ApprovalRequest $record): ?string => static::remindersText($record))
+                                        ->badge()
+                                        ->color(fn (ApprovalRequest $record): string => str_contains((string) static::remindersText($record), 'escalated') ? 'danger' : 'warning')
+                                        ->placeholder('None yet')
+                                        ->visible(fn (ApprovalRequest $record): bool => $record->status === ApprovalRequestStatus::Pending->value),
                                     TextEntry::make('decisions_history')
                                         ->label('Decision History')
                                         ->getStateUsing(fn (ApprovalRequest $record): string => static::decisionHistoryText($record))
                                         ->extraAttributes(['style' => 'white-space: pre-line;'])
+                                        ->columnSpanFull(),
+                                    TextEntry::make('reminder_history')
+                                        ->label('Reminder History')
+                                        ->getStateUsing(fn (ApprovalRequest $record): string => static::reminderHistoryText($record))
+                                        ->extraAttributes(['style' => 'white-space: pre-line;'])
+                                        ->visible(fn (ApprovalRequest $record): bool => $record->reminders->isNotEmpty())
                                         ->columnSpanFull(),
                                 ])
                                 ->columns(2),
@@ -395,8 +553,7 @@ class ApprovalRequestResource extends Resource
                             $payload = (array) ($record->subject->payload ?? []);
                             $dateStr = $payload['attendance_date'] ?? null;
                             if (! $dateStr && isset($payload['attendance_record_id'])) {
-                                $att = AttendanceRecord::find($payload['attendance_record_id']);
-                                $dateStr = $att?->attendance_date?->toDateString();
+                                $dateStr = static::attendanceDate((int) $payload['attendance_record_id']);
                             }
                             if ($dateStr) {
                                 $c = Carbon::parse($dateStr);
@@ -469,6 +626,17 @@ class ApprovalRequestResource extends Resource
                 TextColumn::make('requester.name')->label('Requester')->placeholder('System'),
                 TextColumn::make('amount')->numeric(decimalPlaces: 2)->placeholder('—')->toggleable(),
                 TextColumn::make('current_step_sequence')->label('Step')->placeholder('Complete'),
+                TextColumn::make('waiting_for')
+                    ->label('Waiting')
+                    ->getStateUsing(fn (ApprovalRequest $record): ?string => static::waitingText($record))
+                    ->color(fn (ApprovalRequest $record): ?string => ($record->waitingHours() ?? 0) >= app(ApprovalReminderService::class)->settingsFor($record->workflow)['after_hours'] ? 'danger' : null)
+                    ->placeholder('—'),
+                TextColumn::make('reminders_sent')
+                    ->label('Reminders')
+                    ->getStateUsing(fn (ApprovalRequest $record): ?string => static::remindersText($record))
+                    ->badge()
+                    ->color(fn (?string $state): string => str_contains((string) $state, 'escalated') ? 'danger' : 'warning')
+                    ->placeholder('—'),
                 TextColumn::make('status')
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => ApprovalRequestStatus::labelFor($state))
@@ -493,8 +661,15 @@ class ApprovalRequestResource extends Resource
                     ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record, Auth::user()))
                     ->action(function (ApprovalRequest $record, array $data): void {
-                        app(ApprovalEngine::class)->approve($record, Auth::user(), $data['reason'] ?? null);
-                        Notification::make()->success()->title('Approval recorded')->send();
+                        // A subject may refuse the decision (e.g. overtime with too few minutes
+                        // recorded, a finalised attendance month): the whole decision is rolled
+                        // back and the reason shown, not an error page.
+                        try {
+                            app(ApprovalEngine::class)->approve($record, Auth::user(), $data['reason'] ?? null);
+                            Notification::make()->success()->title('Approval recorded')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not approve')->body($e->getMessage())->send();
+                        }
                     }),
                 Action::make('reject')
                     ->color('danger')
@@ -504,8 +679,28 @@ class ApprovalRequestResource extends Resource
                     ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record, Auth::user()))
                     ->action(function (ApprovalRequest $record, array $data): void {
-                        app(ApprovalEngine::class)->reject($record, Auth::user(), (string) $data['reason']);
-                        Notification::make()->success()->title('Request rejected')->send();
+                        try {
+                            app(ApprovalEngine::class)->reject($record, Auth::user(), (string) $data['reason']);
+                            Notification::make()->success()->title('Request rejected')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not reject')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('return_to_requester')
+                    ->label('Return to requester')
+                    ->color('info')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription('The requester is asked to change the request and resubmit it. It then starts again from the first approval step.')
+                    ->schema([Textarea::make('comment')->label('What needs to change')->required()->maxLength(2000)])
+                    ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
+                        && app(ApprovalEngine::class)->canReturn($record, Auth::user()))
+                    ->action(function (ApprovalRequest $record, array $data): void {
+                        try {
+                            app(ApprovalEngine::class)->returnToRequester($record, Auth::user(), (string) $data['comment']);
+                            Notification::make()->success()->title('Returned to the requester for changes')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not return the request')->body($e->getMessage())->send();
+                        }
                     }),
             ]);
     }

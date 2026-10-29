@@ -18,8 +18,13 @@
     @elseif ($report)
         <x-filament::section
             :heading="$report['company']['name'].' — '.$report['month_label']"
-            description="Worked = time inside the office window plus up to the allowed time outside it. Required = working days (weekends, public holidays and approved leave excluded) × daily hours. Days still to come are not counted."
+            description="Worked = time inside each employee's scheduled window plus up to the allowed time outside it, net of approved overtime. Required = working days (weekends, public holidays and approved leave excluded) × the schedule's daily minutes. Days still to come are not counted."
         >
+            @if (! empty($report['finalised']))
+                <p style="margin-bottom: .75rem; font-weight: 600; color: rgb(217, 119, 6);">
+                    Finalised on {{ $report['finalised']['at']->format('d M Y h:i A') }}{{ $report['finalised']['by'] ? ' by '.$report['finalised']['by'] : '' }} — this is the frozen snapshot; attendance, leave and overtime of the month are locked.
+                </p>
+            @endif
             <div style="overflow-x: auto;">
                 <table style="{{ $table }}">
                     <thead>
@@ -46,6 +51,9 @@
                             <th style="{{ $thNum }}">Earned extra (min)</th>
                             <th style="{{ $thNum }}">Grace allowance (min)</th>
                             <th style="{{ $thNum }}">Grace balance (min)</th>
+                            <th style="{{ $thNum }}">OT approved (h)</th>
+                            <th style="{{ $thNum }}">OT pending (h)</th>
+                            <th style="{{ $thNum }}">Weekend / holiday (h)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -74,10 +82,13 @@
                                 <td style="{{ $tdNum }}">{{ $s['time_bank_extra_minutes'] }}</td>
                                 <td style="{{ $tdNum }}">{{ $s['grace_allowance_minutes'] + $s['grace_carry_in_minutes'] }}</td>
                                 <td style="{{ $tdNum }} {{ $s['grace_balance_minutes'] < 0 ? 'color: rgb(220, 38, 38); font-weight: 600;' : '' }}">{{ $s['grace_balance_minutes'] }}</td>
+                                <td style="{{ $tdNum }}">{{ number_format((float) ($s['overtime_approved_hours'] ?? 0), 2) }}</td>
+                                <td style="{{ $tdNum }}">{{ number_format((float) ($s['overtime_pending_hours'] ?? 0), 2) }}</td>
+                                <td style="{{ $tdNum }}">{{ number_format((float) ($s['weekend_holiday_hours'] ?? 0), 2) }}</td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="22" style="{{ $td }} text-align: center; opacity: .7;">No employees match these filters.</td>
+                                <td colspan="25" style="{{ $td }} text-align: center; opacity: .7;">No employees match these filters.</td>
                             </tr>
                         @endforelse
                     </tbody>

@@ -14,6 +14,7 @@ use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
 use Webkul\TimeOff\Models\Leave;
 use Webkul\TimeOff\Models\LeaveAllocationPolicy;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\LeaveApprovalService;
 use Webkul\TimeOff\Services\LeaveBalanceService;
 
 class EmployeeDashboardOverviewWidget extends Widget
@@ -186,7 +187,7 @@ class EmployeeDashboardOverviewWidget extends Widget
 
         // Recent Leave Requests
         $recentLeaves = Leave::query()
-            ->with(['holidayStatus'])
+            ->with(['holidayStatus', 'approvalRequest'])
             ->where('employee_id', $employee->id)
             ->orderByDesc('id')
             ->take(3)
@@ -199,11 +200,16 @@ class EmployeeDashboardOverviewWidget extends Widget
                 $dateRange = $from === $to ? $from : "{$from} – {$to}";
 
                 $stateValue = $l->state instanceof State ? $l->state->value : (string) $l->state;
+                // Returned for changes by an approver: kept as "refuse" (out of the balance) but not refused.
+                if (LeaveApprovalService::isReturned($l)) {
+                    $stateValue = 'returned';
+                }
                 $statusLabel = match ($stateValue) {
                     'validate_two' => 'Approved',
                     'validate_one' => 'Partially Approved',
                     'confirm'      => 'Pending',
                     'refuse'       => 'Rejected',
+                    'returned'     => 'Returned for changes',
                     'cancel'       => 'Cancelled',
                     default        => ucfirst($stateValue),
                 };
@@ -213,6 +219,7 @@ class EmployeeDashboardOverviewWidget extends Widget
                     'validate_one' => 'info',
                     'confirm'      => 'warning',
                     'refuse'       => 'danger',
+                    'returned'     => 'info',
                     'cancel'       => 'gray',
                     default        => 'gray',
                 };

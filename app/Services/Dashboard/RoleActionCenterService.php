@@ -11,6 +11,7 @@ use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
+use Webkul\Employee\Services\Checklists\EmployeeChecklistService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
@@ -309,6 +310,25 @@ class RoleActionCenterService
                     'url'          => route('filament.admin.resources.employee-requests.index'),
                 ];
             }
+        }
+
+        // =========================================================================
+        // 5. ONBOARDING / EXIT CHECKLIST TASKS (assigned to me, or HR's queue)
+        // =========================================================================
+        $checklistTasks = app(EmployeeChecklistService::class)->openTaskCounts($user, $companyId);
+
+        if ($checklistTasks['open'] > 0) {
+            $items[] = [
+                'id'           => 'checklist_tasks_open',
+                'title'        => "{$checklistTasks['open']} Onboarding / Exit Task(s) For You",
+                'urgency'      => $checklistTasks['overdue'] > 0 ? 'danger' : 'info',
+                'icon'         => 'heroicon-o-clipboard-document-check',
+                'description'  => $checklistTasks['overdue'] > 0
+                    ? "{$checklistTasks['overdue']} overdue. New joiner and leaver checklist tasks waiting for you."
+                    : 'New joiner and leaver checklist tasks waiting for you.',
+                'action_label' => 'My Tasks →',
+                'url'          => route('filament.admin.pages.my-tasks'),
+            ];
         }
 
         return [

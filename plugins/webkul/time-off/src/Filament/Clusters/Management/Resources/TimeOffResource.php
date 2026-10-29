@@ -149,7 +149,8 @@ class TimeOffResource extends Resource
                     ->searchable(),
                 TextColumn::make('state')
                     ->label(__('time-off::filament/clusters/management/resources/time-off.table.columns.status'))
-                    ->formatStateUsing(fn (State $state) => $state->getLabel())
+                    ->formatStateUsing(fn (State $state, Leave $record) => LeaveApprovalService::isReturned($record) ? 'Returned for changes' : $state->getLabel())
+                    ->color(fn (State $state, Leave $record): string|array|null => LeaveApprovalService::isReturned($record) ? 'info' : $state->getColor())
                     ->sortable()
                     ->badge()
                     ->searchable(),
@@ -180,12 +181,15 @@ class TimeOffResource extends Resource
                     ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)),
                 ActionGroup::make([
                     Action::make('submit_for_approval')
-                        ->label('Submit for approval')
+                        ->label(fn (Leave $record): string => LeaveApprovalService::isReturned($record) ? 'Resubmit' : 'Submit for approval')
                         ->icon('heroicon-o-paper-airplane')
                         ->color('primary')
                         ->visible(function (Leave $record): bool {
                             if (! static::isActiveCompanyRecord($record)) {
                                 return false;
+                            }
+                            if (LeaveApprovalService::isReturned($record)) {
+                                return Auth::user() instanceof User && app(LeaveApprovalService::class)->canResubmit($record, Auth::user());
                             }
 
                             $canSubmit = (int) $record->employee?->user_id === (int) Auth::id()
@@ -249,6 +253,28 @@ class TimeOffResource extends Resource
                                 ->send();
                         })
                         ->label(__('time-off::filament/clusters/management/resources/time-off.table.actions.refused.title')),
+                    Action::make('return_to_requester')
+                        ->label('Return to requester')
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->color('info')
+                        ->modalDescription('The employee is asked to change the request and resubmit it. Until then it does not count against the balance; approval then starts again from the first step.')
+                        ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)
+                            && $record->approvalRequest?->status === 'pending'
+                            && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
+                        ->schema([
+                            Textarea::make('comment')
+                                ->label('What needs to change')
+                                ->required()
+                                ->maxLength(2000),
+                        ])
+                        ->action(function (Leave $record, array $data): void {
+                            app(LeaveApprovalService::class)->returnToRequester($record, Auth::user(), (string) $data['comment']);
+
+                            Notification::make()
+                                ->success()
+                                ->title('Returned to the employee for changes')
+                                ->send();
+                        }),
                     ...LeaveCancellationActions::make(),
                     ViewAction::make(),
                     EditAction::make()
@@ -373,10 +399,45 @@ class TimeOffResource extends Resource
         // Company filter starts on the active one.
         $user = Auth::user();
 
-        return CurrentCompany::scopeMemberships(parent::getEloquentQuery())
+        return static::withListRelations(CurrentCompany::scopeMemberships(parent::getEloquentQuery())
             ->whereIn(
                 'employee_id',
                 $user instanceof User ? app(HrHierarchyService::class)->visibleEmployeeIdsAcrossMemberships($user) : [],
-            );
+            ));
+    }
+
+    /**
+     * Everything the list columns and row actions read, loaded once per page
+     * instead of per row: the employee and its hierarchy chain (policies,
+     * cancellation rules, the approval engine's hierarchy routing), the leave
+     * type, and the approval request with its workflow steps and requester
+     * chain (approve / refuse / return visibility). The approval request's
+     * subject is the leave itself, so it is set from the row rather than
+     * loaded again.
+     *
+     * @param  Builder<Leave>  $query
+     * @return Builder<Leave>
+     */
+    public static function withListRelations(Builder $query): Builder
+    {
+        $chain = ['user', 'parent.user', 'department.manager.user', 'team.manager.user'];
+
+        return $query
+            ->with([
+                ...array_map(fn (string $relation): string => 'employee.'.$relation, $chain),
+                'holidayStatus',
+                'approvalRequest.workflow.steps',
+                ...array_map(fn (string $relation): string => 'approvalRequest.requester.employee.'.$relation, $chain),
+            ])
+            ->afterQuery(function ($leaves) {
+                foreach ($leaves as $leave) {
+                    $approval = $leave instanceof Leave ? $leave->approvalRequest : null;
+                    if ($approval && $approval->subject_type === $leave->getMorphClass() && (int) $approval->subject_id === (int) $leave->getKey()) {
+                        $approval->setRelation('subject', $leave);
+                    }
+                }
+
+                return $leaves;
+            });
     }
 }

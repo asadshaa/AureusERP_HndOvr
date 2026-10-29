@@ -8,6 +8,8 @@
  */
 
 use App\Filament\Pages\Dashboard;
+use App\Filament\Widgets\AnnouncementsWidget;
+use App\Filament\Widgets\CelebrationsWidget;
 use App\Filament\Widgets\CompanySnapshotWidget;
 use App\Filament\Widgets\EmployeeDashboardOverviewWidget;
 use App\Filament\Widgets\HomeGreetingWidget;
@@ -26,6 +28,7 @@ use Spatie\Permission\PermissionRegistrar;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeJobPosition;
+use Webkul\Employee\Services\AnnouncementService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\Candidate;
@@ -126,6 +129,8 @@ function hdRender(User $user): array
     test()->actingAs($user);
     test()->get('/admin')->assertOk();
     app(HomeDashboardContext::class)->flush();
+    // The announcements feed is remembered per request (scoped service); count its query again.
+    app()->forgetInstance(AnnouncementService::class);
 
     // The warm-up request already ran the after-response work (chatter
     // notifications of the test data); the test process never clears the
@@ -321,6 +326,65 @@ it('shows the CEO a snapshot of their own companies only, each switching company
     $this->post(route('security.switch-company'), ['company_id' => $notMine->id])->assertForbidden();
 });
 
+it('shows announcements and birthdays of the week to an employee, within the employee budget', function () {
+    $company = hdCompany('Home News Co');
+    $hr = hdUser($company, 'hd_news_hr', [HrPermissions::ManageAnnouncements]);
+    $user = hdUser($company, 'hd_news_employee');
+    hdEmployee($company, 'Hina Qureshi', $user);
+    $colleagueUser = hdUser($company, 'hd_news_colleague');
+    $colleague = Employee::query()->create([
+        'company_id' => $company->id,
+        'user_id'    => $colleagueUser->id,
+        'name'       => 'Bilal Birthday',
+        'is_active'  => true,
+        'birthday'   => '1991-10-30',
+    ]);
+    $pinned = app(AnnouncementService::class)->create($hr, ['title' => 'Eid holidays announced', 'body' => '<p>Office closed on Friday.</p>', 'audience' => 'all', 'is_pinned' => true]);
+    $news = app(AnnouncementService::class)->create($hr, ['title' => 'New canteen menu', 'audience' => 'all']);
+
+    expect(hdWidgetsFor($user))->toBe([
+        HomeGreetingWidget::class,
+        PendingActionsCenterWidget::class,
+        AnnouncementsWidget::class,
+        MyDayWidget::class,
+        EmployeeDashboardOverviewWidget::class,
+        CelebrationsWidget::class,
+    ]);
+
+    Livewire::test(AnnouncementsWidget::class)
+        ->assertSee('Eid holidays announced')
+        ->assertSee('New canteen menu')
+        ->call('markRead', $news->id)
+        ->assertDontSee('New canteen menu')
+        ->assertSee('Eid holidays announced');
+
+    Livewire::test(CelebrationsWidget::class)
+        ->assertSee('Bilal Birthday')
+        ->assertSee('Fri 30 Oct')
+        ->assertDontSee('1991')
+        ->call('sendWishes', $colleague->id, 'birthday')
+        ->assertSee('Sent');
+    expect($colleagueUser->fresh()->notifications)->toHaveCount(1);
+
+    [$response, $queries] = hdRender($user);
+
+    $response->assertOk()
+        ->assertSee('Announcements')
+        ->assertSee('Eid holidays announced')
+        ->assertSee('This week')
+        ->assertSee('Bilal Birthday')
+        ->assertDontSee('1991');
+
+    expect($queries)->toBeLessThanOrEqual(45);
+
+    // Nothing to read and nobody celebrating: neither card is shown.
+    $colleague->update(['show_birthday' => false]);
+    app(AnnouncementService::class)->markRead($pinned, $user);
+    $pinned->update(['is_pinned' => false]);
+
+    expect(hdWidgetsFor($user))->not->toContain(AnnouncementsWidget::class, CelebrationsWidget::class);
+});
+
 it('hides home widgets on the server for users without the role', function () {
     $company = hdCompany('Home Plain Co');
     $user = hdUser($company, 'hd_plain');
@@ -332,5 +396,7 @@ it('hides home widgets on the server for users without the role', function () {
         ->and(MyDayWidget::canView())->toBeFalse()
         ->and(TeamTodayWidget::canView())->toBeFalse()
         ->and(RecruitmentPipelineWidget::canView())->toBeFalse()
+        ->and(AnnouncementsWidget::canView())->toBeFalse()
+        ->and(CelebrationsWidget::canView())->toBeFalse()
         ->and(HomeGreetingWidget::canView())->toBeTrue();
 });

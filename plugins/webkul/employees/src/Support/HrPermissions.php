@@ -72,10 +72,29 @@ final class HrPermissions
     /** Read-only access to the employee documents of the employees in one's HR scope (auditors). */
     public const ViewEmployeeDocuments = 'hr_view_employee_documents';
 
+    /**
+     * Finalise (lock) a company's attendance month and re-open it with a
+     * reason (HR Parity 2.3, AttendanceMonthLockService).
+     */
+    public const FinaliseAttendance = 'hr_finalise_attendance';
+
+    /**
+     * Start onboarding / exit checklists, edit checklist templates, and
+     * complete, skip or reassign any checklist task of the employees in
+     * one's HR scope (HR Parity 2.4).
+     */
+    public const ManageChecklists = 'hr_manage_onboarding';
+
+    /** Post, edit and remove company announcements and see who read them (HR Parity 2.6). */
+    public const ManageAnnouncements = 'hr_manage_announcements';
+
     /** @return array<int, string> */
     public static function all(): array
     {
         return [
+            self::ManageChecklists,
+            self::ManageAnnouncements,
+            self::FinaliseAttendance,
             self::ManageEmployeeDocuments,
             self::ViewEmployeeDocuments,
             self::ViewAllRecords,
@@ -271,10 +290,13 @@ final class HrPermissions
         return [
             self::ViewAllRecords,
             self::ManageEmployeeDocuments,
+            self::ManageChecklists,
+            self::ManageAnnouncements,
             self::ApproveLeave,
             self::ApproveTimesheets,
             self::ManagePerformance,
             self::ManageAttendance,
+            self::FinaliseAttendance,
             self::ManageEmployeeRequests,
             self::ViewAnalytics,
             self::ManageAttendanceGeofences,
@@ -307,6 +329,7 @@ final class HrPermissions
     {
         return [
             self::ManageEmployeeDocuments,
+            self::ManageChecklists,
             'view_any_employee_employee', 'view_employee_employee', 'create_employee_employee', 'update_employee_employee',
             'view_any_employee_employee::skill', 'view_employee_employee::skill', 'create_employee_employee::skill', 'update_employee_employee::skill',
             'view_any_employee_department', 'view_employee_department',

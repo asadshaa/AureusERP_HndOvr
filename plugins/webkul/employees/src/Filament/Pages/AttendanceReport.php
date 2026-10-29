@@ -5,16 +5,22 @@ namespace Webkul\Employee\Filament\Pages;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
+use InvalidArgumentException;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Webkul\Employee\Models\AttendanceMonthLock;
 use Webkul\Employee\Models\Department;
+use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
 use Webkul\Employee\Services\Attendance\MonthlyAttendanceExcel;
 use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
 use Webkul\Security\Models\User;
@@ -149,6 +155,43 @@ class AttendanceReport extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('finaliseMonth')
+                ->label('Finalise month')
+                ->icon('heroicon-o-lock-closed')
+                ->color('warning')
+                ->visible(fn (): bool => $this->canFinaliseSelected() && $this->selectedLock()?->isFinalised() !== true)
+                ->requiresConfirmation()
+                ->modalHeading(fn (): string => 'Finalise '.Carbon::createFromFormat('!Y-m', $this->month())->format('F Y').'?')
+                ->modalDescription(fn (): string => $this->finaliseSummary())
+                ->modalSubmitActionLabel('Finalise and lock')
+                ->action(function (): void {
+                    try {
+                        app(AttendanceMonthLockService::class)->finalise(CurrentCompany::user(), (int) $this->companyId(), $this->month());
+                        Notification::make()->success()->title('Month finalised')
+                            ->body('The report is frozen and attendance, leave and overtime for this month are locked.')
+                            ->send();
+                    } catch (AuthorizationException|InvalidArgumentException|RuntimeException $e) {
+                        Notification::make()->danger()->title('Not finalised')->body($e->getMessage())->send();
+                    }
+                }),
+            Action::make('reopenMonth')
+                ->label('Re-open month')
+                ->icon('heroicon-o-lock-open')
+                ->color('gray')
+                ->visible(fn (): bool => $this->canFinaliseSelected() && $this->selectedLock()?->isFinalised() === true)
+                ->modalHeading('Re-open this month?')
+                ->modalDescription('Attendance, leave and overtime of the month can be changed again and the report is calculated live until it is finalised again (which replaces the snapshot). Your reason is kept in the audit trail.')
+                ->schema([
+                    Textarea::make('reason')->label('Reason for re-opening')->required()->minLength(10)->maxLength(1000),
+                ])
+                ->action(function (array $data): void {
+                    try {
+                        app(AttendanceMonthLockService::class)->reopen(CurrentCompany::user(), (int) $this->companyId(), $this->month(), (string) $data['reason']);
+                        Notification::make()->success()->title('Month re-opened')->send();
+                    } catch (AuthorizationException|InvalidArgumentException|RuntimeException $e) {
+                        Notification::make()->danger()->title('Not re-opened')->body($e->getMessage())->send();
+                    }
+                }),
             Action::make('downloadExcel')
                 ->label('Download Excel')
                 ->icon('heroicon-o-arrow-down-tray')
@@ -167,6 +210,38 @@ class AttendanceReport extends Page implements HasForms
                     return app(MonthlyAttendanceExcel::class)->download($report);
                 }),
         ];
+    }
+
+    protected function canFinaliseSelected(): bool
+    {
+        $companyId = $this->companyId();
+
+        return $companyId !== null && AttendanceMonthLockService::canFinalise(CurrentCompany::user(), $companyId);
+    }
+
+    protected function selectedLock(): ?AttendanceMonthLock
+    {
+        $companyId = $this->companyId();
+
+        return $companyId !== null ? app(AttendanceMonthLockService::class)->lockFor($companyId, $this->month()) : null;
+    }
+
+    /** The confirmation text: who is in the month and what is still open. */
+    protected function finaliseSummary(): string
+    {
+        $companyId = $this->companyId();
+        if ($companyId === null) {
+            return '';
+        }
+
+        $review = app(AttendanceMonthLockService::class)->review($companyId, $this->month());
+
+        $text = "{$review['employees']} employee(s); {$review['days_needing_review']} day(s) needing review.";
+        $text .= $review['warnings'] !== []
+            ? ' Still open: '.implode('; ', $review['warnings']).'. You can finalise anyway; these will be locked as they are.'
+            : ' Nothing is left open.';
+
+        return $text.' After finalising, the report and Excel come from a snapshot, and attendance, leave and overtime of the month can no longer be changed until HR re-opens it.';
     }
 
     /** The selected company, only when the user belongs to it. */

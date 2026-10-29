@@ -283,7 +283,8 @@ it('runs a flat number of queries however many employees there are', function ()
     }
     $large = $count();
 
-    expect($large)->toBe($small)->and($small)->toBeLessThanOrEqual(12);
+    // 12 + one query for the day's work schedules (HR parity plan 2.2).
+    expect($large)->toBe($small)->and($small)->toBeLessThanOrEqual(13);
 });
 
 it('renders the page with the problems list and downloads the Excel', function () {

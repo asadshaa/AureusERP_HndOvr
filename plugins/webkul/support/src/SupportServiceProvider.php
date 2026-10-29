@@ -12,6 +12,7 @@ use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Security\Livewire\AcceptInvitation;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Policies\RolePolicy;
+use Webkul\Support\Console\Commands\SendApprovalRemindersCommand;
 use Webkul\Support\Traits\HasFilamentDefaults;
 use Webkul\Support\Traits\HasRouterMacros;
 use Webkul\Support\Traits\HasRtlSupport;
@@ -68,8 +69,13 @@ class SupportServiceProvider extends PackageServiceProvider
                 '2026_08_03_093616_create_email_templates_table',
                 '2026_08_25_000001_create_approval_workflow_tables',
                 '2026_09_09_000001_add_tax_identity_to_companies_table',
+                '2026_10_30_400001_add_reminders_and_returns_to_approval_tables',
+                '2026_10_30_400002_create_support_approval_reminders_table',
             ])
             ->runsMigrations()
+            ->hasCommands([
+                SendApprovalRemindersCommand::class,
+            ])
             ->hasSettings([
                 '2026_06_12_000001_create_brand_settings',
             ])

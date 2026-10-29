@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use InvalidArgumentException;
+use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 
@@ -81,6 +82,10 @@ class AttendanceInterval extends Model
 
     protected static function booted(): void
     {
+        // A finalised attendance month is locked (AttendanceMonthLockService).
+        static::saving(fn (self $interval) => app(AttendanceMonthLockService::class)->guardAttendanceInterval($interval));
+        static::deleting(fn (self $interval) => app(AttendanceMonthLockService::class)->guardAttendanceInterval($interval));
+
         static::saving(function (self $interval): void {
             $record = $interval->attendanceRecord;
             if ($record && ((int) $record->company_id !== (int) $interval->company_id || (int) $record->employee_id !== (int) $interval->employee_id)) {
