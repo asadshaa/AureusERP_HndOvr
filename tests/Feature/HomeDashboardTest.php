@@ -126,6 +126,12 @@ function hdRender(User $user): array
     test()->actingAs($user);
     test()->get('/admin')->assertOk();
     app(HomeDashboardContext::class)->flush();
+
+    // The warm-up request already ran the after-response work (chatter
+    // notifications of the test data); the test process never clears the
+    // terminating callbacks, so drop them instead of counting them again.
+    $terminating = new ReflectionProperty(app(), 'terminatingCallbacks');
+    $terminating->setValue(app(), []);
     DB::flushQueryLog();
     DB::enableQueryLog();
     $response = test()->get('/admin');

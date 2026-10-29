@@ -3,11 +3,13 @@
 /**
  * HR parity plan 1.9: Loan, Salary advance and HR letter request types per
  * company, and the HR fallback approver fix (spec D5): the HR approver set is
- * the company's real HR people only -- never manager-role users, never HR of
- * another company, never a group owner just for being one.
+ * the company's real HR people only -- never manager-role users, never a
+ * read-only HR auditor, never HR of another company, never a group owner just
+ * for being one.
  */
 
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
@@ -23,6 +25,7 @@ use Webkul\Security\Models\Permission;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Filament\Resources\ApprovalRequestResource;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
@@ -146,7 +149,9 @@ it('keeps manager-role users, other companies HR and group owners out of the HR 
     $engine = app(ApprovalEngine::class);
 
     $directHr = selfServiceUser($f['company']);
-    $directHr->givePermissionTo(Permission::query()->firstOrCreate(['name' => 'hr_view_all_records', 'guard_name' => 'web']));
+    foreach (['hr_view_all_records', 'hr_manage_employee_requests'] as $permission) {
+        $directHr->givePermissionTo(Permission::query()->firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+    }
 
     $memberOwner = selfServiceUser($f['company']);
     $memberOwner->givePermissionTo(Permission::query()->firstOrCreate(['name' => CurrentCompany::MANAGE_MEMBERSHIPS, 'guard_name' => 'web']));
@@ -195,6 +200,106 @@ it('lets only the company HR decide the fallback step of an employee without a l
     expect($f['managerUser']->can('hr_approve_leave'))->toBeTrue()
         ->and($engine->canAct($leaveApproval, $f['managerUser']))->toBeFalse()
         ->and($engine->canAct($leaveApproval, $f['hrUser']))->toBeTrue();
+});
+
+it('keeps read-only HR auditors out of the HR approver set and keeps Admin and the HR roles in', function (): void {
+    $f = selfServiceFixture();
+    $engine = app(ApprovalEngine::class);
+    $companyId = (int) $f['company']->id;
+
+    $auditor = selfServiceUser($f['company'], 'hr_auditor');
+    // A line manager who is also an auditor: decision rights for their own reports, visibility from auditing.
+    $auditingManager = selfServiceUser($f['company'], 'hr_auditor');
+    $auditingManager->assignRole(Role::query()->where('name', 'manager')->where('guard_name', 'web')->firstOrFail());
+    $viewOnly = selfServiceUser($f['company']);
+    $viewOnly->givePermissionTo(Permission::query()->firstOrCreate(['name' => 'hr_view_all_records', 'guard_name' => 'web']));
+
+    $admin = selfServiceUser($f['company'], 'Admin');
+    $opsManager = selfServiceUser($f['company'], 'hr_ops_manager');
+    $hrAdministrator = selfServiceUser($f['company'], 'hr_administrator');
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    $ids = $engine->resolveHrApproversForCompany($companyId)->pluck('id')->all();
+    $queries = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect($queries)->toBe(1)
+        ->and($auditor->can('hr_view_all_records'))->toBeTrue()
+        ->and($auditingManager->can('hr_view_all_records') && $auditingManager->can('hr_approve_leave'))->toBeTrue()
+        ->and($ids)->toContain($f['hrUser']->id, $admin->id, $opsManager->id, $hrAdministrator->id)
+        ->and($ids)->not->toContain($auditor->id, $auditingManager->id, $viewOnly->id)
+        ->and($engine->isCompanyHrApprover($auditor, $companyId))->toBeFalse()
+        ->and($engine->isCompanyHrApprover($viewOnly, $companyId))->toBeFalse()
+        ->and($engine->isCompanyHrApprover($f['hrUser'], $companyId))->toBeTrue()
+        ->and($engine->isCompanyHrApprover($admin, $companyId))->toBeTrue();
+
+    // The HR fallback step of an employee without a line manager.
+    $request = selfServiceRequest($f['company'], $f['orphan'], EmployeeRequestKinds::SalaryAdvanceCode, '1000', [
+        'reason' => 'Rent', 'deduct_month' => now()->format('Y-m'),
+    ]);
+    $approval = app(EmployeeRequestService::class)->submit($request, $f['orphanUser']);
+
+    expect($engine->canAct($approval, $auditor))->toBeFalse()
+        ->and($engine->canAct($approval, $auditingManager))->toBeFalse()
+        ->and($engine->canAct($approval, $f['hrUser']))->toBeTrue()
+        ->and($engine->resolveAuthorizedApprovers($approval)->pluck('id')->all())->toContain($f['hrUser']->id)->not->toContain($auditor->id)
+        ->and(fn () => $engine->approve($approval, $auditor))->toThrow(RuntimeException::class, 'not an approver');
+
+    // Sensitive employee changes let any HR approver decide: still not the auditor.
+    $custodian = selfServiceUser($f['company']);
+    ApprovalWorkflow::query()
+        ->create(['company_id' => $companyId, 'request_type' => 'employee_sensitive_change', 'name' => 'Sensitive change', 'priority' => 100000, 'is_active' => true])
+        ->steps()->create(['sequence' => 1, 'name' => 'Custodian review', 'approver_user_id' => $custodian->id, 'required_approvals' => 1]);
+    $sensitive = $engine->submit($f['employee'], $f['managerUser'], 'employee_sensitive_change', null, ['company_id' => $companyId]);
+
+    expect($engine->canAct($sensitive, $auditor))->toBeFalse()
+        ->and($engine->canAct($sensitive, $viewOnly))->toBeFalse()
+        ->and($engine->canAct($sensitive, $f['hrUser']))->toBeTrue()
+        ->and($engine->canAct($sensitive, $custodian))->toBeTrue();
+});
+
+it('lets one HR person decide both steps for an employee without a line manager and shows both, by step, in the trail', function (): void {
+    $f = selfServiceFixture();
+    $service = app(EmployeeRequestService::class);
+
+    $request = selfServiceRequest($f['company'], $f['orphan'], EmployeeRequestKinds::SalaryAdvanceCode, '1000', [
+        'reason' => 'Rent', 'deduct_month' => now()->format('Y-m'),
+    ]);
+    $service->submit($request, $f['orphanUser']);
+
+    $service->approve($request->fresh(), $f['hrUser'], 'Covering the missing line manager');
+    expect($request->fresh()->status)->toBe('pending_approval')
+        ->and(app(ApprovalEngine::class)->canAct($request->fresh()->approvalRequest, $f['hrUser']))->toBeTrue();
+
+    $service->approve($request->fresh(), $f['hrUser'], 'HR check done');
+    $request = $request->fresh(['approvalRequest.decisions.step']);
+    $decisions = $request->approvalRequest->decisions;
+
+    expect($request->status)->toBe('approved')
+        ->and($decisions)->toHaveCount(2)
+        ->and($decisions->pluck('actor_id')->unique()->values()->all())->toBe([$f['hrUser']->id])
+        ->and($decisions->map(fn ($decision): string => $decision->step->name)->all())->toBe(['Line Manager Review', 'HR Review']);
+
+    Auth::login($f['orphanUser']);
+    $trail = EmployeeRequestResource::approvalTrailHtml(EmployeeRequestResource::getEloquentQuery()->findOrFail($request->id));
+    $hrName = e($f['hrUser']->name);
+
+    expect($trail)->toContain(
+        "by {$hrName} at Line Manager Review",
+        'Covering the missing line manager',
+        "by {$hrName} at HR Review",
+        'HR check done',
+    )
+        ->and($trail)->not->toContain('Waiting:');
+
+    // The Approval Queue's decision history names the steps too.
+    expect(ApprovalRequestResource::decisionHistoryText($request->approvalRequest))->toContain(
+        "[APPROVED] Step 1: Line Manager Review by {$f['hrUser']->name}",
+        "[APPROVED] Step 2: HR Review by {$f['hrUser']->name}",
+        '(Note: Covering the missing line manager)',
+        '(Note: HR check done)',
+    );
 });
 
 // ---------------------------------------------------------------------

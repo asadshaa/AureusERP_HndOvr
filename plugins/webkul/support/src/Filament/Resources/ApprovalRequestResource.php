@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
+use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Filament\Resources\ApprovalRequestResource\Pages\ListApprovalRequests;
 use Webkul\Support\Models\ApprovalRequest;
@@ -77,7 +78,34 @@ class ApprovalRequestResource extends Resource
     {
         return parent::getEloquentQuery()
             ->where('company_id', Auth::user()?->default_company_id)
-            ->with(['workflow', 'requester', 'decisions.actor', 'subject']);
+            ->with(['workflow', 'requester', 'decisions.actor', 'decisions.step', 'subject']);
+    }
+
+    /**
+     * One line per decision, oldest first, naming the step it was taken at.
+     * The same person can decide two steps in a row (HR covering the line
+     * manager step of an employee without a manager, then the HR step), so
+     * the step is what tells those decisions apart.
+     */
+    public static function decisionHistoryText(ApprovalRequest $record): string
+    {
+        $record->loadMissing(['decisions.actor', 'decisions.step']);
+
+        if ($record->decisions->isEmpty()) {
+            return 'No decisions recorded yet.';
+        }
+
+        return $record->decisions->sortBy('id')->map(function ($decision): string {
+            $action = strtoupper((string) $decision->decision);
+            $step = $decision->step
+                ? "Step {$decision->step->sequence}: {$decision->step->name}"
+                : 'Step #'.$decision->step_id;
+            $who = $decision->actor?->name ?? 'User #'.$decision->actor_id;
+            $date = ($decision->decided_at ?? $decision->created_at)?->format('d M Y, h:i A') ?? '';
+            $note = $decision->reason ? " (Note: {$decision->reason})" : '';
+
+            return "• [{$action}] {$step} by {$who} on {$date}{$note}";
+        })->join("\n");
     }
 
     public static function form(Schema $schema): Schema
@@ -242,24 +270,11 @@ class ApprovalRequestResource extends Resource
                                         ->getStateUsing(fn (ApprovalRequest $record): string => app(ApprovalEngine::class)->describeCurrentApprover($record))
                                         ->badge()
                                         ->color('warning')
-                                        ->icon('heroicon-o-user-circle'),
+                                        ->icon('heroicon-o-user-circle')
+                                        ->visible(fn (ApprovalRequest $record): bool => $record->status === ApprovalRequestStatus::Pending->value),
                                     TextEntry::make('decisions_history')
                                         ->label('Decision History')
-                                        ->getStateUsing(function (ApprovalRequest $record): string {
-                                            $decisions = $record->decisions;
-                                            if ($decisions->isEmpty()) {
-                                                return 'No decisions recorded yet.';
-                                            }
-
-                                            return $decisions->map(function ($d): string {
-                                                $who = $d->actor?->name ?? 'User #'.$d->actor_id;
-                                                $action = strtoupper($d->decision);
-                                                $date = $d->created_at?->format('d M Y, h:i A') ?? '';
-                                                $note = $d->reason ? " (Note: {$d->reason})" : '';
-
-                                                return "• [{$action}] by {$who} on {$date}{$note}";
-                                            })->join("\n");
-                                        })
+                                        ->getStateUsing(fn (ApprovalRequest $record): string => static::decisionHistoryText($record))
                                         ->extraAttributes(['style' => 'white-space: pre-line;'])
                                         ->columnSpanFull(),
                                 ])
@@ -317,11 +332,8 @@ class ApprovalRequestResource extends Resource
                                 ->schema([
                                     TextEntry::make('status')
                                         ->badge()
-                                        ->color(fn (string $state): string => match ($state) {
-                                            'approved' => 'success',
-                                            'rejected' => 'danger',
-                                            default    => 'warning',
-                                        }),
+                                        ->formatStateUsing(fn (?string $state): string => ApprovalRequestStatus::labelFor($state))
+                                        ->color(fn (?string $state): string => ApprovalRequestStatus::colorFor($state)),
                                     TextEntry::make('completed_at')
                                         ->label('Completed At')
                                         ->dateTime('d M Y, h:i A')
@@ -457,9 +469,10 @@ class ApprovalRequestResource extends Resource
                 TextColumn::make('requester.name')->label('Requester')->placeholder('System'),
                 TextColumn::make('amount')->numeric(decimalPlaces: 2)->placeholder('—')->toggleable(),
                 TextColumn::make('current_step_sequence')->label('Step')->placeholder('Complete'),
-                TextColumn::make('status')->badge()->color(fn (string $state): string => match ($state) {
-                    'approved' => 'success', 'rejected' => 'danger', default => 'warning',
-                }),
+                TextColumn::make('status')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => ApprovalRequestStatus::labelFor($state))
+                    ->color(fn (?string $state): string => ApprovalRequestStatus::colorFor($state)),
                 TextColumn::make('submitted_at')->dateTime()->sortable(),
                 TextColumn::make('completed_at')->dateTime()->placeholder('Pending')->toggleable(),
             ])
@@ -469,9 +482,7 @@ class ApprovalRequestResource extends Resource
             // belongs at the top, not a freshly-submitted one.
             ->defaultSort('submitted_at', 'asc')
             ->filters([
-                SelectFilter::make('status')->options([
-                    'pending' => 'Pending', 'approved' => 'Approved', 'rejected' => 'Rejected',
-                ]),
+                SelectFilter::make('status')->options(ApprovalRequestStatus::options()),
             ])
             ->recordActions([
                 ViewAction::make()->modalHeading('Approval Details'),

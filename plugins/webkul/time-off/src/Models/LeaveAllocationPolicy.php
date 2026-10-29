@@ -25,15 +25,18 @@ class LeaveAllocationPolicy extends Model
     protected $table = 'time_off_allocation_policies';
 
     /**
-     * Today's defaults: 12 / 8 / 5 days (the hire-time allocation, 25 days in
-     * total), Annual Leave may carry forward up to 6 unused days.
+     * The leave policy (decision of 2026-10-29): 25 days a year, Annual 12,
+     * Sick 8 and Casual 5. Only Annual Leave carries forward, at most 6 unused
+     * days, and carried days do not expire. Used for the yearly allocation and
+     * the hire-time allocation (AllocateDefaultLeaveOnEmployeeCreated), both
+     * prorated for the joining year.
      *
      * @var array<string, array{annual_days: float, carry_forward_cap: float}>
      */
     public const DEFAULTS = [
         'Annual Leave' => ['annual_days' => 12, 'carry_forward_cap' => 6],
-        'Casual Leave' => ['annual_days' => 8, 'carry_forward_cap' => 0],
-        'Sick Leave'   => ['annual_days' => 5, 'carry_forward_cap' => 0],
+        'Sick Leave'   => ['annual_days' => 8, 'carry_forward_cap' => 0],
+        'Casual Leave' => ['annual_days' => 5, 'carry_forward_cap' => 0],
     ];
 
     protected $fillable = [
@@ -67,19 +70,22 @@ class LeaveAllocationPolicy extends Model
     }
 
     /**
-     * The company's policies, adding the defaults for its own Annual / Casual
-     * / Sick Leave types when the company has no policy row for them yet.
-     * With $persist = false (dry run) the defaults are returned unsaved.
+     * The company's policies, adding the defaults for its own Annual / Sick /
+     * Casual Leave types when the company has no policy for that leave type
+     * name yet (one per name, the oldest type, even if a duplicate type of
+     * the same name exists). With $persist = false (dry run) the defaults are
+     * returned unsaved.
      *
      * @return Collection<int, self>
      */
     public static function forCompany(int $companyId, bool $persist = true): Collection
     {
         $policies = self::query()->with('leaveType')->where('company_id', $companyId)->get();
+        $coveredNames = $policies->map(fn (self $policy): ?string => $policy->leaveType?->name)->filter()->all();
 
         $missing = LeaveType::query()
             ->where('company_id', $companyId)
-            ->whereIn('name', array_keys(self::DEFAULTS))
+            ->whereIn('name', array_diff(array_keys(self::DEFAULTS), $coveredNames))
             ->whereNotIn('id', $policies->pluck('leave_type_id'))
             ->orderBy('id')
             ->get()

@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
 use Webkul\Security\Models\User;
-use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
 use Webkul\TimeOff\Enums\State;
@@ -29,7 +28,7 @@ use Webkul\TimeOff\Models\Leave;
  *                          has not started yet (start date after today,
  *                          Asia/Karachi). The leave stays approved; HR and
  *                          the line manager are notified.
- *  - cancel              : HR (hr_approve_leave, in the leave's company)
+ *  - cancel              : HR (the company's HR approvers, ApprovalEngine)
  *                          cancels an approved leave, with a reason, whether
  *                          or not the employee asked. The employee and line
  *                          manager are notified.
@@ -238,7 +237,7 @@ class LeaveCancellationService
 
     private function isHr(Leave $leave, User $actor): bool
     {
-        return $actor->can('hr_approve_leave') && $this->approvals->userCanAccessCompany($actor, (int) $leave->company_id);
+        return $this->approvals->isCompanyHrApprover($actor, (int) $leave->company_id);
     }
 
     private function startsAfterToday(Leave $leave): bool
@@ -304,12 +303,8 @@ class LeaveCancellationService
     /** @return Collection<int, User> */
     private function hrUsers(Leave $leave, User $actor): Collection
     {
-        // The same people who may cancel (isHr): hr_approve_leave in the leave's company.
-        return CurrentCompany::scopeUsersOf(User::query()->where('is_active', true), (int) $leave->company_id)
-            ->whereKeyNot($actor->id)
-            ->get()
-            ->filter(fn (User $user): bool => $user->can('hr_approve_leave'))
-            ->values();
+        // The same people who may cancel (isHr): the company's HR approvers.
+        return $this->approvals->resolveHrApproversForCompany((int) $leave->company_id, (int) $actor->id)->values();
     }
 
     /** @return Collection<int, User> */

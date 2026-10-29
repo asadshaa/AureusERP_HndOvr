@@ -158,19 +158,9 @@ class LeaveApprovalService
                 $recipients = collect([$manager]);
                 $routingNote = '[Routed to Line Manager]';
             } else {
-                $recipients = User::query()
-                    ->where('default_company_id', $leave->company_id)
-                    ->where('is_active', true)
-                    ->get()
-                    ->filter(fn (User $u): bool => (
-                        $u->hasRole([
-                            'Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager',
-                            'hr_ops_manager', 'hr ops manager', 'hr operations manager',
-                            'hr_administrator', 'hr administrator', 'human resources', 'human resources manager',
-                        ])
-                        || $u->can('hr_approve_leave')
-                        || $u->can('hr_view_all_records')
-                    ) && (int) $u->id !== (int) $requester->id);
+                // The company's HR people, as the approval engine resolves them for its HR
+                // fallback: a plain manager holding hr_approve_leave for their own reports is not HR.
+                $recipients = $this->approvals->resolveHrApproversForCompany((int) $leave->company_id, (int) $requester->id);
                 $routingNote = '[Forwarded to HR: no line manager assigned]';
             }
 

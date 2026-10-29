@@ -13,6 +13,7 @@ use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Support\Models\Company;
 use Webkul\TimeOff\Database\Seeders\AttendanceLeaveTypeSeeder;
+use Webkul\TimeOff\Database\Seeders\LeaveWorkflowSeeder;
 use Webkul\TimeOff\Listeners\AllocateDefaultLeaveOnEmployeeCreated;
 
 class TimeOffServiceProvider extends PackageServiceProvider
@@ -39,6 +40,8 @@ class TimeOffServiceProvider extends PackageServiceProvider
                 '2026_10_28_000020_add_cancellation_to_time_off_leaves',
                 '2026_10_28_000021_create_time_off_allocation_policies_table',
                 '2026_10_28_000022_half_day_uses_casual_leave_balance',
+                '2026_10_29_000023_apply_twenty_five_day_leave_policy',
+                '2026_10_29_000024_deactivate_unused_shared_leave_types',
             ])
             ->hasDependencies([
                 'employees',
@@ -71,11 +74,20 @@ class TimeOffServiceProvider extends PackageServiceProvider
         // know time-off exists at all.
         Event::listen('eloquent.created: '.Employee::class, AllocateDefaultLeaveOnEmployeeCreated::class);
 
-        // A new company gets the attendance leave types (Half day, Short leave, On Duty).
+        // A new company gets the attendance leave types (Half day, Short leave, On Duty) and its own
+        // Annual / Sick / Casual Leave with their yearly allocation policies (12 / 8 / 5 days).
         Company::created(function (Company $company): void {
             try {
                 if (Schema::hasTable('time_off_leave_types')) {
                     app(AttendanceLeaveTypeSeeder::class)->provisionForCompany($company);
+                }
+
+                if (Schema::hasTable('time_off_leave_types') && Schema::hasTable('time_off_allocation_policies')) {
+                    app(LeaveWorkflowSeeder::class)->provisionLeaveTypes($company);
+                }
+
+                if (Schema::hasTable('support_approval_workflows') && Schema::hasTable('support_approval_steps')) {
+                    app(LeaveWorkflowSeeder::class)->provisionWorkflow($company);
                 }
             } catch (Throwable $e) {
                 report($e);

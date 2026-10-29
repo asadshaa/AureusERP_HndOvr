@@ -4,6 +4,7 @@ require_once __DIR__.'/GeoTestHelpers.php';
 
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 uses(DatabaseTransactions::class);
@@ -349,6 +350,8 @@ it('refuses employees who are inactive, terminated or missing', function (array 
 
 it('gives a user with no employee record nothing', function () {
     $f = geoFixture();
+    // The hire-time leave allocations reference the employee (restrict on delete).
+    DB::table('time_off_leave_allocations')->where('employee_id', $f['employee']->id)->delete();
     $f['employee']->forceDelete();
 
     expect($this->service->checkIn($f['user'], geoEvidence(), geoRequest())->result)->toBe(Result::EmployeeNotEligible);

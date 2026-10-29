@@ -40,12 +40,29 @@ final class ApprovalEngine
     ];
 
     /**
-     * Permissions that make a user an HR approver: company-wide HR visibility.
+     * Company-wide HR visibility. On its own it is read-only (the HR auditor
+     * bundle carries it), so it only makes someone an HR approver together
+     * with one of HR_DECISION_PERMISSIONS on the same grant.
      *
      * @var array<int, string>
      */
     public const HR_APPROVER_PERMISSIONS = [
         'hr_view_all_records',
+    ];
+
+    /**
+     * HR decision rights. Paired with HR_APPROVER_PERMISSIONS on one role (or
+     * on the user's own direct permissions) they make an HR approver. Kept
+     * apart from the visibility permission because a line manager's bundle
+     * holds these for their own reports only, and an auditor's holds the
+     * visibility only: neither may approve for the whole company.
+     *
+     * @var array<int, string>
+     */
+    public const HR_DECISION_PERMISSIONS = [
+        'hr_approve_leave',
+        'hr_manage_employee_requests',
+        'hr_manage_attendance',
     ];
 
     /** @var array<string, bool> */
@@ -214,8 +231,11 @@ final class ApprovalEngine
     /**
      * The HR people of one company: active users who belong to it (default
      * company or an explicit membership -- a group owner's implicit access to
-     * every company does not count) and hold an HR role or company-wide HR
-     * visibility. One query; line managers are never included (D5).
+     * every company does not count) and hold an HR role, or a role (or direct
+     * permissions) granting both company-wide HR visibility and an HR decision
+     * right. One query; line managers (decision rights without company-wide
+     * visibility) and read-only HR auditors (visibility without decision
+     * rights) are never included (D5).
      */
     public function resolveHrApproversForCompany(int $companyId, ?int $excludeUserId = null): Collection
     {
@@ -238,8 +258,24 @@ final class ApprovalEngine
             ->when($excludeUserId, fn (Builder $query) => $query->whereKeyNot($excludeUserId))
             ->where(fn (Builder $query) => $query
                 ->whereHas('roles', fn (Builder $roles) => $roles->whereIn('name', self::HR_ROLE_NAMES))
-                ->orWhereHas('roles.permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_APPROVER_PERMISSIONS))
-                ->orWhereHas('permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_APPROVER_PERMISSIONS)));
+                ->orWhereHas('roles', fn (Builder $roles) => $this->grantsHrDecisions($roles))
+                ->orWhere(fn (Builder $directPermissions) => $this->grantsHrDecisions($directPermissions)));
+    }
+
+    /**
+     * Constrains a permission holder (a role, or a user's direct permissions)
+     * to one that carries company-wide HR visibility AND an HR decision right.
+     * Requiring both on the same holder keeps a line manager who is also an
+     * HR auditor out: neither of their roles makes them a company approver.
+     *
+     * @param  Builder<Model>  $holder
+     * @return Builder<Model>
+     */
+    private function grantsHrDecisions(Builder $holder): Builder
+    {
+        return $holder
+            ->whereHas('permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_APPROVER_PERMISSIONS))
+            ->whereHas('permissions', fn (Builder $permissions) => $permissions->whereIn('name', self::HR_DECISION_PERMISSIONS));
     }
 
     /**
@@ -317,7 +353,7 @@ final class ApprovalEngine
             : $actor->roles()->whereKey($step->approver_role_id)->exists())) {
             return true;
         }
-        if ($request->request_type === 'employee_sensitive_change' && $this->isHrApprover($actor)) {
+        if ($request->request_type === 'employee_sensitive_change' && $this->isHrApprover($actor, (int) $request->company_id)) {
             return true;
         }
 
@@ -415,7 +451,12 @@ final class ApprovalEngine
         return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
-    private function isHrApprover(User $actor): bool
+    /**
+     * Who may decide an employee_sensitive_change at any step: HR roles, the
+     * sensitive-data custodian, and the company's HR approvers. Company-wide
+     * HR visibility alone (the read-only HR auditor) is not enough.
+     */
+    private function isHrApprover(User $actor, int $companyId): bool
     {
         return $actor->hasRole([
             'hr',
@@ -434,7 +475,7 @@ final class ApprovalEngine
             'Sensitive_data_custodian',
         ])
         || $actor->can('hr_manage_sensitive_employee_data')
-        || $actor->can('hr_view_all_records');
+        || $this->isCompanyHrApprover($actor, $companyId);
     }
 
     /**

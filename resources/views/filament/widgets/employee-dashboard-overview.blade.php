@@ -206,7 +206,7 @@
                 </div>
             </a>
 
-            {{-- Cards 2, 3, 4: Annual (12), Casual (8), Sick (5) --}}
+            {{-- Cards 2, 3, 4: Annual (12), Casual (5), Sick (8) --}}
             @foreach ($cards as $card)
                 @php
                     $themeKey = $card['key'] ?? 'annual';

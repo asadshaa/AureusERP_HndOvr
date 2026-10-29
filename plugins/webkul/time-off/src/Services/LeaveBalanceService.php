@@ -17,48 +17,43 @@ use Webkul\TimeOff\Models\LeaveType;
  *
  *  - allocated : approved allocations (state validate_two) of the type that
  *                overlap the year (the yearly grant plus any carry-forward);
- *  - taken     : approved leave (validate_two) starting in the year;
+ *  - taken     : approved leave (validate_two) of the type starting in the year;
  *  - pending   : leave waiting for a decision (confirm / validate_one);
  *  - remaining : allocated - taken - pending.
  *
  * Refused and cancelled leave never count, so withdrawing or cancelling a
- * leave gives the days back. Days are number_of_days: a half day is 0.5, a
- * short leave is its hours / 8 (only relevant when the type requires an
- * allocation; the seeded Short leave does not).
+ * leave gives the days back. Days are number_of_days: a half day of a type
+ * that requires an allocation is 0.5, a short leave is its hours / 8 (only
+ * relevant when the type requires an allocation; the seeded Short leave
+ * does not).
  *
- * Half day (decision 2026-10-28): a half-day type that needs no allocation
- * of its own ("Half day") uses the employee's Casual Leave balance, or
- * Annual Leave when the company has no Casual Leave type. Its 0.5 days are
- * shown and checked against that pool, and counted as taken there.
+ * Only a type that requires an allocation has a balance. The Half day type
+ * (half-day request unit, decision of 2026-10-29) does not count as leave:
+ * it deducts nothing from any balance and is never refused for balance,
+ * whatever its requires_allocation says. It stays a leave type, so an
+ * approved Half day still covers half the day in attendance.
  *
- * A request may not take the remaining balance below zero, unless the pool
- * type allows a negative balance: then down to -max_allowed_negative (no
- * limit when max_allowed_negative is empty).
+ * A request may not take the remaining balance below zero, unless the type
+ * allows a negative balance: then down to -max_allowed_negative (no limit
+ * when max_allowed_negative is empty).
  */
 class LeaveBalanceService
 {
-    /** Pools a half-day type without its own allocation uses, in order. */
-    public const HALF_DAY_POOLS = ['Casual Leave', 'Annual Leave'];
-
     /** @var array<int, string> */
     public const PENDING_STATES = ['confirm', 'validate_one'];
 
     /**
-     * @return array{tracked: bool, year: int, leave_type: string, pool_type_id: ?int, pool_type: ?string, shared_pool: bool, allocated: float, taken: float, pending: float, remaining: float, allows_negative: bool, max_negative: ?float}
+     * @return array{tracked: bool, year: int, leave_type: string, allocated: float, taken: float, pending: float, remaining: float, allows_negative: bool, max_negative: ?float}
      */
     public function forEmployee(Employee $employee, LeaveType $leaveType, ?int $year = null, ?int $ignoreLeaveId = null): array
     {
         $year ??= self::today()->year;
-        $pool = $this->poolTypeFor($leaveType, (int) $employee->company_id);
 
-        if (! $pool) {
+        if (! self::deductsBalance($leaveType)) {
             return [
                 'tracked'         => false,
                 'year'            => $year,
                 'leave_type'      => (string) $leaveType->name,
-                'pool_type_id'    => null,
-                'pool_type'       => null,
-                'shared_pool'     => false,
                 'allocated'       => 0.0,
                 'taken'           => 0.0,
                 'pending'         => 0.0,
@@ -68,35 +63,28 @@ class LeaveBalanceService
             ];
         }
 
-        $usage = $this->poolUsage($employee, $pool, $year, $ignoreLeaveId);
-
-        return $usage + [
+        return $this->usage($employee, $leaveType, $year, $ignoreLeaveId) + [
             'tracked'         => true,
             'year'            => $year,
             'leave_type'      => (string) $leaveType->name,
-            'pool_type_id'    => (int) $pool->id,
-            'pool_type'       => (string) $pool->name,
-            'shared_pool'     => (int) $pool->id !== (int) $leaveType->id,
-            'allows_negative' => (bool) $pool->allows_negative,
-            'max_negative'    => $pool->max_allowed_negative !== null ? (float) $pool->max_allowed_negative : null,
+            'allows_negative' => (bool) $leaveType->allows_negative,
+            'max_negative'    => $leaveType->max_allowed_negative !== null ? (float) $leaveType->max_allowed_negative : null,
         ];
     }
 
     /**
-     * Allocated / taken / pending / remaining days of a pool type, including
-     * the half-day types that draw from it.
+     * Allocated / taken / pending / remaining days of one leave type in a year.
      *
      * @return array{allocated: float, taken: float, pending: float, remaining: float}
      */
-    public function poolUsage(Employee $employee, LeaveType $pool, int $year, ?int $ignoreLeaveId = null): array
+    public function usage(Employee $employee, LeaveType $leaveType, int $year, ?int $ignoreLeaveId = null): array
     {
         $yearStart = Carbon::create($year, 1, 1)->startOfDay();
         $yearEnd = Carbon::create($year, 12, 31)->endOfDay();
-        $typeIds = $this->consumingTypeIds($pool, (int) $employee->company_id);
 
         $allocated = (float) LeaveAllocation::query()
             ->where('employee_id', $employee->id)
-            ->where('holiday_status_id', $pool->id)
+            ->where('holiday_status_id', $leaveType->id)
             ->where('state', State::VALIDATE_TWO->value)
             ->where('date_from', '<=', $yearEnd)
             ->where(fn ($query) => $query->whereNull('date_to')->orWhere('date_to', '>=', $yearStart))
@@ -104,7 +92,7 @@ class LeaveBalanceService
 
         $leaves = Leave::query()
             ->where('employee_id', $employee->id)
-            ->whereIn('holiday_status_id', $typeIds)
+            ->where('holiday_status_id', $leaveType->id)
             ->whereRaw('COALESCE(request_date_from, date_from) BETWEEN ? AND ?', [$yearStart->toDateTimeString(), $yearEnd->toDateTimeString()])
             ->when($ignoreLeaveId, fn ($query) => $query->whereKeyNot($ignoreLeaveId));
 
@@ -120,8 +108,64 @@ class LeaveBalanceService
     }
 
     /**
+     * usage() for several leave types at once, in two queries.
+     *
+     * @param  iterable<LeaveType>  $leaveTypes
+     * @return array<int, array{allocated: float, taken: float, pending: float, remaining: float}> keyed by leave type id
+     */
+    public function usageForTypes(Employee $employee, iterable $leaveTypes, int $year): array
+    {
+        $typeIds = collect($leaveTypes)->map(fn (LeaveType $type): int => (int) $type->id)->unique()->values()->all();
+
+        if ($typeIds === []) {
+            return [];
+        }
+
+        $yearStart = Carbon::create($year, 1, 1)->startOfDay();
+        $yearEnd = Carbon::create($year, 12, 31)->endOfDay();
+
+        $allocated = LeaveAllocation::query()
+            ->where('employee_id', $employee->id)
+            ->whereIn('holiday_status_id', $typeIds)
+            ->where('state', State::VALIDATE_TWO->value)
+            ->where('date_from', '<=', $yearEnd)
+            ->where(fn ($query) => $query->whereNull('date_to')->orWhere('date_to', '>=', $yearStart))
+            ->groupBy('holiday_status_id')
+            ->selectRaw('holiday_status_id, SUM(number_of_days) AS days')
+            ->pluck('days', 'holiday_status_id');
+
+        $leaves = Leave::query()
+            ->where('employee_id', $employee->id)
+            ->whereIn('holiday_status_id', $typeIds)
+            ->whereRaw('COALESCE(request_date_from, date_from) BETWEEN ? AND ?', [$yearStart->toDateTimeString(), $yearEnd->toDateTimeString()])
+            ->whereIn('state', [State::VALIDATE_TWO->value, ...self::PENDING_STATES])
+            ->groupBy('holiday_status_id', 'state')
+            ->selectRaw('holiday_status_id, state, SUM(number_of_days) AS days')
+            ->toBase()
+            ->get();
+
+        $usage = [];
+        foreach ($typeIds as $typeId) {
+            $forType = $leaves->where('holiday_status_id', $typeId);
+            $allocatedDays = (float) ($allocated[$typeId] ?? 0);
+            $taken = (float) $forType->where('state', State::VALIDATE_TWO->value)->sum('days');
+            $pending = (float) $forType->whereIn('state', self::PENDING_STATES)->sum('days');
+
+            $usage[$typeId] = [
+                'allocated' => round($allocatedDays, 2),
+                'taken'     => round($taken, 2),
+                'pending'   => round($pending, 2),
+                'remaining' => round($allocatedDays - $taken - $pending, 2),
+            ];
+        }
+
+        return $usage;
+    }
+
+    /**
      * Why the employee may not request $days of $leaveType starting on $date,
-     * or null when the request fits the balance.
+     * or null when the request fits the balance (always null for a type
+     * without a balance, such as Half day).
      *
      * @return array{reason: string, message: string, balance: ?array<string, mixed>}|null
      */
@@ -151,13 +195,12 @@ class LeaveBalanceService
             $floor = -abs($balance['max_negative']);
         }
 
-        $pool = $balance['pool_type'];
-        $via = $balance['shared_pool'] ? " ({$leaveType->name} uses the {$pool} balance)" : '';
+        $name = (string) $leaveType->name;
 
         if ($balance['allocated'] <= 0 && ! $balance['allows_negative']) {
             return [
                 'reason'  => 'no_allocation',
-                'message' => "There is no approved {$pool} allocation for {$year}{$via}. Ask HR to allocate {$pool} first.",
+                'message' => "There is no approved {$name} allocation for {$year}. Ask HR to allocate {$name} first.",
                 'balance' => $balance,
             ];
         }
@@ -166,10 +209,9 @@ class LeaveBalanceService
             return [
                 'reason'  => 'insufficient',
                 'message' => sprintf(
-                    'Not enough %s balance for %d%s: %s day(s) remaining (allocated %s, taken %s, pending %s), %s requested.',
-                    $pool,
+                    'Not enough %s balance for %d: %s day(s) remaining (allocated %s, taken %s, pending %s), %s requested.',
+                    $name,
                     $year,
-                    $via,
                     self::format($balance['remaining']),
                     self::format($balance['allocated']),
                     self::format($balance['taken']),
@@ -214,24 +256,23 @@ class LeaveBalanceService
     /** One-line summary for the request form. */
     public function summary(Employee $employee, LeaveType $leaveType, ?int $year = null, ?int $ignoreLeaveId = null): string
     {
+        if (self::isHalfDayType($leaveType)) {
+            return "{$leaveType->name} does not count as leave: no balance is deducted.";
+        }
+
         $balance = $this->forEmployee($employee, $leaveType, $year, $ignoreLeaveId);
 
         if (! $balance['tracked']) {
             return "{$leaveType->name} needs no allocation: no balance is deducted.";
         }
 
-        $prefix = $balance['shared_pool']
-            ? "Uses your {$balance['pool_type']} balance. "
-            : '';
-
         $negative = $balance['allows_negative']
             ? ($balance['max_negative'] === null ? ' (may go negative)' : ' (may go down to -'.self::format($balance['max_negative']).')')
             : '';
 
         return sprintf(
-            '%s%s %d: available %s, taken %s, pending %s, remaining %s day(s)%s.',
-            $prefix,
-            $balance['pool_type'],
+            '%s %d: available %s, taken %s, pending %s, remaining %s day(s)%s.',
+            $leaveType->name,
             $balance['year'],
             self::format($balance['allocated']),
             self::format($balance['taken']),
@@ -241,56 +282,16 @@ class LeaveBalanceService
         );
     }
 
-    /**
-     * The type whose allocation a leave of $leaveType uses: itself when it
-     * requires an allocation, the company's Casual (else Annual) Leave for a
-     * half-day type without its own allocation, null when nothing is deducted.
-     */
-    public function poolTypeFor(LeaveType $leaveType, int $companyId): ?LeaveType
+    /** Whether a leave of this type is deducted from (and checked against) a balance. */
+    public static function deductsBalance(LeaveType $leaveType): bool
     {
-        if (self::requiresAllocation($leaveType)) {
-            return $leaveType;
-        }
-
-        if (self::requestUnit($leaveType) !== 'half_day') {
-            return null;
-        }
-
-        foreach (self::HALF_DAY_POOLS as $name) {
-            $pool = LeaveType::query()
-                ->where('name', $name)
-                ->where('is_active', true)
-                ->where(fn ($query) => $query->where('company_id', $companyId)->orWhereNull('company_id'))
-                ->orderByRaw('company_id IS NULL')
-                ->orderBy('id')
-                ->first();
-
-            if ($pool && self::requiresAllocation($pool)) {
-                return $pool;
-            }
-        }
-
-        return null;
+        return self::requiresAllocation($leaveType) && ! self::isHalfDayType($leaveType);
     }
 
-    /** @return array<int, int> the pool type and every half-day type of the company drawing from it */
-    public function consumingTypeIds(LeaveType $pool, int $companyId): array
+    /** The Half day type (half-day request unit): it never counts as leave in a balance. */
+    public static function isHalfDayType(LeaveType $leaveType): bool
     {
-        $ids = [(int) $pool->id];
-
-        $halfDayTypes = LeaveType::query()
-            ->where('request_unit', 'half_day')
-            ->where('requires_allocation', 'no')
-            ->where(fn ($query) => $query->where('company_id', $companyId)->orWhereNull('company_id'))
-            ->get();
-
-        foreach ($halfDayTypes as $halfDayType) {
-            if ((int) $this->poolTypeFor($halfDayType, $companyId)?->id === (int) $pool->id) {
-                $ids[] = (int) $halfDayType->id;
-            }
-        }
-
-        return array_values(array_unique($ids));
+        return self::requestUnit($leaveType) === 'half_day';
     }
 
     public static function requiresAllocation(LeaveType $leaveType): bool

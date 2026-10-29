@@ -7,13 +7,12 @@ use Webkul\Support\Models\Company;
 use Webkul\TimeOff\Models\LeaveType;
 
 /**
- * The leave types the attendance rules rely on (business decision of
- * 2026-10-28), per company:
+ * The leave types the attendance rules rely on (business decisions of
+ * 2026-10-28 and 2026-10-29), per company:
  *
- *  - "Half day"    : half-day unit, counts 0.5 day; no allocation of its
- *                    own: it uses the employee's Casual Leave balance
- *                    (Annual Leave if the company has no Casual Leave), see
- *                    LeaveBalanceService.
+ *  - "Half day"    : half-day unit, covers half the day in attendance; no
+ *                    allocation, and it does not count as leave: nothing is
+ *                    deducted from any balance (LeaveBalanceService).
  *  - "Short leave" : hour unit (from-to time), no allocation; limited by
  *                    attendance.short_leave.* (ShortLeavePolicy).
  *  - "On Duty"     : no allocation; recognised by the monthly report through

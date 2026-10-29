@@ -144,7 +144,7 @@ class AllocationPolicyResource extends Resource
                 DeleteAction::make(),
             ])
             ->emptyStateHeading('No yearly allocation policy')
-            ->emptyStateDescription('Running time-off:yearly-allocation adds Annual 12 (carry up to 6), Casual 8 and Sick 5 for this company\'s own leave types.');
+            ->emptyStateDescription('Running time-off:yearly-allocation adds Annual 12 (carry up to 6), Sick 8 and Casual 5 for this company\'s own leave types.');
     }
 
     public static function getPages(): array

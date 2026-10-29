@@ -5,14 +5,16 @@ namespace App\Filament\Widgets;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Webkul\Employee\Models\Employee;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Filament\Pages\Profile;
 use Webkul\TimeOff\Enums\State;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
 use Webkul\TimeOff\Models\Leave;
-use Webkul\TimeOff\Models\LeaveAllocation;
+use Webkul\TimeOff\Models\LeaveAllocationPolicy;
 use Webkul\TimeOff\Models\LeaveType;
+use Webkul\TimeOff\Services\LeaveBalanceService;
 
 class EmployeeDashboardOverviewWidget extends Widget
 {
@@ -36,15 +38,22 @@ class EmployeeDashboardOverviewWidget extends Widget
     }
 
     /**
-     * Calculate canonical employee leave entitlements and remaining balances.
-     * Policy allocation: Total 25 days (12 Annual, 8 Casual, 5 Sick).
+     * The employee's Annual, Sick and Casual Leave for one allocation year
+     * (the year of $endOfYear), from LeaveBalanceService, the same figures as
+     * the request form: approved allocations, approved (taken) and pending
+     * leave of that year; refused and cancelled leave never count, and left =
+     * allocated - taken - pending. Each card uses the company's own type of
+     * that name (else a shared one). Policy: 25 days, Annual 12, Sick 8,
+     * Casual 5 (LeaveAllocationPolicy); until an allocation exists, the
+     * company's policy days (else the default) are shown as the entitlement.
      *
      * @return array<string, mixed>
      */
     public static function calculateCanonicalLeaves(Employee $employee, ?int $companyId = null, ?\DateTimeInterface $endOfYear = null): array
     {
         $companyId = $companyId ?? (int) ($employee->company_id ?? CurrentCompany::id());
-        $endOfYear = $endOfYear ?? Carbon::now()->endOfYear();
+        $year = $endOfYear ? Carbon::instance($endOfYear)->year : LeaveBalanceService::today()->year;
+        $balances = app(LeaveBalanceService::class);
 
         $leaveTypes = LeaveType::query()
             ->where('is_active', true)
@@ -52,26 +61,25 @@ class EmployeeDashboardOverviewWidget extends Widget
                 $q->whereNull('company_id')
                     ->orWhere('company_id', $companyId);
             })
+            ->orderByRaw('company_id IS NULL')
+            ->orderBy('id')
             ->get();
 
         $canonicalSpecs = [
             'annual' => [
                 'name'       => 'Annual Leave',
-                'allocated'  => 12.0,
                 'keywords'   => ['annual', 'vacation'],
                 'icon'       => 'heroicon-o-sun',
                 'color'      => 'success',
             ],
             'casual' => [
                 'name'       => 'Casual Leave',
-                'allocated'  => 8.0,
                 'keywords'   => ['casual'],
                 'icon'       => 'heroicon-o-sparkles',
                 'color'      => 'info',
             ],
             'sick' => [
                 'name'       => 'Sick Leave',
-                'allocated'  => 5.0,
                 'keywords'   => ['sick', 'medical'],
                 'icon'       => 'heroicon-o-heart',
                 'color'      => 'danger',
@@ -83,50 +91,37 @@ class EmployeeDashboardOverviewWidget extends Widget
         $totalTaken = 0.0;
         $totalPending = 0.0;
 
+        $typesBySpec = collect($canonicalSpecs)->map(fn (array $spec): ?LeaveType => $leaveTypes->first(fn (LeaveType $type): bool => strcasecmp(trim((string) $type->name), $spec['name']) === 0)
+            ?? $leaveTypes->first(fn (LeaveType $type): bool => LeaveBalanceService::deductsBalance($type)
+                && Str::contains(strtolower((string) $type->name), $spec['keywords'])));
+
+        // One query each for allocations, leaves and policies, whatever the number of cards.
+        $usageByType = $balances->usageForTypes($employee, $typesBySpec->filter(), $year);
+        $policyDaysByType = LeaveAllocationPolicy::query()
+            ->where('company_id', $companyId)
+            ->whereIn('leave_type_id', $typesBySpec->filter()->pluck('id'))
+            ->where('is_active', true)
+            ->pluck('annual_days', 'leave_type_id');
+
         foreach ($canonicalSpecs as $key => $spec) {
-            $matchingTypeIds = $leaveTypes->filter(function ($lt) use ($spec) {
-                $nameLower = strtolower($lt->name);
-                foreach ($spec['keywords'] as $kw) {
-                    if (str_contains($nameLower, $kw)) {
-                        return true;
-                    }
-                }
+            $leaveType = $typesBySpec[$key];
 
-                return false;
-            })->pluck('id')->all();
+            $usage = $leaveType
+                ? $usageByType[(int) $leaveType->id]
+                : ['allocated' => 0.0, 'taken' => 0.0, 'pending' => 0.0, 'remaining' => 0.0];
 
-            $dbAllocated = 0.0;
-            if (! empty($matchingTypeIds)) {
-                $dbAllocated = (float) LeaveAllocation::where('employee_id', $employee->id)
-                    ->whereIn('holiday_status_id', $matchingTypeIds)
-                    ->where('state', State::VALIDATE_TWO->value)
-                    ->where(function ($q) use ($endOfYear) {
-                        $q->where('date_to', '<=', $endOfYear)
-                            ->orWhereNull('date_to');
-                    })
-                    ->sum('number_of_days');
-            }
+            $policyDays = $leaveType && $leaveType->company_id !== null && isset($policyDaysByType[$leaveType->id])
+                ? (float) $policyDaysByType[$leaveType->id]
+                : null;
 
-            // Use DB allocation if explicitly assigned, otherwise use the company canonical allocation
-            $allocated = $dbAllocated > 0 ? $dbAllocated : (float) $spec['allocated'];
+            // The approved allocation when there is one, otherwise the policy entitlement.
+            $allocated = $usage['allocated'] > 0
+                ? $usage['allocated']
+                : ($policyDays ?? (float) LeaveAllocationPolicy::DEFAULTS[$spec['name']]['annual_days']);
+            $taken = $usage['taken'];
+            $pending = $usage['pending'];
 
-            $taken = 0.0;
-            if (! empty($matchingTypeIds)) {
-                $taken = (float) Leave::where('employee_id', $employee->id)
-                    ->whereIn('holiday_status_id', $matchingTypeIds)
-                    ->where('state', State::VALIDATE_TWO->value)
-                    ->sum('number_of_days');
-            }
-
-            $pending = 0.0;
-            if (! empty($matchingTypeIds)) {
-                $pending = (float) Leave::where('employee_id', $employee->id)
-                    ->whereIn('holiday_status_id', $matchingTypeIds)
-                    ->whereIn('state', [State::CONFIRM->value, State::VALIDATE_ONE->value])
-                    ->sum('number_of_days');
-            }
-
-            $left = max(0.0, round($allocated - $taken, 1));
+            $left = max(0.0, round($allocated - $taken - $pending, 1));
             $pct = $allocated > 0 ? min(100, max(0, (int) round(($left / $allocated) * 100))) : 0;
 
             $totalAllocated += $allocated;
@@ -146,7 +141,7 @@ class EmployeeDashboardOverviewWidget extends Widget
             ];
         }
 
-        $totalLeft = max(0.0, round($totalAllocated - $totalTaken, 1));
+        $totalLeft = max(0.0, round($totalAllocated - $totalTaken - $totalPending, 1));
 
         return [
             'total_allocated' => $totalAllocated,
@@ -173,7 +168,7 @@ class EmployeeDashboardOverviewWidget extends Widget
         }
 
         $companyId = (int) ($employee->company_id ?? CurrentCompany::id($user));
-        $endOfYear = Carbon::now()->endOfYear();
+        $endOfYear = LeaveBalanceService::today()->endOfYear();
 
         $name = $employee->name ?? $user->name;
         $employeeData = [
@@ -186,7 +181,7 @@ class EmployeeDashboardOverviewWidget extends Widget
             'company_name' => $employee->company?->name ?? $user->defaultCompany?->name ?? config('app.name'),
         ];
 
-        // 25 Days Leave Allocation (12 Annual, 8 Casual, 5 Sick)
+        // 25 days a year: Annual 12, Sick 8, Casual 5 (LeaveAllocationPolicy).
         $leaveData = self::calculateCanonicalLeaves($employee, $companyId, $endOfYear);
 
         // Recent Leave Requests
@@ -209,6 +204,7 @@ class EmployeeDashboardOverviewWidget extends Widget
                     'validate_one' => 'Partially Approved',
                     'confirm'      => 'Pending',
                     'refuse'       => 'Rejected',
+                    'cancel'       => 'Cancelled',
                     default        => ucfirst($stateValue),
                 };
 
@@ -217,6 +213,7 @@ class EmployeeDashboardOverviewWidget extends Widget
                     'validate_one' => 'info',
                     'confirm'      => 'warning',
                     'refuse'       => 'danger',
+                    'cancel'       => 'gray',
                     default        => 'gray',
                 };
 

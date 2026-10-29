@@ -111,7 +111,7 @@ class MyTimeOffWidget extends BaseWidget
             return ['days' => number_format(0, 1)];
         }
 
-        $balance = app(LeaveBalanceService::class)->poolUsage($employee, $leaveType, Carbon::parse($endDate)->year);
+        $balance = app(LeaveBalanceService::class)->usage($employee, $leaveType, Carbon::parse($endDate)->year);
 
         return [
             'days' => number_format($balance['remaining'], 1),

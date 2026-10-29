@@ -171,7 +171,7 @@ trait TimeOffHelper
                                 ->live()
                                 ->hidden(fn (Get $get) => (bool) $get('request_unit_hours'))
                                 ->label(__('time-off::filament/widgets/calendar-widget.form.fields.half-day'))
-                                ->helperText(__('time-off::filament/widgets/calendar-widget.form.fields.half-day-helper'))
+                                ->helperText(fn (Get $get): string => $this->halfDayHelperText($get('holiday_status_id')))
                                 ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                     if ($state) {
                                         $set('duration_info', '0.5 day');
@@ -404,8 +404,29 @@ trait TimeOffHelper
     }
 
     /**
+     * Under the half-day toggle: the Half day type does not count as leave
+     * (LeaveBalanceService deducts nothing for it); a half day of a type with
+     * a balance takes 0.5 day of that type.
+     */
+    private function halfDayHelperText(mixed $leaveTypeId): string
+    {
+        $leaveType = $leaveTypeId ? LeaveType::query()->find($leaveTypeId) : null;
+
+        if ($leaveType && LeaveBalanceService::isHalfDayType($leaveType)) {
+            return "{$leaveType->name} does not count as leave: nothing is deducted from your leave balance.";
+        }
+
+        if ($leaveType && LeaveBalanceService::deductsBalance($leaveType)) {
+            return "Half a day: 0.5 day of {$leaveType->name}.";
+        }
+
+        return __('time-off::filament/widgets/calendar-widget.form.fields.half-day-helper');
+    }
+
+    /**
      * The balance of the chosen type for the current allocation year (the
-     * year of the start date), shown live on the request form.
+     * year of the start date), shown live on the request form; a Half day
+     * shows that it does not count as leave.
      */
     private function leaveBalanceSummary(mixed $leaveTypeId, mixed $employeeId, mixed $startDate, ?int $ignoreLeaveId = null): string
     {
@@ -424,7 +445,8 @@ trait TimeOffHelper
     /**
      * Refuses a request above the remaining balance of a type that requires
      * an allocation (LeaveBalanceService; the Leave model checks it again on
-     * save). A refused request is shown as a notification and the form stays open.
+     * save). A Half day is never refused for balance: it does not count as
+     * leave. A refused request is shown as a notification and the form stays open.
      */
     private function handleLeaveAllocation(array &$data, ?Action $action = null, ?int $excludeRecordId = null): void
     {

@@ -91,6 +91,9 @@ function hrPlatformEmployee(Company $company, User $user, string $name, ?Employe
 
 function hrPlatformWorkflow(Company $company, User $creator, User $approver, string $requestType): ApprovalWorkflow
 {
+    // A new company may already have a provisioned workflow for this type (e.g. leave): this one replaces it.
+    ApprovalWorkflow::query()->where('company_id', $company->id)->where('request_type', $requestType)->update(['is_active' => false]);
+
     $workflow = ApprovalWorkflow::query()->create([
         'company_id'   => $company->id,
         'creator_id'   => $creator->id,
@@ -661,10 +664,11 @@ it('scopes the allocation, employee-skill, attendance, performance-review and ti
         'number_of_days'      => 5,
     ]);
 
-    expect(AllocationResource::getEloquentQuery()->pluck('employee_id')->all())->toBe([$employee->id]);
+    // Only this leave type: every employee also gets the hire-time Annual / Sick / Casual allocations.
+    expect(AllocationResource::getEloquentQuery()->where('holiday_status_id', $leaveType->id)->pluck('employee_id')->all())->toBe([$employee->id]);
 
     $this->actingAs($employeeUser);
-    expect(MyAllocationResource::getEloquentQuery()->pluck('id')->all())->toBe([$visibleAllocation->id]);
+    expect(MyAllocationResource::getEloquentQuery()->where('holiday_status_id', $leaveType->id)->pluck('id')->all())->toBe([$visibleAllocation->id]);
     $this->actingAs($managerUser);
 
     // EmployeeSkillResource: no company column of its own — scoped via the

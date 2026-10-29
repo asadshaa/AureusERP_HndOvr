@@ -23,7 +23,7 @@ class ListAllocationPolicies extends ListRecords
                 ->color('gray')
                 ->visible(fn (): bool => AllocationPolicyResource::canCreate())
                 ->requiresConfirmation()
-                ->modalDescription('Adds Annual Leave 12 days (carry forward up to 6), Casual Leave 8 and Sick Leave 5 for this company\'s own leave types that have no policy yet. Existing policies are not changed.')
+                ->modalDescription('Adds Annual Leave 12 days (carry forward up to 6), Sick Leave 8 and Casual Leave 5 for this company\'s own leave types that have no policy yet. Existing policies are not changed.')
                 ->action(function (): void {
                     $companyId = (int) CurrentCompany::id();
                     $before = LeaveAllocationPolicy::query()->where('company_id', $companyId)->count();

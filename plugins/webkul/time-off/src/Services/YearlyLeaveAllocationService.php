@@ -19,12 +19,17 @@ use Webkul\TimeOff\Models\LeaveAllocationPolicy;
  *
  *  - grant      : the policy's annual days; an employee who joins during the
  *                 year gets annual days x months left / 12 (the joining month
- *                 counts in full), rounded to the nearest half day;
+ *                 counts in full), rounded to the nearest half day (the same
+ *                 proration as the hire-time allocation,
+ *                 AllocateDefaultLeaveOnEmployeeCreated);
  *  - carried    : the previous year's remaining balance (allocated - taken -
- *                 pending, LeaveBalanceService; Half day counted on Casual),
- *                 never below 0 and at most the policy's carry-forward cap.
+ *                 pending, LeaveBalanceService; a Half day never counts),
+ *                 never below 0 and at most the policy's carry-forward cap
+ *                 (by default Annual Leave 6, Sick and Casual Leave 0).
  *                 Stored on the allocation as expiring_carryover_days and in
- *                 the notes, so the split stays auditable.
+ *                 the notes, so the split stays auditable. Carried days do
+ *                 not expire: no carried_over_days_expiration_date is set and
+ *                 they are part of the year's allocation until 31 December.
  *
  * Idempotent: an allocation of the type starting on 1 January of the year
  * (the same key the hire-time allocation uses) means "already allocated"
@@ -74,7 +79,11 @@ class YearlyLeaveAllocationService
         return $result;
     }
 
-    /** Annual days x months left in the year / 12 for a joiner, nearest half day. */
+    /**
+     * Annual days x months left in the year / 12 (joining month counted) for
+     * someone joining in $year, rounded to the nearest half day; the full
+     * days for an earlier joiner or an unknown joining date, none for a later one.
+     */
     public static function prorate(float $annualDays, ?Carbon $joiningDate, int $year): float
     {
         if (! $joiningDate || $joiningDate->year < $year) {
@@ -204,7 +213,7 @@ class YearlyLeaveAllocationService
             return 0.0;
         }
 
-        $previous = $this->balances->poolUsage($employee, $policy->leaveType, $year - 1);
+        $previous = $this->balances->usage($employee, $policy->leaveType, $year - 1);
         if ($previous['allocated'] <= 0) {
             return 0.0;
         }
