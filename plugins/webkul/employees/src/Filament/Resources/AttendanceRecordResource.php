@@ -2,6 +2,7 @@
 
 namespace Webkul\Employee\Filament\Resources;
 
+use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -17,6 +18,8 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -91,7 +94,16 @@ class AttendanceRecordResource extends Resource
                 ->maxDate(fn (): string => now()->addYear()->toDateString()),
             DateTimePicker::make('scheduled_start')->seconds(false),
             DateTimePicker::make('scheduled_end')->seconds(false)->after('scheduled_start'),
-            DateTimePicker::make('check_in')->seconds(false),
+            // Picking the check-in fills the attendance date with the shift's day: a check-in after
+            // midnight within yesterday's overnight shift belongs to yesterday (AttendanceScheduleResolver).
+            DateTimePicker::make('check_in')->seconds(false)
+                ->live(onBlur: true)
+                ->afterStateUpdated(function (Get $get, Set $set, ?string $state): void {
+                    $date = self::shiftDateFor((int) $get('employee_id'), $state);
+                    if ($date !== null) {
+                        $set('attendance_date', $date);
+                    }
+                }),
             // An overnight shift simply has a check-out on the next date; a check-out
             // before the check-in is always a data-entry mistake (it used to be saved
             // silently with 0 worked hours).
@@ -125,6 +137,31 @@ class AttendanceRecordResource extends Resource
                 ->columnSpanFull(),
             Textarea::make('notes')->columnSpanFull(),
         ])->columns(2);
+    }
+
+    /**
+     * The attendance date of a check-in entered by hand (app-timezone
+     * "Y-m-d H:i:s"), for an employee the user may manage; null when unknown.
+     */
+    public static function shiftDateFor(int $employeeId, ?string $checkIn): ?string
+    {
+        $user = Auth::user();
+        if ($employeeId <= 0 || blank($checkIn) || ! $user instanceof User) {
+            return null;
+        }
+
+        $employee = Employee::query()->find($employeeId);
+        if (! $employee || ! app(HrHierarchyService::class)->canManage($user, $employee)) {
+            return null;
+        }
+
+        try {
+            $moment = CarbonImmutable::parse((string) $checkIn, (string) config('app.timezone'))->utc();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return app(AttendanceScheduleResolver::class)->attendanceDateFor($employee, $moment);
     }
 
     private static function isEvidenceBacked(?AttendanceRecord $record): bool

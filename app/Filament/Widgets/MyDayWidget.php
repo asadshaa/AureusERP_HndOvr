@@ -7,12 +7,14 @@ use Carbon\CarbonImmutable;
 use Filament\Widgets\Widget;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
+use Throwable;
 use Webkul\Employee\Filament\Pages\MyAttendance;
 use Webkul\Employee\Filament\Resources\EmployeeRequestResource;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
+use Webkul\Employee\Services\Attendance\ShiftRosterService;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\CalendarLeave;
 use Webkul\TimeOff\Enums\State;
@@ -49,7 +51,7 @@ class MyDayWidget extends Widget
         $employee = $context->employee();
 
         if (! $user || ! $employee) {
-            return ['attendance' => null, 'grace' => null, 'pending' => [], 'holidays' => [], 'urls' => []];
+            return ['attendance' => null, 'shifts' => [], 'grace' => null, 'pending' => [], 'holidays' => [], 'urls' => []];
         }
 
         $now = $context->now();
@@ -57,6 +59,7 @@ class MyDayWidget extends Widget
 
         return [
             'attendance' => $attendanceUrl ? $this->attendance($user) : null,
+            'shifts'     => $this->shifts($employee, $now),
             'grace'      => $this->grace($user, $employee, $now),
             'pending'    => $this->pending($user, $employee, $context->companyId()),
             'holidays'   => $this->holidays($employee, $context->companyId(), $now),
@@ -100,6 +103,22 @@ class MyDayWidget extends Widget
                 'button' => 'Check in',
             ],
         };
+    }
+
+    /**
+     * The next three days of the employee's shift roster (empty when not rostered).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function shifts(Employee $employee, CarbonImmutable $now): array
+    {
+        try {
+            return app(ShiftRosterService::class)->upcomingFor($employee, $now->toDateString(), 3);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return [];
+        }
     }
 
     /** @return array{month: string, allowance: string, used: string, balance: string, balance_minutes: int, percentage: int, tone: string}|null */

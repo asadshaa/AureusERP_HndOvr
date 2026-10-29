@@ -7,6 +7,10 @@ use Webkul\Employee\Enums\PunchPairingMode;
 
 /**
  * Turns one employee-day of device punches into check-in / check-out pairs.
+ * The day is the attendance date, not the calendar date: the import gives
+ * an overnight shift's after-midnight punches the date the shift started
+ * (DeviceAttendanceImportService::assignShiftDates()), so a 22:00-06:00
+ * shift pairs as one interval instead of two half days.
  * A missing check-out is never made up: an odd punch leaves its pair open
  * and the day is flagged "missing_check_out" for HR review.
  */

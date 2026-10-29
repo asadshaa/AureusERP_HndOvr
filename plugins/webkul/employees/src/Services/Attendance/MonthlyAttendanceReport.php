@@ -13,8 +13,7 @@ use InvalidArgumentException;
 use Webkul\Employee\Models\AttendancePolicy;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
-use Webkul\Employee\Models\WorkSchedule;
-use Webkul\Employee\Services\Attendance\Data\DaySchedule;
+use Webkul\Employee\Services\Attendance\Data\ScheduleSet;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
@@ -87,6 +86,22 @@ use Webkul\Support\Models\Company;
  * outside the window first (before the daily credit cap), then out of the
  * minutes inside it. "Final working hours", the grace balance and the
  * off-day hours of that day are therefore net of approved overtime.
+ *
+ * Rotating rosters and overnight shifts (HR parity plan 3.4): the day's
+ * schedule may be a shift from a roster or a day override (resolution order
+ * in AttendanceScheduleResolver). An overnight shift (22:00-06:00) is one
+ * day, the date it starts: its punches are stored on that attendance date
+ * and counted in seconds after that date's midnight (a 06:00 check-out is
+ * 108000), so late / left early / the month boundary all follow the start
+ * date. A roster day off is an off day ("Day off") like a weekend.
+ *
+ * Unpaid break (HR parity plan 3.5): a schedule / shift with break minutes
+ * deducts the break from the day's worked time when the employee worked
+ * through the break window (centred on the middle of the day) without
+ * recording it; recorded gaps between check-ins inside the day (not
+ * covered by approved leave or OD) count towards the break, so a break is
+ * never deducted twice. Shown as "Break deducted N min" and in
+ * break_deducted_minutes (day and month).
  *
  * Finalised months (AttendanceMonthLockService): forCompany() and
  * forEmployee() read the snapshot HR froze when finalising, so the export
@@ -227,7 +242,7 @@ class MonthlyAttendanceReport
             'punches'  => $this->punches($companyId, $employeeIds, $key, $key, $this->timezone()),
             'leaves'   => $this->leaves($employeeIds, $key, $key),
             'holidays' => $this->holidays($companyId, $key, $key),
-            'periods'  => $this->schedules->periodsFor($employeeIds, $key, $key),
+            'periods'  => $this->schedules->setsFor([$employee], $key, $key),
             'overtime' => OvertimeService::minutesByDay($companyId, $employeeIds, $key, $key),
             'policy'   => $this->policyFor($companyId),
             'today'    => CarbonImmutable::now($this->timezone())->toDateString(),
@@ -373,10 +388,13 @@ class MonthlyAttendanceReport
      * first_half | second_half | hours (with an optional window [from, to] in
      * seconds and an approver name). leaves lists several part-day leaves.
      * schedule is the day's window (seconds), required and flexible minutes
-     * (DaySchedule::forCalculation(); default: the config office hours);
-     * overtime_minutes is the day's approved overtime (see the class docs).
+     * (DaySchedule::forCalculation(); default: the config office hours), with
+     * an optional unpaid break (minutes, see the class docs) and an end above
+     * 86400 for an overnight shift; overtime_minutes is the day's approved
+     * overtime (see the class docs); off_label replaces "Weekend" on a
+     * roster day off.
      *
-     * @param  array{in?: ?int, out?: ?int, intervals?: array<int, array{0: int, 1: ?int}>, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}, leaves?: array<int, array<string, mixed>>, credit_cap_minutes?: int, schedule?: array{start: int, end: int, required: int, flexible?: int}, overtime_minutes?: int}  $day
+     * @param  array{in?: ?int, out?: ?int, intervals?: array<int, array{0: int, 1: ?int}>, missing_check_out?: bool, weekend?: bool, holiday?: ?string, employed?: bool, future?: bool, od?: ?string, leave?: ?array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}, approver?: ?string}, leaves?: array<int, array<string, mixed>>, credit_cap_minutes?: int, schedule?: array{start: int, end: int, required: int, flexible?: int, break?: int}, overtime_minutes?: int, off_label?: ?string}  $day
      * @return array<string, mixed>
      */
     public function calculateDay(array $day): array
@@ -411,7 +429,7 @@ class MonthlyAttendanceReport
             $type = 'future';
         } elseif ($day['weekend'] ?? false) {
             $type = 'weekend';
-            $remarks[] = 'Weekend';
+            $remarks[] = ($day['off_label'] ?? null) ?: 'Weekend';
         } elseif (($day['holiday'] ?? null) !== null) {
             $type = 'holiday';
             $remarks[] = 'Public holiday'.($day['holiday'] !== '' ? ': '.$day['holiday'] : '');
@@ -479,7 +497,13 @@ class MonthlyAttendanceReport
             $work[] = $odInterval;
         }
 
+        // Unpaid break: deducted once from a day worked through the break window without a recorded break.
+        $breakSeconds = max(0, (int) ($day['schedule']['break'] ?? 0)) * 60;
+        $breakDeducted = $this->breakDeduction($closed, $start, $end, $breakSeconds, $odInterval !== null ? [...$leaveWindows, $odInterval] : $leaveWindows);
+
         $inside = $this->unionWithin($work, $start, $end);
+        $breakDeducted = min($breakDeducted, $inside);
+        $inside -= $breakDeducted;
         $before = 0;
         $after = 0;
         foreach ($closed as [$pairIn, $pairOut]) {
@@ -577,6 +601,9 @@ class MonthlyAttendanceReport
         if ($isWorking && $workedInLeave >= 60) {
             $remarks[] = 'Worked during approved leave';
         }
+        if ($breakDeducted >= 60) {
+            $remarks[] = 'Break deducted '.intdiv($breakDeducted, 60).' min';
+        }
 
         $offDayWork = in_array($type, ['weekend', 'holiday', 'leave'], true) && $hasPair;
         if ($offDayWork) {
@@ -625,7 +652,44 @@ class MonthlyAttendanceReport
             // The day's window after a flexible start (seconds after midnight).
             'schedule_start_seconds'  => $start,
             'schedule_end_seconds'    => $end,
+            // Unpaid break of the day's schedule, and how much of it came off the worked time (already net in inside / final).
+            'break_minutes'           => intdiv($breakSeconds, 60),
+            'break_deducted_minutes'  => intdiv($breakDeducted, 60),
         ];
+    }
+
+    /**
+     * The unpaid break to take off a day's worked time: none unless the
+     * closed intervals run from before to after the break window (centred on
+     * the middle of the day); then the break minus the gaps already recorded
+     * between check-ins inside the day, not counting gaps covered by
+     * approved leave or OD ($excused).
+     *
+     * @param  array<int, array{0: int, 1: int}>  $closed
+     * @param  array<int, array{0: int, 1: int}>  $excused
+     */
+    protected function breakDeduction(array $closed, int $start, int $end, int $breakSeconds, array $excused): int
+    {
+        if ($breakSeconds <= 0 || $closed === []) {
+            return 0;
+        }
+
+        $merged = $this->merge($closed);
+        $breakStart = $start + intdiv($end - $start, 2) - intdiv($breakSeconds, 2);
+        $breakEnd = $breakStart + $breakSeconds;
+
+        if ($merged[0][0] > $breakStart || $merged[count($merged) - 1][1] < $breakEnd) {
+            return 0;
+        }
+
+        $gaps = [];
+        for ($index = 1; $index < count($merged); $index++) {
+            $gaps[] = [$merged[$index - 1][1], $merged[$index][0]];
+        }
+
+        $recorded = $this->measure($this->subtract($this->intersect($gaps, [[$start, $end]]), $excused));
+
+        return max(0, $breakSeconds - $recorded);
     }
 
     /**
@@ -696,6 +760,8 @@ class MonthlyAttendanceReport
             'overtime_pending_hours'    => round($overtimePendingMinutes / 60, 2),
             'weekend_holiday_seconds'   => $weekendHolidaySeconds,
             'weekend_holiday_hours'     => round($weekendHolidaySeconds / 3600, 2),
+            // Unpaid break taken off worked time (already net in worked_seconds / worked_hours).
+            'break_deducted_minutes'    => (int) $rows->sum(fn (array $row): int => (int) ($row['break_deducted_minutes'] ?? 0)),
         ];
     }
 
@@ -749,7 +815,7 @@ class MonthlyAttendanceReport
     {
         return [
             'Check-ins', 'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Grace balance (mins)',
-            'Schedule', 'OT approved (mins)', 'OT pending (mins)',
+            'Schedule', 'OT approved (mins)', 'OT pending (mins)', 'Break deducted (mins)',
         ];
     }
 
@@ -781,7 +847,7 @@ class MonthlyAttendanceReport
             'punches'  => $this->punches($companyId, $employeeIds, $from, $to, $timezone),
             'leaves'   => $this->leaves($employeeIds, $from, $to),
             'holidays' => $this->holidays($companyId, $from, $to),
-            'periods'  => $this->schedules->periodsFor($employeeIds, $from, $to),
+            'periods'  => $this->schedules->setsFor($employees, $from, $to),
             'overtime' => OvertimeService::minutesByDay($companyId, $employeeIds, $from, $to),
             'policy'   => $policy,
             'today'    => CarbonImmutable::now($timezone)->toDateString(),
@@ -797,6 +863,7 @@ class MonthlyAttendanceReport
             $carry = (int) ($carryIn[$employee->id] ?? 0);
             $running = ($allowance + $carry) * 60;
             $scheduleDays = [];
+            $schedulesByKey = [];
 
             for ($date = $monthStart; $date->lte($monthEnd); $date = $date->addDay()) {
                 $key = $date->toDateString();
@@ -810,6 +877,7 @@ class MonthlyAttendanceReport
 
                 if ($row['working']) {
                     $scheduleDays[$row['schedule_key']] = ($scheduleDays[$row['schedule_key']] ?? 0) + 1;
+                    $schedulesByKey[$row['schedule_key']] ??= $this->schedules->pick($context['periods'][$employee->id] ?? [], $key);
                 }
 
                 // Like the template: working days, weekday leave and holidays; weekends only when worked (or configured).
@@ -827,7 +895,7 @@ class MonthlyAttendanceReport
 
             // The schedule of most of the month's working days (headers of the employee's sheet).
             arsort($scheduleDays);
-            $mainSchedule = $this->scheduleByKey($context['periods'][$employee->id] ?? [], (string) (array_key_first($scheduleDays) ?? 'default'));
+            $mainSchedule = $schedulesByKey[(string) array_key_first($scheduleDays)] ?? $this->schedules->defaultSchedule();
 
             $reports[] = [
                 'employee' => [
@@ -849,7 +917,7 @@ class MonthlyAttendanceReport
     /**
      * One employee's day with the month's preloaded inputs.
      *
-     * @param  array{punches: array<int, array<string, mixed>>, leaves: array<int, array<int, object>>, holidays: Collection<int, CalendarLeave>, periods: array<int, array<int, WorkSchedule>>, overtime: array{approved: array<int, array<string, int>>, pending: array<int, array<string, int>>}, policy: array<string, mixed>, today: string}  $context
+     * @param  array{punches: array<int, array<string, mixed>>, leaves: array<int, array<int, object>>, holidays: Collection<int, CalendarLeave>, periods: array<int, ScheduleSet>, overtime: array{approved: array<int, array<string, int>>, pending: array<int, array<string, int>>}, policy: array<string, mixed>, today: string}  $context
      * @return array<string, mixed>
      */
     protected function calculateEmployeeDay(Employee $employee, string $key, array $context): array
@@ -870,25 +938,16 @@ class MonthlyAttendanceReport
             'credit_cap_minutes' => $context['policy']['daily_extra_credit_cap_minutes'],
             'schedule'           => $schedule->forCalculation(),
             'overtime_minutes'   => (int) ($context['overtime']['approved'][$employeeId][$key] ?? 0),
+            'off_label'          => $schedule->isOff() ? 'Day off' : null,
         ]);
 
         $row['overtime_pending_minutes'] = (int) ($context['overtime']['pending'][$employeeId][$key] ?? 0);
         $row['schedule'] = $schedule->label();
-        $row['schedule_key'] = $schedule->scheduleId !== null ? (string) $schedule->scheduleId : 'default';
+        $row['schedule_key'] = $schedule->key();
+        $row['shift_code'] = $schedule->shiftCode;
+        $row['schedule_source'] = $schedule->source;
 
         return $row;
-    }
-
-    /** @param  array<int, WorkSchedule>  $periods */
-    protected function scheduleByKey(array $periods, string $key): DaySchedule
-    {
-        foreach ($periods as $period) {
-            if ((string) $period->id === $key) {
-                return $this->schedules->fromPeriod($period);
-            }
-        }
-
-        return $this->schedules->defaultSchedule();
     }
 
     /**

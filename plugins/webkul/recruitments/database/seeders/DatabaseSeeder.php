@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             ApplicantCategorySeeder::class,
             JobOpeningWorkflowSeeder::class,
             ScreeningQuestionSeeder::class,
+            JobOfferDefaultsSeeder::class,
         ]);
     }
 }

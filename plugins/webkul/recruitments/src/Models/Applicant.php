@@ -201,6 +201,12 @@ class Applicant extends Model
         return $this->hasMany(Interview::class, 'applicant_id');
     }
 
+    /** Job offers made on this application (HR parity 3.6), newest last. */
+    public function offers(): HasMany
+    {
+        return $this->hasMany(JobOffer::class, 'applicant_id');
+    }
+
     /** The job ad this application came through (first touch). */
     public function jobPosting(): BelongsTo
     {

@@ -44,8 +44,10 @@ use Webkul\Security\Services\CurrentCompany;
  *     matched to an employee of the company (device ID, else employee code,
  *     else an exact CNIC for users who may see it) and given a status
  *     (OK / unknown employee / duplicate / outside the employment dates /
- *     bad date / day already has manual entries). Nothing is written to
- *     attendance.
+ *     bad date / day already has manual entries). Each punch gets its
+ *     attendance date: the local date, or the previous date when it belongs
+ *     to that day's overnight shift (assignShiftDates()). Nothing is written
+ *     to attendance.
  *  2. import(): the rows are checked again and each employee-day is written
  *     in its own transaction through AttendanceIntervalService (intervals
  *     with source "biometric", the day summary from them). A punch is
@@ -755,7 +757,7 @@ class DeviceAttendanceImportService
 
         $employees = Employee::query()
             ->where('company_id', $companyId)
-            ->get(['id', 'company_id', 'name', 'employee_number', 'biometric_id', 'cnic', 'joining_date', 'leaving_date', 'departure_date'])
+            ->get(['id', 'company_id', 'department_id', 'name', 'employee_number', 'biometric_id', 'cnic', 'joining_date', 'leaving_date', 'departure_date'])
             ->keyBy('id');
 
         $byDevice = [];
@@ -810,6 +812,17 @@ class DeviceAttendanceImportService
                 continue;
             }
 
+            $row['status'] = RowStatus::Ok;
+        }
+        unset($row);
+
+        $this->assignShiftDates($rows, $employees, $timezone);
+
+        foreach ($rows as &$row) {
+            if ($row['status'] !== RowStatus::Ok || $row['employee_id'] === null || $row['attendance_date'] === null) {
+                continue;
+            }
+
             $outside = $this->outsideEmployment($employees->get($row['employee_id']), $row['attendance_date']);
             $row['status'] = $outside === null ? RowStatus::Ok : RowStatus::OutsideEmployment;
             $row['message'] = $outside;
@@ -820,6 +833,40 @@ class DeviceAttendanceImportService
         $this->markManualDays($companyId, $rows);
 
         return $rows;
+    }
+
+    /**
+     * A punch after midnight that belongs to the previous day's shift (an
+     * overnight roster shift checked out at 06:00, or a late finish within
+     * the overnight tolerance) gets that shift's attendance date, so the
+     * shift is paired as one day instead of being split at midnight
+     * (AttendanceScheduleResolver::attributeLocal()). Schedules are loaded
+     * once for every employee and date of the file.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @param  EloquentCollection<int, Employee>  $employees  keyed by id
+     */
+    private function assignShiftDates(array &$rows, EloquentCollection $employees, string $timezone): void
+    {
+        $candidates = array_keys(array_filter($rows, fn (array $row): bool => $row['status'] === RowStatus::Ok && $row['punched_at'] !== null && $row['employee_id'] !== null));
+        if ($candidates === []) {
+            return;
+        }
+
+        $dates = array_map(fn (int $index): string => $rows[$index]['attendance_date'], $candidates);
+        $employeeIds = array_values(array_unique(array_map(fn (int $index): int => (int) $rows[$index]['employee_id'], $candidates)));
+        $sets = $this->schedule->setsFor(
+            $employees->only($employeeIds)->values(),
+            CarbonImmutable::parse(min($dates))->subDay()->toDateString(),
+            max($dates),
+        );
+
+        foreach ($candidates as $index) {
+            $rows[$index]['attendance_date'] = $this->schedule->attributeLocal(
+                $sets[(int) $rows[$index]['employee_id']] ?? [],
+                $rows[$index]['punched_at']->setTimezone($timezone),
+            );
+        }
     }
 
     /**

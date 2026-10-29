@@ -13,11 +13,14 @@ use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 
 /**
- * One effective-dated work schedule of an employee: start / end time,
- * required minutes, working weekdays and an optional flexible window, valid
- * from effective_from to effective_to (open-ended when null). Periods of one
- * employee never overlap; a day without a period uses the company default
- * (config/attendance.php office hours). Resolved by AttendanceScheduleResolver.
+ * One effective-dated work schedule of an employee: start / end time (an
+ * end before the start is an overnight schedule, owned by the day it
+ * starts), required minutes, working weekdays, an optional flexible window
+ * and an unpaid break, valid from effective_from to effective_to
+ * (open-ended when null). Periods of one employee never overlap; a day
+ * without a period uses the company default (config/attendance.php office
+ * hours). A roster or a day override wins over it. Resolved by
+ * AttendanceScheduleResolver.
  *
  * Enforced on every save, whatever the path: same company as the employee,
  * a valid time window and weekdays, no overlap, and no change to days of a
@@ -39,6 +42,7 @@ class WorkSchedule extends Model
         'required_minutes',
         'working_days',
         'flexible_minutes',
+        'break_minutes',
         'effective_from',
         'effective_to',
         'notes',
@@ -52,6 +56,7 @@ class WorkSchedule extends Model
             'working_days'     => 'array',
             'required_minutes' => 'integer',
             'flexible_minutes' => 'integer',
+            'break_minutes'    => 'integer',
             'effective_from'   => 'date',
             'effective_to'     => 'date',
         ];
@@ -100,7 +105,8 @@ class WorkSchedule extends Model
             .static::clock($this->start_time).'–'.static::clock($this->end_time)
             .', '.intdiv((int) $this->required_minutes, 60).'h'.((int) $this->required_minutes % 60 ? ' '.((int) $this->required_minutes % 60).'m' : '')
             .' ('.static::weekdaysLabel($days).')'
-            .((int) $this->flexible_minutes > 0 ? ', flexible '.(int) $this->flexible_minutes.' min' : ''));
+            .((int) $this->flexible_minutes > 0 ? ', flexible '.(int) $this->flexible_minutes.' min' : '')
+            .((int) $this->break_minutes > 0 ? ', break '.(int) $this->break_minutes.' min' : ''));
     }
 
     /** @param  array<int, int>  $days  ISO weekday numbers */
@@ -161,11 +167,19 @@ class WorkSchedule extends Model
         if ($start === null || $end === null) {
             throw ValidationException::withMessages(['start_time' => 'Give the start and end time as HH:MM.']);
         }
-        if ($end <= $start) {
-            throw ValidationException::withMessages(['end_time' => 'The end time must be after the start time (overnight shifts are not supported).']);
+        if ($end === $start) {
+            throw ValidationException::withMessages(['end_time' => 'The end time must differ from the start time (an earlier end time is an overnight shift).']);
         }
         $this->start_time = sprintf('%02d:%02d:00', intdiv($start, 60), $start % 60);
         $this->end_time = sprintf('%02d:%02d:00', intdiv($end, 60), $end % 60);
+
+        // Overnight (end before start): the shift belongs to the day it starts.
+        $span = $end > $start ? $end - $start : $end + 1440 - $start;
+        $break = (int) ($this->break_minutes ?? 0);
+        if ($break < 0 || $break >= $span) {
+            throw ValidationException::withMessages(['break_minutes' => 'The unpaid break must be shorter than the working hours ('.$span.' minutes).']);
+        }
+        $this->break_minutes = $break;
 
         $required = (int) $this->required_minutes;
         if ($required < 1 || $required > 1440) {

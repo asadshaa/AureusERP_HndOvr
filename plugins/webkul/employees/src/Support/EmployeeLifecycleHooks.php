@@ -32,6 +32,13 @@ final class EmployeeLifecycleHooks
             }
         }));
 
+        // ... and the default appraisal form (HR Parity 3.2).
+        Company::created(fn (Company $company) => self::safely(function () use ($company): void {
+            if (Schema::hasTable('employees_appraisal_templates')) {
+                DefaultAppraisalTemplate::provisionForCompany((int) $company->getKey());
+            }
+        }));
+
         Employee::created(fn (Employee $employee) => self::safely(fn () => app(EmployeeChecklistService::class)->autoStartOnboarding($employee)));
 
         Employee::saved(function (Employee $employee): void {

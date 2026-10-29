@@ -181,6 +181,11 @@ class TodayAttendance extends Page implements HasForms, HasTable
                     ->description(fn (array $record): ?string => $record['code'] !== '' ? $record['code'] : null)
                     ->sortable(),
                 TextColumn::make('department')->label('Department')->placeholder('—')->sortable(),
+                TextColumn::make('shift')
+                    ->label('Shift')
+                    ->placeholder('—')
+                    ->tooltip(fn (array $record): string => (string) $record['schedule'])
+                    ->toggleable(),
                 TextColumn::make('line_manager')->label('Line manager')->placeholder('—')->sortable(),
                 TextColumn::make('status_label')
                     ->label('Status')

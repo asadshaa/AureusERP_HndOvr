@@ -2,6 +2,7 @@
 
 namespace App\Services\Dashboard;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 use Webkul\Account\Models\Move;
@@ -12,6 +13,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\Checklists\EmployeeChecklistService;
+use Webkul\Employee\Services\PerformanceService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
@@ -328,6 +330,51 @@ class RoleActionCenterService
                     : 'New joiner and leaver checklist tasks waiting for you.',
                 'action_label' => 'My Tasks →',
                 'url'          => route('filament.admin.pages.my-tasks'),
+            ];
+        }
+
+        // =========================================================================
+        // 6. APPRAISALS (my self review, manager reviews for me or HR, results to acknowledge)
+        // =========================================================================
+        $appraisals = app(PerformanceService::class)->taskCountsFor($user, $companyId);
+
+        if ($appraisals['self'] > 0) {
+            $items[] = [
+                'id'           => 'appraisal_self_review',
+                'title'        => 'Your Appraisal Self Review Is Open',
+                'urgency'      => $appraisals['self_overdue'] > 0 ? 'danger' : 'warning',
+                'icon'         => 'heroicon-o-star',
+                'description'  => $appraisals['self_overdue'] > 0
+                    ? 'Your self review is overdue. Rate each item and submit it to your line manager.'
+                    : 'Rate each item and submit it to your line manager'.($appraisals['self_due_on'] ? ' by '.Carbon::parse($appraisals['self_due_on'])->format('D j M') : '').'.',
+                'action_label' => 'My Appraisals →',
+                'url'          => route('filament.admin.pages.my-appraisals'),
+            ];
+        }
+
+        if ($appraisals['manager'] > 0) {
+            $items[] = [
+                'id'           => 'appraisal_manager_reviews',
+                'title'        => "{$appraisals['manager']} Appraisal(s) Waiting for Your Review",
+                'urgency'      => $appraisals['manager_overdue'] > 0 ? 'danger' : 'warning',
+                'icon'         => 'heroicon-o-user-group',
+                'description'  => $appraisals['manager_overdue'] > 0
+                    ? "{$appraisals['manager_overdue']} overdue. Self reviews are in; complete the manager reviews."
+                    : 'Self reviews are in; complete the manager reviews.',
+                'action_label' => 'Team Appraisals →',
+                'url'          => route('filament.admin.pages.team-appraisals'),
+            ];
+        }
+
+        if ($appraisals['acknowledge'] > 0) {
+            $items[] = [
+                'id'           => 'appraisal_acknowledge',
+                'title'        => 'Your Appraisal Result Is Ready',
+                'urgency'      => 'info',
+                'icon'         => 'heroicon-o-hand-thumb-up',
+                'description'  => 'Read your manager\'s review and final rating, then acknowledge it.',
+                'action_label' => 'My Appraisals →',
+                'url'          => route('filament.admin.pages.my-appraisals'),
             ];
         }
 

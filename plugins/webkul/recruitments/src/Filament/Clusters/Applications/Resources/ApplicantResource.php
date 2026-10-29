@@ -61,8 +61,10 @@ use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResourc
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ManageSkill;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\Pages\ViewApplicant;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\InterviewsRelationManager;
+use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\OffersRelationManager;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\ApplicantResource\RelationManagers\SkillsRelationManager;
 use Webkul\Recruitment\Filament\Schemas\CvAnalysisComponents;
+use Webkul\Recruitment\Filament\Schemas\JobOfferComponents;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\ApplicantAnswer;
 use Webkul\Recruitment\Models\Candidate;
@@ -1028,6 +1030,7 @@ class ApplicantResource extends Resource
                                             ->state(fn (Applicant $record): ?string => $record->interviews()->upcoming()->orderBy('starts_at')->first()?->whenLabel())
                                             ->placeholder('None scheduled'),
                                     ]),
+                                JobOfferComponents::applicantInfolistSection(),
                                 CvAnalysisComponents::infolistSection(),
                             ])->columnSpan(1),
                     ])->columnSpanFull(),
@@ -1047,6 +1050,7 @@ class ApplicantResource extends Resource
     {
         return [
             InterviewsRelationManager::class,
+            OffersRelationManager::class,
             RelationGroup::make('Manage Skills', [
                 SkillsRelationManager::class,
             ])

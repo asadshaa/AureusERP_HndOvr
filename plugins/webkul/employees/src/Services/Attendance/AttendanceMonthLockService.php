@@ -17,6 +17,8 @@ use Webkul\Employee\Models\AttendanceMonthLockEvent;
 use Webkul\Employee\Models\AttendanceMonthSnapshot;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Models\ShiftOverride;
+use Webkul\Employee\Models\ShiftRosterAssignment;
 use Webkul\Employee\Models\WorkSchedule;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
@@ -40,6 +42,10 @@ use Webkul\Support\Models\Company;
  *  - every Time Off state change (and every change to an approved leave)
  *    touching a day in it (Leave hooks);
  *  - work schedule changes affecting days in it (WorkSchedule hooks);
+ *  - roster assignments and day overrides of days in it (ShiftRosterAssignment
+ *    / ShiftOverride hooks); an overnight shift belongs to its attendance
+ *    date (the day it starts), so its after-midnight check-out is guarded by
+ *    that day's month;
  *  - submitting or finally approving overtime for a day in it.
  * The refusal is an AttendanceMonthLockedException with a clear message.
  *
@@ -249,7 +255,7 @@ class AttendanceMonthLockService
             $ranges = [[$oldFrom, $oldTo]];
         } elseif (! $schedule->exists) {
             $ranges = [[$newFrom, $newTo]];
-        } elseif ($schedule->isDirty(['start_time', 'end_time', 'required_minutes', 'working_days', 'flexible_minutes', 'employee_id', 'company_id'])) {
+        } elseif ($schedule->isDirty(['start_time', 'end_time', 'required_minutes', 'working_days', 'flexible_minutes', 'break_minutes', 'employee_id', 'company_id'])) {
             $ranges = [[$oldFrom, $oldTo], [$newFrom, $newTo]];
         } else {
             $ranges = $this->changedDays($oldFrom, $oldTo, $newFrom, $newTo);
@@ -258,6 +264,46 @@ class AttendanceMonthLockService
         foreach ($ranges as [$from, $to]) {
             if ($from !== null) {
                 $this->assertRangeOpen($companyId, $from, $to, 'work schedules');
+            }
+        }
+    }
+
+    /** ShiftOverride saving / deleting: its day (old and new) must be in an open month. */
+    public function guardShiftOverride(ShiftOverride $override): void
+    {
+        $companyId = (int) ($override->company_id ?: Employee::query()->withTrashed()->whereKey($override->employee_id)->value('company_id'));
+        $original = $override->exists && $override->getRawOriginal('date') ? substr((string) $override->getRawOriginal('date'), 0, 10) : null;
+
+        $this->assertDatesOpen($companyId, array_values(array_filter([$override->date?->toDateString(), $original])), 'shift roster');
+    }
+
+    /**
+     * ShiftRosterAssignment saving / deleting: refused when it would change
+     * the roster of a day in a finalised month (like guardWorkSchedule()).
+     */
+    public function guardRosterAssignment(ShiftRosterAssignment $assignment, bool $deleting = false): void
+    {
+        $companyId = (int) $assignment->company_id;
+        $newFrom = $assignment->start_date?->toDateString();
+        $newTo = $assignment->end_date?->toDateString();
+        $oldFrom = $assignment->getRawOriginal('start_date') ? substr((string) $assignment->getRawOriginal('start_date'), 0, 10) : null;
+        $oldTo = $assignment->getRawOriginal('end_date') ? substr((string) $assignment->getRawOriginal('end_date'), 0, 10) : null;
+
+        if ($deleting) {
+            $ranges = [[$oldFrom, $oldTo]];
+        } elseif (! $assignment->exists) {
+            $ranges = [[$newFrom, $newTo]];
+        } elseif ($assignment->isDirty(['roster_id', 'employee_id', 'department_id', 'company_id'])
+            || ($oldFrom !== $newFrom && $oldFrom !== null && $newFrom !== null)) {
+            // A moved start shifts the whole cycle, so every day of both periods changes.
+            $ranges = [[$oldFrom, $oldTo], [$newFrom, $newTo]];
+        } else {
+            $ranges = $this->changedDays($oldFrom, $oldTo, $newFrom, $newTo);
+        }
+
+        foreach ($ranges as [$from, $to]) {
+            if ($from !== null) {
+                $this->assertRangeOpen($companyId, $from, $to, 'shift roster');
             }
         }
     }
@@ -463,6 +509,7 @@ class AttendanceMonthLockService
         $change = match ($what) {
             'leave'          => 'leave requests for those days can no longer be created, approved, refused or cancelled',
             'work schedules' => 'work schedules covering it can no longer be changed',
+            'shift roster'   => 'its shift roster can no longer be changed',
             'overtime'       => 'overtime for those days can no longer be requested or approved',
             default          => 'its attendance can no longer be changed',
         };

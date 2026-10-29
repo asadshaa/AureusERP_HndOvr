@@ -48,7 +48,7 @@ use Webkul\Support\Models\ApprovalWorkflow;
 final class ApprovalReminderService
 {
     /** Hierarchy steps whose approver is a manager with a line manager of their own. */
-    private const MANAGER_ROUTES = ['requester_manager', 'department_manager', 'team_manager'];
+    private const MANAGER_ROUTES = ['requester_manager', 'department_manager', 'team_manager', 'record_manager'];
 
     public function __construct(
         private ApprovalEngine $engine,

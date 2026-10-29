@@ -11,7 +11,7 @@ class PerformanceGoal extends Model
     protected $table = 'employees_performance_goals';
 
     protected $fillable = [
-        'company_id', 'review_id', 'title', 'description', 'weight', 'target_value',
+        'company_id', 'review_id', 'period', 'title', 'description', 'weight', 'target_value',
         'actual_value', 'rating', 'status', 'due_date',
     ];
 

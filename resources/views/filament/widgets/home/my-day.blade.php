@@ -18,6 +18,18 @@
                 <p class="ah-muted" style="margin: 0;">
                     {{ $attendance['detail'] ?? 'Check in and out from My Attendance.' }}
                 </p>
+                @if (($shifts ?? []) !== [])
+                    <ul class="ah-list" data-testid="my-day-shifts">
+                        @foreach ($shifts as $shift)
+                            <li>
+                                <span class="ah-small">{{ $loop->first ? 'Today' : $shift['day'] }}</span>
+                                <span class="ah-strong" style="font-size: .8125rem;">
+                                    <span style="display: inline-block; width: .55rem; height: .55rem; border-radius: 999px; margin-right: .25rem; background: {{ $shift['off'] ? 'rgba(127,127,127,.4)' : ($shift['color'] ?? 'rgba(127,127,127,.4)') }};"></span>{{ $shift['off'] ? 'Off' : $shift['label'].' '.$shift['hours'] }}
+                                </span>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
                 @if ($urls['attendance'] ?? null)
                     <x-filament::button
                         tag="a"

@@ -7,6 +7,7 @@ use App\Services\Demo\DemoPurger;
 use App\Services\Demo\DemoRecorder;
 use App\Services\Demo\DemoSandbox;
 use Carbon\CarbonImmutable;
+use Database\Seeders\Demo\DemoAppraisals;
 use Database\Seeders\Demo\DemoCatalog;
 use Database\Seeders\Demo\DemoPdf;
 use Illuminate\Database\Seeder;
@@ -213,6 +214,7 @@ class DemoActivitySeeder extends Seeder
         $this->seedDocuments();
         $this->seedEmployeeRequests();
         $this->seedRecruitment();
+        $this->seedAppraisals();
         $this->sendDocumentReminders();
         $this->recorder->flush();
         $this->settleNotifications();
@@ -1845,6 +1847,26 @@ class DemoActivitySeeder extends Seeder
             'LANGUAGES',
             'Urdu (native), English (fluent)',
         ];
+    }
+
+    // ---------------------------------------------------------------------
+    // Appraisals (HR Parity 3.2)
+    // ---------------------------------------------------------------------
+
+    /** One running appraisal cycle with self / manager reviews done through the services (Demo\DemoAppraisals). */
+    private function seedAppraisals(): void
+    {
+        // The same recorder: its company context and its capture of created rows.
+        $result = app(DemoAppraisals::class, ['recorder' => $this->recorder])->seed(
+            $this->company,
+            $this->baseUser($this->hrManagerKey()),
+            $this->realNow,
+            fn (Carbon $moment, ?User $actor, callable $callback): mixed => $this->at($moment, $actor, $callback),
+        );
+
+        foreach ($result['warnings'] as $warning) {
+            $this->warn($warning);
+        }
     }
 
     // ---------------------------------------------------------------------

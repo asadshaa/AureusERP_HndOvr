@@ -45,6 +45,7 @@ use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Services\HrHierarchyService;
+use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
@@ -263,6 +264,9 @@ class EmployeeRequestResource extends Resource
                                             ? 'Approved and recorded on '.Carbon::parse(data_get($record->payload, 'recorded_at'))->format('d M Y')
                                             : 'Not yet'),
                                     TextEntry::make('payload.reason')->label('Reason')->columnSpanFull(),
+                                    TextEntry::make('advance_deduction')->label('Deduction')->html()->columnSpanFull()
+                                        ->visible(fn (EmployeeRequest $record): bool => $record->status === 'approved')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => app(RequestInstalmentService::class)->scheduleHtml($record) ?? '<span class="text-gray-500">Not recorded yet.</span>'),
                                 ])
                                 ->columns(2),
 
@@ -870,6 +874,11 @@ class EmployeeRequestResource extends Resource
 
     public static function instalmentScheduleHtml(EmployeeRequest $record): string
     {
+        // Once approved, the recorded instalments with their status (deducted, skipped, ...).
+        if (($recorded = app(RequestInstalmentService::class)->scheduleHtml($record)) !== null) {
+            return $recorded;
+        }
+
         $schedule = (array) data_get($record->payload, 'schedule', []);
         if ($schedule === []) {
             return '<span class="text-gray-500">Calculated on submission.</span>';
@@ -1113,6 +1122,14 @@ class EmployeeRequestResource extends Resource
                 ]),
             ])->recordActions([
                 ViewAction::make()->modalHeading('Employee Request Details'),
+                Action::make('manage_instalments')
+                    ->label('Instalments')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('gray')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'approved'
+                        && RequestInstalmentService::kindFor($record) !== null
+                        && app(RequestInstalmentService::class)->canManage(Auth::user(), $record))
+                    ->url(fn (EmployeeRequest $record): string => EmployeeResource::getUrl('view', ['record' => $record->employee_id])),
                 Action::make('submit')
                     ->icon('heroicon-o-paper-airplane')->color('primary')->requiresConfirmation()
                     ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true))

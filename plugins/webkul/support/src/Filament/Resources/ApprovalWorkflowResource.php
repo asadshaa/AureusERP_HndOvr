@@ -134,6 +134,7 @@ class ApprovalWorkflowResource extends Resource
                             'requester_manager'  => 'Requester manager',
                             'department_manager' => 'Department manager',
                             'team_manager'       => 'Team manager',
+                            'record_manager'     => 'Manager named on the record (e.g. hiring manager)',
                             'hr'                 => 'HR of the company',
                         ]),
                         TextInput::make('sla_hours')->numeric()->minValue(1),

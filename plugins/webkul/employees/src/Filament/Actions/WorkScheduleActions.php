@@ -47,6 +47,7 @@ final class WorkScheduleActions
                 ->label('End')
                 ->seconds(false)
                 ->default((string) config('attendance.monthly_report.office_end', '18:00'))
+                ->helperText('An end before the start is an overnight schedule (e.g. 22:00–06:00), counted on the day it starts.')
                 ->required(),
             TextInput::make('required_minutes')
                 ->label('Required minutes per day')
@@ -61,6 +62,13 @@ final class WorkScheduleActions
                 ->integer()
                 ->minValue(0)
                 ->maxValue(WorkSchedule::MaxFlexibleMinutes)
+                ->default(0),
+            TextInput::make('break_minutes')
+                ->label('Unpaid break (minutes)')
+                ->helperText('Taken off the worked time when no break was recorded (a recorded gap between check-ins counts towards it). 0 = no break.')
+                ->integer()
+                ->minValue(0)
+                ->maxValue(1439)
                 ->default(0),
             CheckboxList::make('working_days')
                 ->label('Working days')

@@ -25,6 +25,7 @@ use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 use Webkul\Employee\Services\Attendance\OvertimeService;
+use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Security\Models\User;
 use Webkul\Support\Enums\ApprovalRequestStatus;
@@ -756,6 +757,9 @@ class EmployeeRequestService
 
         $payload['recorded_at'] ??= now()->toDateTimeString();
         $request->forceFill(['payload' => $payload])->save();
+
+        // The schedule becomes "due" instalment rows that feed the payroll-input export (idempotent).
+        app(RequestInstalmentService::class)->createForApprovedRequest($request);
     }
 
     /**

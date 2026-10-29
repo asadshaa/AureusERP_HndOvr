@@ -20,8 +20,13 @@ class Reportings extends Cluster
         return __('employees::filament/clusters/reportings.navigation.title');
     }
 
-    public static function getNavigationGroup(): string | \UnitEnum
+    public static function getNavigationGroup(): string|\UnitEnum
     {
         return NavigationGroup::Employee;
+    }
+
+    public static function getClusterBreadcrumb(): ?string
+    {
+        return static::getNavigationLabel();
     }
 }

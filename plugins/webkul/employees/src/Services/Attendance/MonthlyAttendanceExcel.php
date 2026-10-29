@@ -22,7 +22,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * employee (named after the employee) whose daily table starts on row 1: the
  * template's 15 headers in order (worded from the employee's schedule), then
  * Check-ins, Late, Left early, Extra, Away without approval, Grace balance,
- * Schedule, OT approved and OT pending. Times New Roman 10, d-mmm-yyyy
+ * Schedule, OT approved, OT pending and Break deducted. Times New Roman 10, d-mmm-yyyy
  * dates, h:mm:ss AM/PM times, [h]:mm durations, month totals on the first
  * data row only. A finalised month says so on the Summary sheet (row 5).
  */
@@ -119,9 +119,9 @@ class MonthlyAttendanceExcel
             'Code', 'Employee', 'Department', 'Designation', 'Working days', 'Present', 'Absent', 'Leave', 'OD', 'Late', 'Missing check-out', 'Holidays',
             'Total Hrs Worked', 'Total Hrs Req', 'Delta', 'Penalty', 'Extra (outside required)',
             'Late (mins)', 'Left early (mins)', 'Extra (mins)', 'Away without approval (mins)', 'Net balance (mins)', 'Grace allowance (mins)', 'Grace balance (mins)',
-            'OT approved (hrs)', 'OT pending (hrs)', 'Weekend / holiday (hrs)',
+            'OT approved (hrs)', 'OT pending (hrs)', 'Weekend / holiday (hrs)', 'Break deducted (mins)',
         ];
-        $widths = [10, 26, 20, 24, 10, 9, 9, 8, 8, 8, 11, 9, 11, 11, 9, 9, 12, 10, 10, 10, 12, 11, 11, 11, 11, 11, 12];
+        $widths = [10, 26, 20, 24, 10, 9, 9, 8, 8, 8, 11, 9, 11, 11, 9, 9, 12, 10, 10, 10, 12, 11, 11, 11, 11, 11, 12, 11];
         $headerRow = self::SUMMARY_HEADER_ROW;
 
         $row = $headerRow + 1;
@@ -157,6 +157,7 @@ class MonthlyAttendanceExcel
                 $summary['overtime_approved_hours'] ?? 0,
                 $summary['overtime_pending_hours'] ?? 0,
                 $summary['weekend_holiday_hours'] ?? 0,
+                $summary['break_deducted_minutes'] ?? 0,
             ]], null, 'A'.$row, true);
 
             if ($summary['penalty_percent'] > 0) {
@@ -170,12 +171,13 @@ class MonthlyAttendanceExcel
         $this->table($sheet, $headers, $widths, $headerRow, $lastRow);
 
         if ($lastRow > $headerRow) {
-            $sheet->getStyle('A'.($headerRow + 1).':AA'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+            $sheet->getStyle('A'.($headerRow + 1).':AB'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
             $sheet->getStyle('M'.($headerRow + 1).':O'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
             $sheet->getStyle('P'.($headerRow + 1).':P'.$lastRow)->getNumberFormat()->setFormatCode('0.00%');
             $sheet->getStyle('Q'.($headerRow + 1).':Q'.$lastRow)->getNumberFormat()->setFormatCode('[h]:mm');
             $sheet->getStyle('R'.($headerRow + 1).':X'.$lastRow)->getNumberFormat()->setFormatCode('0');
             $sheet->getStyle('Y'.($headerRow + 1).':AA'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
+            $sheet->getStyle('AB'.($headerRow + 1).':AB'.$lastRow)->getNumberFormat()->setFormatCode('0');
         }
     }
 
@@ -194,7 +196,7 @@ class MonthlyAttendanceExcel
         $credit = isset($report['policy']['daily_extra_credit_cap_minutes']) ? (int) $report['policy']['daily_extra_credit_cap_minutes'] : null;
 
         $headers = [...$this->report->dailyHeaders($credit, $employeeReport['schedule'] ?? null), ...$this->report->extraHeaders()];
-        $widths = [14, 13, 13, 18, 14, 14, 14, 14, 14, 14, 20, 13, 13, 13, 13, 24, 11, 11, 11, 13, 13, 22, 11, 11];
+        $widths = [14, 13, 13, 18, 14, 14, 14, 14, 14, 14, 20, 13, 13, 13, 13, 24, 11, 11, 11, 13, 13, 22, 11, 11, 11];
         $headerRow = self::HEADER_ROW;
 
         $row = $headerRow + 1;
@@ -235,6 +237,9 @@ class MonthlyAttendanceExcel
             if (($day['overtime_pending_minutes'] ?? 0) > 0) {
                 $sheet->setCellValue('X'.$row, (int) $day['overtime_pending_minutes']);
             }
+            if (($day['break_deducted_minutes'] ?? 0) > 0) {
+                $sheet->setCellValue('Y'.$row, (int) $day['break_deducted_minutes']);
+            }
 
             $fill = match (true) {
                 in_array($day['type'], ['weekend', 'holiday'], true) => self::GREY,
@@ -259,7 +264,7 @@ class MonthlyAttendanceExcel
         $this->table($sheet, $headers, $widths, $headerRow, $lastRow);
 
         $first = $headerRow + 1;
-        $sheet->getStyle('A'.$first.':X'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle('A'.$first.':Y'.$lastRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
         $sheet->getStyle('A'.$first.':A'.$lastRow)->getNumberFormat()->setFormatCode('d-mmm-yyyy');
         $sheet->getStyle('B'.$first.':C'.$lastRow)->getNumberFormat()->setFormatCode('h:mm:ss AM/PM');
         $sheet->getStyle('E'.$first.':F'.$lastRow)->getNumberFormat()->setFormatCode('h:mm:ss AM/PM');
@@ -270,7 +275,7 @@ class MonthlyAttendanceExcel
         $sheet->getStyle('L'.$first.':N'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
         $sheet->getStyle('O'.$first.':O'.$lastRow)->getNumberFormat()->setFormatCode('0.00%');
         $sheet->getStyle('Q'.$first.':U'.$lastRow)->getNumberFormat()->setFormatCode('0');
-        $sheet->getStyle('W'.$first.':X'.$lastRow)->getNumberFormat()->setFormatCode('0');
+        $sheet->getStyle('W'.$first.':Y'.$lastRow)->getNumberFormat()->setFormatCode('0');
         $sheet->getStyle('D'.$first.':D'.$lastRow)->getAlignment()->setWrapText(true);
         $sheet->getStyle('P'.$first.':P'.$lastRow)->getAlignment()->setWrapText(true);
     }

@@ -12,9 +12,11 @@ use Webkul\PluginManager\Console\Commands\UninstallCommand;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Recruitment\Console\Commands\AnalyseCvsCommand;
+use Webkul\Recruitment\Console\Commands\ExpireJobOffersCommand;
 use Webkul\Recruitment\Console\Commands\PullWebsiteApplicationsCommand;
 use Webkul\Recruitment\Console\Commands\RemindPostingRemovalsCommand;
 use Webkul\Recruitment\Console\Commands\SendInterviewRemindersCommand;
+use Webkul\Recruitment\Database\Seeders\JobOfferDefaultsSeeder;
 use Webkul\Recruitment\Database\Seeders\JobOpeningWorkflowSeeder;
 use Webkul\Recruitment\Database\Seeders\ScreeningQuestionSeeder;
 use Webkul\Recruitment\Enums\ChannelPostingStatus;
@@ -48,6 +50,7 @@ class RecruitmentServiceProvider extends PackageServiceProvider
     {
         $package->name(static::$name)
             ->hasViews()
+            ->hasRoute('web')
             ->hasTranslations()
             ->hasMigrations([
                 '2025_01_06_133002_create_recruitments_stages_table',
@@ -72,6 +75,8 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_10_29_000001_create_recruitments_website_tables',
                 '2026_10_30_000001_create_recruitments_interviews_tables',
                 '2026_10_31_000001_create_recruitments_job_board_registrations_table',
+                '2026_10_31_400001_create_recruitments_job_offers_tables',
+                '2026_10_31_400002_provision_recruitments_job_offer_defaults',
             ])
             ->runsMigrations()
             ->hasCommands([
@@ -79,6 +84,7 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 AnalyseCvsCommand::class,
                 PullWebsiteApplicationsCommand::class,
                 SendInterviewRemindersCommand::class,
+                ExpireJobOffersCommand::class,
             ])
             ->hasDependencies([
                 'employees',
@@ -106,6 +112,11 @@ class RecruitmentServiceProvider extends PackageServiceProvider
 
                 if (Schema::hasTable('recruitments_screening_questions')) {
                     app(ScreeningQuestionSeeder::class)->provisionForCompany($company);
+                }
+
+                // Job offers (HR parity 3.6): the "job_offer" approval workflow and the default letter template.
+                if (Schema::hasTable('support_approval_workflows') && Schema::hasTable('recruitments_offer_letter_templates')) {
+                    app(JobOfferDefaultsSeeder::class)->provisionForCompany($company);
                 }
             } catch (Throwable $e) {
                 report($e);

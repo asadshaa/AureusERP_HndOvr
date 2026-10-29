@@ -298,6 +298,12 @@ class Employee extends Model
         return $this->hasMany(EmployeeRequest::class);
     }
 
+    /** Loan instalments and salary-advance deductions (RequestInstalmentService). */
+    public function requestInstalments(): HasMany
+    {
+        return $this->hasMany(RequestInstalment::class, 'employee_id');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(EmployeeDocument::class, 'employee_id');

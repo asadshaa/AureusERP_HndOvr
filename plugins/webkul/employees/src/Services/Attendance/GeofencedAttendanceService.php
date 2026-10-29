@@ -311,7 +311,9 @@ class GeofencedAttendanceService
 
     private function doCheckIn(User $user, Employee $employee, ?LocationEvidence $evidence, ?string $clientError, Request $request, string $requestId, CarbonImmutable $nowUtc, string $timezone): AttendanceAttemptResult
     {
-        $attendanceDate = $this->schedule->attendanceDateFor($employee, $nowUtc);
+        // The shift's day: a check-in after midnight within yesterday's (overnight) shift belongs to yesterday.
+        $schedules = $this->schedule->setAround($employee, $nowUtc);
+        $attendanceDate = $this->schedule->attributeLocal($schedules, $nowUtc->setTimezone($timezone));
         ['mode' => $mode, 'candidates' => $candidates] = $this->resolveMode($employee, $attendanceDate);
 
         if ($mode === 'none') {
@@ -348,7 +350,7 @@ class GeofencedAttendanceService
             return $this->resultFor(Action::CheckIn, $decision->result, false, null, null);
         }
 
-        [$scheduledStart, $scheduledEnd] = $this->schedule->scheduledWindowFor($employee, $attendanceDate);
+        [$scheduledStart, $scheduledEnd] = $this->schedule->scheduledWindowFor($employee, $attendanceDate, $schedules);
         $appTimezone = config('app.timezone');
         $newStatus = $this->statusFor($mode, $decision)->value;
 
@@ -948,7 +950,9 @@ class GeofencedAttendanceService
 
         $nowUtc = CarbonImmutable::now('UTC');
         $timezone = $this->schedule->timezoneFor($employee);
-        $attendanceDate = $this->schedule->attendanceDateFor($employee, $nowUtc);
+        // After midnight, yesterday's overnight shift is still "today" until it ends (plus the tolerance).
+        $schedules = $this->schedule->setAround($employee, $nowUtc);
+        $attendanceDate = $this->schedule->attributeLocal($schedules, $nowUtc->setTimezone($timezone));
 
         $open = $this->openRecord($employee, $nowUtc);
         $record = $open ?? AttendanceRecord::query()
@@ -960,7 +964,7 @@ class GeofencedAttendanceService
         ['mode' => $mode, 'candidates' => $candidates] = $this->resolveMode($employee, $open ? $open->attendance_date->toDateString() : $attendanceDate);
 
         $scheduleName = $employee->calendar?->name;
-        [$schedStartUtc, $schedEndUtc] = $this->schedule->scheduledWindowFor($employee, $attendanceDate);
+        [$schedStartUtc, $schedEndUtc] = $this->schedule->scheduledWindowFor($employee, $attendanceDate, $schedules);
         $schedStartLocal = $schedStartUtc ? $this->localTime($schedStartUtc, $timezone) : null;
         $schedEndLocal = $schedEndUtc ? $this->localTime($schedEndUtc, $timezone) : null;
         $schedDurationHours = ($schedStartUtc && $schedEndUtc) ? round($schedStartUtc->diffInMinutes($schedEndUtc) / 60, 1) : 8.0;

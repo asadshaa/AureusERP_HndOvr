@@ -88,12 +88,23 @@ final class HrPermissions
     /** Post, edit and remove company announcements and see who read them (HR Parity 2.6). */
     public const ManageAnnouncements = 'hr_manage_announcements';
 
+    /**
+     * Monthly payroll-input export, and marking loan instalments / advance
+     * deductions deducted, skipped, rescheduled or settled (HR Parity 1.5, 3.3).
+     */
+    public const ExportPayroll = 'hr_export_payroll';
+
+    /** Employees -> Reportings: joiners & leavers, headcount trend and leave balance reports (HR Parity 3.7). */
+    public const ViewReports = 'hr_view_reports';
+
     /** @return array<int, string> */
     public static function all(): array
     {
         return [
             self::ManageChecklists,
             self::ManageAnnouncements,
+            self::ExportPayroll,
+            self::ViewReports,
             self::FinaliseAttendance,
             self::ManageEmployeeDocuments,
             self::ViewEmployeeDocuments,
@@ -292,6 +303,8 @@ final class HrPermissions
             self::ManageEmployeeDocuments,
             self::ManageChecklists,
             self::ManageAnnouncements,
+            self::ExportPayroll,
+            self::ViewReports,
             self::ApproveLeave,
             self::ApproveTimesheets,
             self::ManagePerformance,
@@ -414,6 +427,7 @@ final class HrPermissions
             self::ViewSensitiveEmployeeData,
             self::ViewEmployeeDocuments,
             self::ViewAnalytics,
+            self::ViewReports,
             self::ViewAttendance,
             self::ViewAttendanceLocationEvidence,
             self::ViewPerformance,

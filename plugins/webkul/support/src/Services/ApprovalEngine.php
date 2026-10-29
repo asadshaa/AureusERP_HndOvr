@@ -11,6 +11,7 @@ use RuntimeException;
 use WeakMap;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Contracts\NamesApprovalManager;
 use Webkul\Support\Contracts\ReturnableApprovalSubject;
 use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Models\ApprovalRequest;
@@ -348,6 +349,7 @@ final class ApprovalEngine
             'requester_manager'  => $subjectEmployee?->parent?->user,
             'department_manager' => $techHeadUserId ? User::query()->find($techHeadUserId) : $subjectEmployee?->department?->manager?->user,
             'team_manager'       => $subjectEmployee?->team?->manager?->user,
+            'record_manager'     => $this->recordManager($request),
             default              => null,
         };
 
@@ -358,6 +360,14 @@ final class ApprovalEngine
         }
 
         return $manager;
+    }
+
+    /** The manager a NamesApprovalManager subject names for a "record_manager" step. */
+    private function recordManager(ApprovalRequest $request): ?User
+    {
+        $subject = $request->subject;
+
+        return $subject instanceof NamesApprovalManager ? $subject->approvalManager() : null;
     }
 
     /** User id of the employee the request is about (the subject's employee, else the requester's). */
@@ -447,6 +457,12 @@ final class ApprovalEngine
             }
 
             return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+        }
+
+        if ($step->hierarchy_route === 'record_manager') {
+            $recordManager = $this->hierarchyManagerFor($request, $step);
+
+            return $recordManager ? collect([$recordManager]) : $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
         }
 
         return collect();
@@ -618,8 +634,25 @@ final class ApprovalEngine
             'requester_manager'  => $this->canActAsRequesterManager($subjectEmployee, $actor, $request),
             'department_manager' => $this->canActAsDepartmentManager($subjectEmployee, $actor, $request),
             'team_manager'       => $this->canActAsTeamManager($subjectEmployee, $actor, $request),
+            'record_manager'     => $this->canActAsRecordManager($subjectEmployee, $actor, $request, $step),
             default              => false,
         };
+    }
+
+    /** The manager the subject names (NamesApprovalManager), else HR as for the other manager routes. */
+    private function canActAsRecordManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request, ApprovalStep $step): bool
+    {
+        $manager = $this->hierarchyManagerFor($request, $step);
+
+        if ($manager) {
+            return (int) $manager->id === (int) $actor->id;
+        }
+
+        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
+            return false;
+        }
+
+        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     /** An "hr" step: any HR approver of the request's company except the employee the request is about. */
@@ -774,6 +807,7 @@ final class ApprovalEngine
             'requester_manager'  => $subjectEmployee?->parent?->user,
             'department_manager' => $techHeadUser ?? $subjectEmployee?->department?->manager?->user,
             'team_manager'       => $subjectEmployee?->team?->manager?->user,
+            'record_manager'     => $this->hierarchyManagerFor($request, $step),
             default              => null,
         };
         if ($manager?->name) {
@@ -785,6 +819,7 @@ final class ApprovalEngine
             'requester_manager'  => 'Forwarded to HR (no line manager assigned).',
             'department_manager' => 'Forwarded to HR (no department manager assigned).',
             'team_manager'       => 'Forwarded to HR (no team manager assigned).',
+            'record_manager'     => 'Forwarded to HR (no manager named on the record).',
             default              => 'Forwarded for approval.',
         };
     }

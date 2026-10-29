@@ -18,6 +18,7 @@ use Webkul\Employee\Services\Attendance\Verifiers\GpsGeofenceVerifier;
 use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\DefaultDocumentTypes;
+use Webkul\Employee\Support\DefaultShifts;
 use Webkul\Employee\Support\EmployeeLifecycleHooks;
 use Webkul\PluginManager\Console\Commands\InstallCommand;
 use Webkul\PluginManager\Console\Commands\UninstallCommand;
@@ -96,6 +97,17 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_10_30_300002_create_employees_employee_checklists_tables',
                 '2026_10_30_300003_create_employees_announcements_tables',
                 '2026_10_30_300004_add_show_birthday_to_employees_employees_table',
+                '2026_10_31_200001_create_employees_appraisal_templates_table',
+                '2026_10_31_200002_add_appraisal_columns_to_employees_performance_cycles_table',
+                '2026_10_31_200003_add_appraisal_columns_to_employees_performance_reviews_table',
+                '2026_10_31_200004_create_employees_performance_review_reminders_table',
+                '2026_10_31_300001_create_employees_request_instalments_tables',
+                '2026_10_31_300002_backfill_employees_request_instalments',
+                '2026_10_31_500001_create_employees_shifts_table',
+                '2026_10_31_500002_create_employees_shift_rosters_table',
+                '2026_10_31_500003_create_employees_shift_roster_assignments_table',
+                '2026_10_31_500004_create_employees_shift_overrides_table',
+                '2026_10_31_500005_add_break_minutes_to_employees_work_schedules_table',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')
@@ -138,6 +150,15 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 if (Schema::hasTable('employees_document_types')) {
                     DefaultDocumentTypes::provisionForCompany((int) $company->id);
                 }
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
+
+        // A new company starts with the default shifts and the sample rotation (HR Parity 3.4).
+        Company::created(function (Company $company): void {
+            try {
+                DefaultShifts::provisionForCompany((int) $company->id);
             } catch (Throwable $e) {
                 report($e);
             }

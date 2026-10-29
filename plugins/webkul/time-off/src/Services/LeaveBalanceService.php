@@ -163,6 +163,76 @@ class LeaveBalanceService
     }
 
     /**
+     * usageForTypes() for many employees at once (reports), still in two
+     * queries: allocations and leaves are summed per employee and type.
+     * Every employee gets every type, zero when there is nothing.
+     *
+     * @param  iterable<int>  $employeeIds
+     * @param  iterable<LeaveType>  $leaveTypes
+     * @return array<int, array<int, array{allocated: float, taken: float, pending: float, remaining: float}>> keyed by employee id, then leave type id
+     */
+    public function usageForEmployees(iterable $employeeIds, iterable $leaveTypes, int $year): array
+    {
+        $employeeIds = collect($employeeIds)->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $typeIds = collect($leaveTypes)->map(fn (LeaveType $type): int => (int) $type->id)->unique()->values()->all();
+
+        if ($employeeIds === [] || $typeIds === []) {
+            return array_fill_keys($employeeIds, []);
+        }
+
+        $yearStart = Carbon::create($year, 1, 1)->startOfDay();
+        $yearEnd = Carbon::create($year, 12, 31)->endOfDay();
+
+        $allocated = [];
+        LeaveAllocation::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('holiday_status_id', $typeIds)
+            ->where('state', State::VALIDATE_TWO->value)
+            ->where('date_from', '<=', $yearEnd)
+            ->where(fn ($query) => $query->whereNull('date_to')->orWhere('date_to', '>=', $yearStart))
+            ->groupBy('employee_id', 'holiday_status_id')
+            ->selectRaw('employee_id, holiday_status_id, SUM(number_of_days) AS days')
+            ->toBase()
+            ->get()
+            ->each(function (object $row) use (&$allocated): void {
+                $allocated[(int) $row->employee_id][(int) $row->holiday_status_id] = (float) $row->days;
+            });
+
+        $used = [];
+        Leave::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('holiday_status_id', $typeIds)
+            ->whereRaw('COALESCE(request_date_from, date_from) BETWEEN ? AND ?', [$yearStart->toDateTimeString(), $yearEnd->toDateTimeString()])
+            ->whereIn('state', [State::VALIDATE_TWO->value, ...self::PENDING_STATES])
+            ->groupBy('employee_id', 'holiday_status_id', 'state')
+            ->selectRaw('employee_id, holiday_status_id, state, SUM(number_of_days) AS days')
+            ->toBase()
+            ->get()
+            ->each(function (object $row) use (&$used): void {
+                $bucket = $row->state === State::VALIDATE_TWO->value ? 'taken' : 'pending';
+                $used[(int) $row->employee_id][(int) $row->holiday_status_id][$bucket] = ($used[(int) $row->employee_id][(int) $row->holiday_status_id][$bucket] ?? 0.0) + (float) $row->days;
+            });
+
+        $usage = [];
+        foreach ($employeeIds as $employeeId) {
+            foreach ($typeIds as $typeId) {
+                $allocatedDays = $allocated[$employeeId][$typeId] ?? 0.0;
+                $taken = $used[$employeeId][$typeId]['taken'] ?? 0.0;
+                $pending = $used[$employeeId][$typeId]['pending'] ?? 0.0;
+
+                $usage[$employeeId][$typeId] = [
+                    'allocated' => round($allocatedDays, 2),
+                    'taken'     => round($taken, 2),
+                    'pending'   => round($pending, 2),
+                    'remaining' => round($allocatedDays - $taken - $pending, 2),
+                ];
+            }
+        }
+
+        return $usage;
+    }
+
+    /**
      * Why the employee may not request $days of $leaveType starting on $date,
      * or null when the request fits the balance (always null for a type
      * without a balance, such as Half day).

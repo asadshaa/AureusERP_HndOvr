@@ -8,7 +8,6 @@ use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -16,14 +15,24 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
-use RuntimeException;
+use Webkul\Employee\Filament\Appraisals\AppraisalTable;
 use Webkul\Employee\Filament\Resources\PerformanceReviewResource\Pages\ManagePerformanceReviews;
+use Webkul\Employee\Filament\Resources\PerformanceReviewResource\Pages\ViewAppraisal;
 use Webkul\Employee\Models\PerformanceReview;
-use Webkul\Employee\Services\HrHierarchyService;
-use Webkul\Employee\Services\PerformanceService;
+use Webkul\Employee\Services\Appraisals\AppraisalAccess;
+use Webkul\Employee\Support\AppraisalKinds;
 use Webkul\Employee\Support\HrPermissions;
+use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 
+/**
+ * Every appraisal the signed-in user may see in the active company
+ * (AppraisalAccess::visibleQuery()). In the menu for HR only; employees and
+ * line managers use My appraisals / Team appraisals, which open the same
+ * appraisal page. The self / manager review is filled in on that page; the
+ * generic edit form is HR's correction tool.
+ */
 class PerformanceReviewResource extends Resource
 {
     protected static ?string $model = PerformanceReview::class;
@@ -42,17 +51,23 @@ class PerformanceReviewResource extends Resource
         return 'Performance Reviews';
     }
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        $user = Auth::user();
+        $companyId = $user instanceof User ? CurrentCompany::id($user) : null;
+
+        return $companyId !== null && app(AppraisalAccess::class)->canViewCompany($user, (int) $companyId);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            Select::make('cycle_id')->relationship('cycle', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', Auth::user()?->default_company_id))->disabled()->dehydrated(),
-            Select::make('employee_id')->relationship('employee', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', Auth::user()?->default_company_id))->disabled()->dehydrated(),
-            Select::make('reviewer_id')->relationship('reviewer', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', Auth::user()?->default_company_id))->searchable()->preload(),
+            Select::make('cycle_id')->relationship('cycle', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', CurrentCompany::id() ?? 0))->disabled()->dehydrated(),
+            Select::make('employee_id')->relationship('employee', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', CurrentCompany::id() ?? 0))->disabled()->dehydrated(),
+            Select::make('reviewer_id')->relationship('reviewer', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', CurrentCompany::id() ?? 0))->searchable()->preload(),
             TextInput::make('self_rating')->numeric()->minValue(0)->maxValue(5),
             TextInput::make('manager_rating')->numeric()->minValue(0)->maxValue(5),
-            Select::make('status')->options([
-                'self_review' => 'Self review', 'manager_review' => 'Manager review', 'completed' => 'Completed',
-            ])->required(),
+            Select::make('status')->options(AppraisalKinds::statuses())->required(),
             KeyValue::make('competency_ratings')->columnSpanFull(),
             Textarea::make('self_comments')->columnSpanFull(),
             Textarea::make('manager_comments')->columnSpanFull(),
@@ -63,105 +78,53 @@ class PerformanceReviewResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
-            TextColumn::make('cycle.name')->searchable()->sortable(),
-            TextColumn::make('employee.name')->searchable()->sortable(),
-            TextColumn::make('reviewer.name')->label('Manager reviewer')->placeholder('—'),
-            TextColumn::make('self_rating')->numeric(decimalPlaces: 2)->placeholder('—'),
-            TextColumn::make('manager_rating')->numeric(decimalPlaces: 2)->placeholder('—'),
-            TextColumn::make('status')->badge(),
-            TextColumn::make('completed_at')->dateTime()->placeholder('Pending'),
-        ])->filters([
-            SelectFilter::make('status')->options([
-                'self_review' => 'Self review', 'manager_review' => 'Manager review', 'completed' => 'Completed',
-            ]),
-        ])->recordActions([
-            Action::make('submit_self_review')
-                ->label('Submit Self Review')
-                ->icon('heroicon-o-pencil-square')
-                ->color('primary')
-                ->visible(fn (PerformanceReview $record): bool => $record->status === 'self_review'
-                    && (int) $record->employee?->user_id === (int) Auth::id())
-                ->schema([
-                    TextInput::make('self_rating')->numeric()->minValue(0)->maxValue(5)->required(),
-                    Textarea::make('self_comments')->columnSpanFull(),
-                ])
-                ->action(function (PerformanceReview $record, array $data): void {
-                    try {
-                        app(PerformanceService::class)->submitSelfReview($record, $record->employee, (float) $data['self_rating'], $data['self_comments'] ?? null);
-                        Notification::make()->success()->title('Self review submitted')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Could not submit self review')->body($e->getMessage())->send();
-                    }
-                }),
-            Action::make('complete_manager_review')
-                ->label('Complete Manager Review')
-                ->icon('heroicon-o-check-badge')
-                ->color('success')
-                ->visible(fn (PerformanceReview $record): bool => $record->status === 'manager_review'
-                    && (int) $record->reviewer?->user_id === (int) Auth::id())
-                ->schema([
-                    TextInput::make('manager_rating')->numeric()->minValue(0)->maxValue(5)->required(),
-                    KeyValue::make('competency_ratings')->columnSpanFull(),
-                    Textarea::make('manager_comments')->columnSpanFull(),
-                    Textarea::make('improvement_plan')->columnSpanFull(),
-                    Textarea::make('promotion_recommendation')->columnSpanFull(),
-                ])
-                ->action(function (PerformanceReview $record, array $data): void {
-                    try {
-                        app(PerformanceService::class)->completeManagerReview(
-                            $record,
-                            $record->reviewer,
-                            (float) $data['manager_rating'],
-                            $data['manager_comments'] ?? null,
-                            [
-                                'competency_ratings'       => $data['competency_ratings'] ?? null,
-                                'improvement_plan'         => $data['improvement_plan'] ?? null,
-                                'promotion_recommendation' => $data['promotion_recommendation'] ?? null,
-                            ],
-                        );
-                        Notification::make()->success()->title('Manager review completed')->send();
-                    } catch (RuntimeException $e) {
-                        Notification::make()->danger()->title('Could not complete manager review')->body($e->getMessage())->send();
-                    }
-                }),
-            EditAction::make(),
-        ])
+        $user = Auth::user();
+
+        return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['cycle', 'employee.department', 'employee.parent', 'reviewer.user']))
+            ->columns($user instanceof User ? AppraisalTable::columns($user, withEmployee: true, withReviewer: true, withCycle: true) : [
+                TextColumn::make('employee.name'),
+            ])
+            ->filters([
+                SelectFilter::make('status')->options(AppraisalKinds::statuses()),
+                SelectFilter::make('cycle_id')->label('Cycle')->relationship('cycle', 'name', fn (Builder $query): Builder => $query->where('company_id', CurrentCompany::id() ?? 0)),
+            ])
+            ->recordUrl(fn (PerformanceReview $record): string => static::getUrl('view', ['record' => $record]))
+            ->recordActions([
+                // The self / manager review is filled in on the appraisal page.
+                Action::make('submit_self_review')
+                    ->label('Self review')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('primary')
+                    ->visible(fn (PerformanceReview $record): bool => $user instanceof User && app(AppraisalAccess::class)->canEditSelfReview($user, $record))
+                    ->url(fn (PerformanceReview $record): string => static::getUrl('view', ['record' => $record])),
+                Action::make('complete_manager_review')
+                    ->label('Manager review')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->visible(fn (PerformanceReview $record): bool => $user instanceof User && app(AppraisalAccess::class)->canEditManagerReview($user, $record))
+                    ->url(fn (PerformanceReview $record): string => static::getUrl('view', ['record' => $record])),
+                EditAction::make(),
+            ])
             ->defaultSort('id', 'desc');
     }
 
     /**
-     * Company scoping alone let any user holding hr_manage_performance see
-     * every employee's ratings and review comments. Scope to the
-     * requesting user's HR hierarchy, matching every other personal-data
-     * list in this module. Note: PerformanceCycle itself (the
-     * cycle/campaign record — name, dates, status) carries no employee_id
-     * and is intentionally left company-scoped only; it is administrative
-     * configuration, not an individual's data — PerformanceCycleResource
-     * is unchanged.
+     * Own appraisals, the user's reports' (as reviewer or line manager), the
+     * ones without a line manager for HR approvers, and the whole active
+     * company for HR (company-wide scope plus hr_manage_performance or
+     * hr_view_performance). A line manager's hr_manage_performance alone no
+     * longer opens the whole company.
      */
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery()->where('company_id', Auth::user()?->default_company_id);
-
         $user = Auth::user();
-        if (! $user) {
-            return $query->whereRaw('1 = 0');
+
+        if (! $user instanceof User) {
+            return parent::getEloquentQuery()->whereRaw('1 = 0');
         }
 
-        if ($user->can('hr_view_all_records') || $user->can(HrPermissions::ManagePerformance)) {
-            return $query;
-        }
-
-        $hierarchy = app(HrHierarchyService::class);
-        $visibleEmployeeIds = $hierarchy->visibleEmployeeIds($user, (int) $user->default_company_id);
-
-        return $query->where(function (Builder $q) use ($visibleEmployeeIds, $user): void {
-            $q->whereIn('employee_id', $visibleEmployeeIds);
-            if ($user->employee) {
-                $q->orWhere('reviewer_id', $user->employee->id);
-            }
-        });
+        return app(AppraisalAccess::class)->visibleQuery($user, CurrentCompany::id($user));
     }
 
     public static function canViewAny(): bool
@@ -177,6 +140,9 @@ class PerformanceReviewResource extends Resource
 
     public static function getPages(): array
     {
-        return ['index' => ManagePerformanceReviews::route('/')];
+        return [
+            'index' => ManagePerformanceReviews::route('/'),
+            'view'  => ViewAppraisal::route('/{record}'),
+        ];
     }
 }

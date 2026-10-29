@@ -47,7 +47,7 @@ class WorkScheduleService
     }
 
     /**
-     * @param  array{name?: ?string, start_time: string, end_time: string, required_minutes: int|string, working_days: array<int, int|string>, flexible_minutes?: int|string|null, effective_from: string, effective_to?: ?string, notes?: ?string}  $data
+     * @param  array{name?: ?string, start_time: string, end_time: string, required_minutes: int|string, working_days: array<int, int|string>, flexible_minutes?: int|string|null, break_minutes?: int|string|null, effective_from: string, effective_to?: ?string, notes?: ?string}  $data
      *
      * @throws AuthorizationException|ValidationException
      */
@@ -82,6 +82,7 @@ class WorkScheduleService
                 'required_minutes' => (int) $data['required_minutes'],
                 'working_days'     => array_values(array_map('intval', (array) $data['working_days'])),
                 'flexible_minutes' => (int) ($data['flexible_minutes'] ?? 0),
+                'break_minutes'    => (int) ($data['break_minutes'] ?? 0),
                 'effective_from'   => $from,
                 'effective_to'     => filled($data['effective_to'] ?? null) ? CarbonImmutable::parse((string) $data['effective_to'])->toDateString() : null,
                 'notes'            => filled($data['notes'] ?? null) ? mb_substr((string) $data['notes'], 0, 255) : null,

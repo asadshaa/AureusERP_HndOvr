@@ -26,6 +26,7 @@ use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\Data\LocationEvidence;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
+use Webkul\Employee\Services\Attendance\ShiftRosterService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Support\Enums\NavigationGroup;
@@ -157,6 +158,29 @@ class MyAttendance extends Page
         ];
     }
 
+    /**
+     * The signed-in employee's own shifts for the coming days (rotating
+     * roster and day changes); empty when they are not rostered.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getUpcomingShifts(): array
+    {
+        $employee = app(GeofencedAttendanceService::class)->resolveEmployee(Auth::user());
+
+        if (! $employee) {
+            return [];
+        }
+
+        try {
+            return app(ShiftRosterService::class)->upcomingFor($employee);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return [];
+        }
+    }
+
     /** @return array<string, mixed>|null */
     public function getTodayState(): ?array
     {
@@ -213,6 +237,10 @@ class MyAttendance extends Page
             $monthEnd->toDateString(),
         )->get();
 
+        // Days off follow the employee's own schedule (roster day off, work schedule weekdays, else the weekend).
+        $resolver = app(AttendanceScheduleResolver::class);
+        $schedules = $resolver->setsFor([$employee], $monthStart->toDateString(), $monthEnd->toDateString())[(int) $employee->id] ?? [];
+
         $daysPresent = 0;
         $totalHours = 0.0;
         $lateDays = 0;
@@ -235,7 +263,7 @@ class MyAttendance extends Page
             $dateStr = $currentDate->toDateString();
             $isToday = $dateStr === $todayStr;
             $isFuture = $dateStr > $todayStr;
-            $isWeekend = $currentDate->isWeekend();
+            $isWeekend = ! $resolver->pick($schedules, $dateStr)->isWorkingDay($dateStr);
 
             /** @var AttendanceRecord|null $record */
             $record = $records->get($dateStr);

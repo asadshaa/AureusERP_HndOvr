@@ -5,6 +5,8 @@ use Filament\Pages\Dashboard;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\InterviewResource;
+use Webkul\Recruitment\Filament\Clusters\Applications\Resources\JobOfferResource;
+use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\OfferLetterTemplateResource;
 
 return [
 
@@ -185,6 +187,11 @@ return [
         ],
         'exclude' => [
             RoleResource::class,
+            // Job offers (HR parity 3.6) follow the application's rights and
+            // HR membership (JobOfferPolicy / OfferLetterTemplatePolicy), not
+            // role permissions: nothing to tick in the role editor.
+            JobOfferResource::class,
+            OfferLetterTemplateResource::class,
         ],
     ],
 

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Webkul\Employee\Http\Controllers\AppraisalPdfController;
 use Webkul\Employee\Http\Controllers\EmployeeDocumentDownloadController;
 use Webkul\Employee\Http\Controllers\PwaManifestController;
 
@@ -22,3 +23,12 @@ Route::middleware(['web', 'signed', 'throttle:60,1'])
  */
 Route::get('manifest.webmanifest', PwaManifestController::class)
     ->name('employees.pwa.manifest');
+
+/*
+ | Printable appraisal (HR Parity 3.2), rendered on request for a signed-in
+ | user who may read the result (AppraisalAccess::canDownloadPdf()).
+ */
+Route::middleware(['web', 'auth', 'throttle:30,1'])
+    ->get('admin/appraisals/{review}/pdf', AppraisalPdfController::class)
+    ->whereNumber('review')
+    ->name('employees.appraisals.pdf');

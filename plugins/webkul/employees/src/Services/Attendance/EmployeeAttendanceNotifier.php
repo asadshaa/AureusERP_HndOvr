@@ -50,7 +50,8 @@ class EmployeeAttendanceNotifier
 
     /**
      * "You haven't checked in today" to everyone who is due by now and has
-     * not checked in. Nothing after the office day has ended.
+     * not checked in. Nothing after the employee's own day (office hours or
+     * shift) has ended.
      *
      * @return array{companies: int, notified: int, skipped: int}
      */
@@ -67,17 +68,15 @@ class EmployeeAttendanceNotifier
         $secondsNow = $this->secondsAfterMidnight($now);
         $after = max(0, (int) config('attendance.notifications.check_in_reminder_after_minutes', 15)) * 60;
 
-        if ($secondsNow >= $this->officeEnd()) {
-            return $result;
-        }
-
         foreach ($this->companies($companyId) as $company) {
             $day = $this->today->forWholeCompany((int) $company->id, $date);
 
+            // Each employee's own day: an evening or night shift is reminded after its own start, until its own end.
             $due = collect($day['rows'])->filter(fn (array $row): bool => $row['absent']
                 && ! $row['checked_in']
                 && $row['due_start_seconds'] !== null
-                && $secondsNow >= $row['due_start_seconds'] + $after);
+                && $secondsNow >= $row['due_start_seconds'] + $after
+                && $secondsNow < (int) ($row['due_end_seconds'] ?? $this->officeEnd()));
 
             if ($due->isEmpty()) {
                 continue;
@@ -130,7 +129,8 @@ class EmployeeAttendanceNotifier
             }
 
             $now = CarbonImmutable::now($this->timezone());
-            if ($record->attendance_date?->toDateString() !== $now->toDateString()) {
+            // Today's day, or yesterday's overnight shift checked into after midnight.
+            if (! in_array($record->attendance_date?->toDateString(), [$now->toDateString(), $now->subDay()->toDateString()], true)) {
                 return;
             }
 

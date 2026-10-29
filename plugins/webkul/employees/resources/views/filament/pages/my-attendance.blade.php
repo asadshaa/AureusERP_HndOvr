@@ -337,6 +337,25 @@
 
                 {{-- RIGHT COLUMN: Full-Sized Attendance Calendar (Matches app standard width) --}}
                 <div class="flex-1 min-w-0 w-full space-y-4">
+                    {{-- My upcoming shifts (rotating roster / day changes), only when rostered --}}
+                    @php($upcomingShifts = $this->getUpcomingShifts())
+                    @if ($upcomingShifts !== [])
+                        <x-filament::section heading="My upcoming shifts" description="From your shift roster. Overnight shifts count on the day they start." compact>
+                            <div data-testid="my-upcoming-shifts" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: .5rem;">
+                                @foreach ($upcomingShifts as $shift)
+                                    <div style="border: 1px solid rgba(127,127,127,.2); border-radius: .5rem; padding: .45rem .6rem; {{ $shift['changed'] ? 'outline: 2px dashed rgba(220,38,38,.6); outline-offset: -2px;' : '' }}" title="{{ $shift['note'] ? 'Changed: '.$shift['note'] : '' }}">
+                                        <div style="font-size: .7rem; opacity: .7;">{{ $shift['day'] }}</div>
+                                        <div style="display: flex; align-items: center; gap: .35rem; margin-top: .15rem;">
+                                            <span style="display: inline-block; width: .6rem; height: .6rem; border-radius: 999px; background: {{ $shift['off'] ? 'rgba(127,127,127,.4)' : ($shift['color'] ?? 'rgba(127,127,127,.4)') }};"></span>
+                                            <span style="font-weight: 600; font-size: .8125rem;">{{ $shift['label'] }}</span>
+                                        </div>
+                                        <div style="font-size: .7rem; opacity: .75;">{{ $shift['off'] ? 'Day off' : $shift['hours'] }}</div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </x-filament::section>
+                    @endif
+
                     {{-- Calendar Section --}}
                     <x-filament::section>
                         <x-slot name="heading">

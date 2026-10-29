@@ -376,10 +376,13 @@ class HierarchicalNotificationService
     public function notifyPerformanceCycleLaunched(
         mixed $cycle,
         Collection $employees,
+        ?string $actionUrl = null,
     ): void {
         try {
             $title = 'Performance review cycle is now open';
-            $body = "You have been included in active performance review cycle '{$cycle->name}'. Please complete your self-review before the deadline.";
+            $deadline = $cycle->self_review_due_on ?? null;
+            $body = "You have been included in active performance review cycle '{$cycle->name}'. Please complete your self-review before the deadline"
+                .($deadline instanceof \DateTimeInterface ? ' ('.$deadline->format('D j M Y').').' : '.');
 
             foreach ($employees as $employee) {
                 $user = $employee->user;
@@ -389,10 +392,10 @@ class HierarchicalNotificationService
 
                 $idempotencyKey = "perf_cycle_{$cycle->id}_employee_{$employee->id}";
 
-                $notification = FilamentNotification::make()
+                $notification = $this->withOpenAction(FilamentNotification::make()
                     ->info()
                     ->title($title)
-                    ->body($body);
+                    ->body($body), $actionUrl);
 
                 $this->sendIdempotentNotification($user, $notification, $idempotencyKey, [
                     'event'       => 'performance_cycle_launched',
@@ -411,7 +414,7 @@ class HierarchicalNotificationService
      * Dispatches notification when an employee submits their self-review.
      * Notifies the assigned reviewer (or company HR fallback if no reviewer is assigned).
      */
-    public function notifyPerformanceSelfReviewSubmitted(mixed $review): void
+    public function notifyPerformanceSelfReviewSubmitted(mixed $review, ?string $actionUrl = null): void
     {
         try {
             $review->loadMissing(['employee', 'reviewer.user', 'cycle']);
@@ -442,10 +445,10 @@ class HierarchicalNotificationService
             foreach ($recipients as $recipient) {
                 $idempotencyKey = "perf_self_review_{$review->id}_{$recipient->id}";
 
-                $notification = FilamentNotification::make()
+                $notification = $this->withOpenAction(FilamentNotification::make()
                     ->warning()
                     ->title($title)
-                    ->body($body);
+                    ->body($body), $actionUrl);
 
                 $this->sendIdempotentNotification($recipient, $notification, $idempotencyKey, [
                     'event'       => 'performance_self_review_submitted',
@@ -464,7 +467,7 @@ class HierarchicalNotificationService
      * Dispatches notification when a manager completes a performance review.
      * Evaluated employee is notified without leaking confidential comments or ratings.
      */
-    public function notifyPerformanceManagerReviewCompleted(mixed $review): void
+    public function notifyPerformanceManagerReviewCompleted(mixed $review, ?string $actionUrl = null, ?string $extraBody = null): void
     {
         try {
             $review->loadMissing(['employee.user', 'cycle']);
@@ -476,14 +479,14 @@ class HierarchicalNotificationService
 
             $cycleName = $review->cycle?->name ?? 'Performance Cycle';
             $title = 'Performance review completed';
-            $body = "Your manager evaluation for cycle '{$cycleName}' has been completed.";
+            $body = "Your manager evaluation for cycle '{$cycleName}' has been completed.".($extraBody ? ' '.$extraBody : '');
 
             $idempotencyKey = "perf_mgr_review_{$review->id}_{$employeeUser->id}";
 
-            $notification = FilamentNotification::make()
+            $notification = $this->withOpenAction(FilamentNotification::make()
                 ->success()
                 ->title($title)
-                ->body($body);
+                ->body($body), $actionUrl);
 
             $this->sendIdempotentNotification($employeeUser, $notification, $idempotencyKey, [
                 'event'       => 'performance_manager_review_completed',
@@ -495,6 +498,14 @@ class HierarchicalNotificationService
             report($e);
             Log::error("HierarchicalNotification: Failed to notify manager review completion: {$e->getMessage()}");
         }
+    }
+
+    /** Adds an "Open" button to the notification when there is a link. */
+    private function withOpenAction(FilamentNotification $notification, ?string $actionUrl, string $label = 'Open'): FilamentNotification
+    {
+        return $actionUrl
+            ? $notification->actions([Action::make('open')->button()->label($label)->url($actionUrl)])
+            : $notification;
     }
 
     /**

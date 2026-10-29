@@ -51,13 +51,13 @@ class HrHierarchyService
         $this->visibleEmployeeIdsCache = [];
     }
 
-    /** @return Collection<int, int> */
-    private function resolveVisibleEmployeeIds(User $user, int $companyId): Collection
+    /**
+     * Whether the user sees every employee of each company they belong to
+     * (HR and admins) rather than only their own reporting tree.
+     */
+    public function seesWholeCompany(User $user): bool
     {
-        $this->assertCompanyAccess($user, $companyId);
-
-        if (
-            $user->can('hr_view_all_records')
+        return $user->can('hr_view_all_records')
             || $user->hasRole([
                 'Admin',
                 'Super Admin',
@@ -71,8 +71,15 @@ class HrHierarchyService
                 'hr administrator',
                 'human resources',
                 'human resources manager',
-            ])
-        ) {
+            ]);
+    }
+
+    /** @return Collection<int, int> */
+    private function resolveVisibleEmployeeIds(User $user, int $companyId): Collection
+    {
+        $this->assertCompanyAccess($user, $companyId);
+
+        if ($this->seesWholeCompany($user)) {
             return Employee::query()->where('company_id', $companyId)->pluck('id');
         }
 

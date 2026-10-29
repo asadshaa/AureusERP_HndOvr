@@ -54,6 +54,8 @@ class WorkSchedulesRelationManager extends RelationManager
                     ->getStateUsing(fn (WorkSchedule $record): string => WorkSchedule::weekdaysLabel(array_map('intval', (array) $record->working_days))),
                 TextColumn::make('flexible_minutes')->label('Flexible')
                     ->formatStateUsing(fn ($state): string => (int) $state > 0 ? $state.' min' : '—'),
+                TextColumn::make('break_minutes')->label('Unpaid break')
+                    ->formatStateUsing(fn ($state): string => (int) $state > 0 ? $state.' min' : '—'),
                 TextColumn::make('name')->label('Name')->placeholder('—')->toggleable(),
                 TextColumn::make('creator.name')->label('Assigned by')->toggleable(isToggledHiddenByDefault: true),
             ])

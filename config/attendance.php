@@ -112,4 +112,25 @@ return [
         // hr:line-manager-attendance-digest: each line manager's own team, late / absent so far.
         'line_manager_digest' => (bool) env('ATTENDANCE_NOTIFY_LINE_MANAGER_DIGEST', true),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Shifts, rotating rosters and overnight shifts
+    |--------------------------------------------------------------------------
+    |
+    | Day schedule order (AttendanceScheduleResolver): day override > roster
+    | (employee, then department) > work schedule > company default. An
+    | overnight shift (22:00-06:00) belongs to the date it starts; a GPS
+    | check-in / out, manual entry or device punch after midnight belongs to
+    | the previous day's shift while it is before that shift's end plus
+    | overnight_tolerance_minutes.
+    |
+    */
+    'shifts' => [
+        'overnight_tolerance_minutes' => (int) env('ATTENDANCE_OVERNIGHT_TOLERANCE_MINUTES', 240),
+
+        // Attendance -> Shift roster: weeks shown at once, and the days an employee sees ahead.
+        'roster_weeks'  => 2,
+        'upcoming_days' => 7,
+    ],
 ];

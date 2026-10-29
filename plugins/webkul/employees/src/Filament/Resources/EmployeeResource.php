@@ -81,6 +81,7 @@ use Webkul\Employee\Filament\Resources\EmployeeResource\Pages\ViewEmployee;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\AttendanceRecordsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ChecklistTasksRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\DocumentsRelationManager;
+use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\RequestInstalmentsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\ResumeRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\SkillsRelationManager;
 use Webkul\Employee\Filament\Resources\EmployeeResource\RelationManagers\TimeOffRelationManager;
@@ -2288,6 +2289,10 @@ class EmployeeResource extends Resource
                 WorkSchedulesRelationManager::class,
             ])
                 ->icon('heroicon-o-calendar'),
+            RelationGroup::make('Loans & advances', [
+                RequestInstalmentsRelationManager::class,
+            ])
+                ->icon('heroicon-o-banknotes'),
         ];
 
         return $relations;

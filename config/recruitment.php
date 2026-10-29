@@ -140,4 +140,33 @@ return [
         'reminder_hours' => (int) env('RECRUITMENT_INTERVIEW_REMINDER_HOURS', 24),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Job offers (HR parity 3.6)
+    |--------------------------------------------------------------------------
+    |
+    | An offer is approved (request type "job_offer": hiring manager, then HR,
+    | then the CEO only when the monthly gross salary EXCEEDS the company's
+    | threshold) before HR sends the letter. "ceo_approval_threshold" is the
+    | default threshold; each company can set its own on Recruitment >
+    | Configurations > Offer letter templates. "ceo_approver_email" names the
+    | CEO approver put on new workflows (else the group owner, else the
+    | employee titled Chief Executive Officer, else the Admin role).
+    | Dates (joining, expiry: the accept/decline link works until the end of
+    | the expiry date) are in "timezone". recruitments:expire-offers (daily)
+    | expires offers past their expiry date.
+    |
+    */
+
+    'offers' => [
+        'ceo_approval_threshold' => (float) env('RECRUITMENT_OFFER_CEO_THRESHOLD', 300000),
+        'ceo_approver_email'     => env('RECRUITMENT_OFFER_CEO_EMAIL'),
+        'currency'               => 'PKR',
+        'timezone'               => env('RECRUITMENT_OFFER_TIMEZONE', 'Asia/Karachi'),
+        'default_valid_days'     => 7,
+        'default_probation'      => 3,
+        'default_working_hours'  => 'Monday to Friday, 9:00 AM to 6:00 PM (one hour break)',
+        'disk'                   => 'local',
+    ],
+
 ];

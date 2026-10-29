@@ -142,6 +142,18 @@ Schedule::command('recruitments:interview-reminders')
     ->onOneServer();
 
 /*
+| recruitments:expire-offers marks job offers past their expiry date without
+| an answer as expired and tells the recruiter (HR parity 3.6). 00:15 Karachi
+| time, after the offer link stopped working at the end of the expiry date.
+| Each offer is claimed with one conditional update: a re-run changes nothing.
+*/
+Schedule::command('recruitments:expire-offers')
+    ->dailyAt('00:15')
+    ->timezone(config('recruitment.offers.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
 | hr:today-attendance-digest tells each company's HR managers at 11:00
 | Karachi time how many people are absent and late today and how many left
 | yesterday without checking out, with a link to Attendance -> Today's
@@ -162,8 +174,8 @@ Schedule::command('hr:today-attendance-digest')
 | hr:remind-missing-check-in -- "You haven't checked in today", 15 minutes
 | after the employee is due: the 10:15 tick, or 14:15 after an approved
 | first half off. Weekends, public holidays, approved leave and On-Duty are
-| skipped. Runs every 15 minutes in office hours so the 14:15 reminders go
-| out too.
+| skipped. Runs every 15 minutes, all day, so the 14:15 reminders and
+| those of shift workers (each after their own shift start) go out too.
 |
 | hr:line-manager-attendance-digest -- each line manager's own team, late /
 | absent so far, at 10:30; nothing to report = no notice.
@@ -174,7 +186,7 @@ Schedule::command('hr:today-attendance-digest')
 */
 Schedule::command('hr:remind-missing-check-in')
     ->everyFifteenMinutes()
-    ->between('10:00', '18:00')
+    // All day: Morning (06:00), Evening (14:00) and Night (22:00) shifts are reminded after their own start.
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
     ->withoutOverlapping(10)
     ->onOneServer();
@@ -249,6 +261,20 @@ Schedule::command('hr:checklist-reminders')
 
 Schedule::command('hr:checklist-disable-users')
     ->dailyAt('18:30')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
+| hr:appraisal-reminders -- 09:15 Karachi, appraisal self reviews to the
+| employee and manager reviews to the reviewer (or the company HR when there
+| is no line manager): a few days before the deadline, the day after it and
+| weekly while overdue (config/appraisals.php). Each reminder is claimed in
+| employees_performance_review_reminders first, so an overlap or a re-run
+| never reminds twice.
+*/
+Schedule::command('hr:appraisal-reminders')
+    ->dailyAt('09:15')
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
     ->withoutOverlapping(30)
     ->onOneServer();

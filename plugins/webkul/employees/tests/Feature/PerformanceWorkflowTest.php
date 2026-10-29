@@ -15,6 +15,7 @@
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Livewire;
+use Webkul\Employee\Filament\Resources\PerformanceCycleResource;
 use Webkul\Employee\Filament\Resources\PerformanceCycleResource\Pages\ManagePerformanceCycles;
 use Webkul\Employee\Filament\Resources\PerformanceReviewResource;
 use Webkul\Employee\Filament\Resources\PerformanceReviewResource\Pages\ManagePerformanceReviews;
@@ -46,7 +47,9 @@ function perfFixture(): array
 {
     $company = Company::factory()->create(['is_active' => true]);
 
-    $hrUser = perfUser($company, [HrPermissions::ManagePerformance], 'perf_hr_'.uniqid());
+    // HR = hr_manage_performance with company-wide HR scope (HR Parity 3.2):
+    // a line manager's role bundle also holds hr_manage_performance.
+    $hrUser = perfUser($company, [HrPermissions::ManagePerformance, HrPermissions::ViewAllRecords], 'perf_hr_'.uniqid());
 
     $managerUser = perfUser($company, [], 'perf_manager_'.uniqid());
     $manager = Employee::query()->create(['company_id' => $company->id, 'user_id' => $managerUser->id, 'name' => 'Line Manager', 'is_active' => true]);
@@ -243,4 +246,28 @@ it('denies cross-company review visibility entirely', function () {
     Auth::login($outsiderUser);
     $visibleIds = PerformanceReviewResource::getEloquentQuery()->pluck('id')->all();
     expect($visibleIds)->toBe([]);
+});
+
+// ---------------------------------------------------------------------
+// HR Parity 3.2 regression: hr_manage_performance alone (the line manager
+// role bundle) no longer opens every review of the company or the cycles.
+// ---------------------------------------------------------------------
+it('limits a line manager holding hr_manage_performance to their own reports', function () {
+    $f = perfFixture();
+    app(PerformanceService::class)->launch($f['cycle'], $f['hrUser']);
+
+    $lineManagerUser = perfUser($f['company'], [HrPermissions::ManagePerformance], 'perf_line_manager_'.uniqid());
+    $lineManager = Employee::query()->create(['company_id' => $f['company']->id, 'user_id' => $lineManagerUser->id, 'name' => 'Other Line Manager', 'is_active' => true]);
+    Employee::query()->create(['company_id' => $f['company']->id, 'parent_id' => $lineManager->id, 'name' => 'Their Report', 'is_active' => true]);
+
+    Auth::login($lineManagerUser);
+
+    expect(PerformanceReviewResource::getEloquentQuery()->pluck('employee_id')->all())->toBe([])
+        ->and(PerformanceCycleResource::canViewAny())->toBeFalse();
+
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    Filament::bootCurrentPanel();
+    test()->actingAs($lineManagerUser);
+
+    Livewire::test(ManagePerformanceCycles::class)->assertForbidden();
 });

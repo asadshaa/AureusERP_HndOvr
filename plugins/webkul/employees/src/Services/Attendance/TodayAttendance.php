@@ -33,9 +33,12 @@ use Webkul\Support\Models\Company;
  * checked in. Late / left early / half day / short leave come from
  * MonthlyAttendanceReport::calculateDay over those intervals.
  *
- * Each employee's day follows their work schedule for the date
- * (AttendanceScheduleResolver: an effective-dated WorkSchedule, else the
- * config office hours): weekend, due start and the end of the office day.
+ * Each employee's day follows their schedule for the date
+ * (AttendanceScheduleResolver: a day override, a roster shift, an
+ * effective-dated WorkSchedule, else the config office hours): weekend or
+ * roster day off, due start and the end of the day. An overnight shift
+ * belongs to the date it starts, so yesterday's night shift is "still at
+ * work" (and its running time counts) until it ends the next morning.
  *
  * Queries are flat in the number of employees: the visible employee ids,
  * the employees (+ department, line manager), one aggregate over the day's
@@ -177,8 +180,11 @@ class TodayAttendance
         $timezone = $this->timezone();
         $now = CarbonImmutable::now($timezone);
         $isToday = $date === $now->toDateString();
+        $isYesterday = $date === $now->subDay()->toDateString();
         $day = CarbonImmutable::parse($date, $timezone)->startOfDay();
         $secondsNow = $isToday ? $day->diffInSeconds($now, false) : null;
+        // Seconds since the date's midnight (above 86400 the next day): an overnight shift is still running before its end.
+        $secondsSinceMidnight = (int) $day->diffInSeconds($now, false);
 
         $weekend = in_array($day->dayOfWeekIso, array_map('intval', (array) config('attendance.monthly_report.weekend_days', [6, 7])), true);
         $holidays = $this->holidays($companyId, $date);
@@ -188,7 +194,7 @@ class TodayAttendance
         $punches = $employeeIds === [] ? [] : $this->punches($companyId, $employeeIds, $date, $day, $isToday ? $now : null);
         $leaves = $employeeIds === [] ? [] : $this->report->leaves($employeeIds, $date, $date);
         $creditCap = $employeeIds === [] ? null : $this->report->policyFor($companyId)['daily_extra_credit_cap_minutes'];
-        $periods = $this->schedules->periodsFor($employeeIds, $date, $date);
+        $periods = $this->schedules->setsFor($employees, $date, $date);
 
         $rows = [];
 
@@ -200,6 +206,7 @@ class TodayAttendance
             $holiday = $holidays->first(fn (CalendarLeave $holiday): bool => $holiday->calendar_id === null || (int) $holiday->calendar_id === $calendarId);
 
             $schedule = $this->schedules->pick($periods[(int) $employee->id] ?? [], $date);
+            $offLabel = $schedule->isOff() ? 'Day off' : null;
 
             $calculated = $this->report->calculateDay([
                 'intervals'          => $punch['intervals'] ?? [],
@@ -211,13 +218,19 @@ class TodayAttendance
                 'leaves'             => $parts,
                 'credit_cap_minutes' => $creditCap,
                 'schedule'           => $schedule->forCalculation(),
+                'off_label'          => $offLabel,
             ]);
 
-            // An open shift today is "still at work" until the employee's own office day ends.
-            $dayOver = $date < $now->toDateString() || ($isToday && $secondsNow >= (int) $calculated['schedule_end_seconds']);
+            // An open shift is "still at work" until the employee's own day ends (the next morning for a night shift).
+            $dayOver = $secondsSinceMidnight >= (int) $calculated['schedule_end_seconds'];
             $missingCheckOut = $calculated['missing_check_out'] && $dayOver;
+            $currentlyIn = (bool) ($punch['open'] ?? false) && ($isToday || ($isYesterday && ! $dayOver));
+            $workedSeconds = (int) ($punch['worked'] ?? 0);
+            if ($currentlyIn && ! $isToday && ($punch['open_at'] ?? null) !== null) {
+                $workedSeconds += max(0, (int) $punch['open_at']->diffInSeconds($now, false));
+            }
 
-            [$status, $label] = $this->classify($calculated, $parts, $od, $holiday?->name, $missingCheckOut, $isToday, $secondsNow, $schedule->startSeconds);
+            [$status, $label] = $this->classify($calculated, $parts, $od, $holiday?->name, $missingCheckOut, $isToday, $secondsNow, $schedule->startSeconds, $offLabel);
 
             $rows[(int) $employee->id] = [
                 'employee_id'       => (int) $employee->id,
@@ -234,9 +247,9 @@ class TodayAttendance
                 'last_out'          => $this->clock($punch['out'] ?? null),
                 'check_ins'         => (string) $calculated['intervals_text'],
                 'interval_count'    => count($calculated['intervals']),
-                'currently_in'      => $isToday && (bool) ($punch['open'] ?? false),
-                'worked_seconds'    => (int) ($punch['worked'] ?? 0),
-                'worked'            => $punch ? $this->hoursMinutes((int) $punch['worked']) : '',
+                'currently_in'      => $currentlyIn,
+                'worked_seconds'    => $workedSeconds,
+                'worked'            => $punch ? $this->hoursMinutes($workedSeconds) : '',
                 'source'            => (string) ($punch['source'] ?? ''),
                 'remote'            => (bool) ($punch['remote'] ?? false),
                 'gps_office'        => (bool) ($punch['gps_office'] ?? false),
@@ -245,18 +258,22 @@ class TodayAttendance
                 'late'              => (bool) $calculated['late'],
                 'late_minutes'      => (int) $calculated['late_minutes'],
                 // Leaving early / time away are only final once the office day is over.
-                'left_early_minutes'=> $dayOver ? (int) $calculated['left_early_minutes'] : 0,
-                'away_minutes'      => $dayOver ? (int) $calculated['gap_minutes'] : 0,
-                'extra_minutes'     => (int) $calculated['extra_minutes'],
-                'absent'            => (bool) $calculated['absent'],
-                'due_start_seconds' => $calculated['due_start_seconds'],
-                'schedule'          => $schedule->label(),
-                'missing_check_out' => $missingCheckOut,
-                'on_leave'          => $leave !== null,
-                'leave_name'        => $leave['name'] ?? null,
-                'short_leave'       => collect($parts)->contains(fn (array $part): bool => $part['portion'] === 'hours'),
-                'on_duty'           => $od !== null,
-                'remarks'           => (string) $calculated['remarks'],
+                'left_early_minutes'     => $dayOver ? (int) $calculated['left_early_minutes'] : 0,
+                'away_minutes'           => $dayOver ? (int) $calculated['gap_minutes'] : 0,
+                'extra_minutes'          => (int) $calculated['extra_minutes'],
+                'absent'                 => (bool) $calculated['absent'],
+                'due_start_seconds'      => $calculated['due_start_seconds'],
+                'due_end_seconds'        => (int) $calculated['schedule_end_seconds'],
+                'schedule'               => $schedule->label(),
+                'shift'                  => $schedule->isRostered() ? $schedule->shortLabel() : '',
+                'shift_color'            => $schedule->color,
+                'break_deducted_minutes' => (int) $calculated['break_deducted_minutes'],
+                'missing_check_out'      => $missingCheckOut,
+                'on_leave'               => $leave !== null,
+                'leave_name'             => $leave['name'] ?? null,
+                'short_leave'            => collect($parts)->contains(fn (array $part): bool => $part['portion'] === 'hours'),
+                'on_duty'                => $od !== null,
+                'remarks'                => (string) $calculated['remarks'],
             ];
         }
 
@@ -292,7 +309,7 @@ class TodayAttendance
      * @param  array<int, array{name: string, portion: string, hours?: float, window?: ?array{0: int, 1: int}}>  $parts  approved part-day / full-day leave
      * @return array{0: string, 1: string}
      */
-    protected function classify(array $calculated, array $parts, ?string $od, ?string $holidayName, bool $missingCheckOut, bool $isToday, ?int $secondsNow, ?int $startSeconds = null): array
+    protected function classify(array $calculated, array $parts, ?string $od, ?string $holidayName, bool $missingCheckOut, bool $isToday, ?int $secondsNow, ?int $startSeconds = null, ?string $offLabel = null): array
     {
         $worked = $calculated['first_in'] !== null ? ' (worked)' : '';
         $leave = $parts[0] ?? null;
@@ -300,7 +317,7 @@ class TodayAttendance
         $shortLeave = collect($parts)->first(fn (array $part): bool => $part['portion'] === 'hours');
 
         return match (true) {
-            $calculated['type'] === 'weekend' => [self::WEEKEND, 'Weekend'.$worked],
+            $calculated['type'] === 'weekend' => [self::WEEKEND, ($offLabel ?? 'Weekend').$worked],
             $calculated['type'] === 'holiday' => [self::HOLIDAY, 'Holiday'.($holidayName ? ': '.$holidayName : '').$worked],
             $calculated['type'] === 'leave'   => [self::ON_LEAVE, 'On leave: '.$leave['name']],
             $calculated['absent']             => [self::ABSENT, $this->absentLabel($leave, $od, $isToday, $secondsNow, $startSeconds)],
@@ -371,7 +388,7 @@ class TodayAttendance
      * minute (as the monthly report counts them).
      *
      * @param  array<int, int>  $employeeIds
-     * @return array<int, array{in: ?int, out: ?int, open: bool, worked: int, source: string, remote: bool, gps_office: bool, needs_review: bool}>
+     * @return array<int, array{in: ?int, out: ?int, open: bool, open_at: ?CarbonImmutable, worked: int, source: string, remote: bool, gps_office: bool, needs_review: bool}>
      */
     protected function punches(int $companyId, array $employeeIds, string $date, CarbonImmutable $midnight, ?CarbonImmutable $now): array
     {
@@ -416,6 +433,7 @@ class TodayAttendance
 
                 $source = $row->min_source === $row->max_source ? (string) $row->min_source : 'mixed';
                 $pairs = $intervals[(int) $row->employee_id] ?? null;
+                $openAt = $open ? CarbonImmutable::parse($row->open_in, 'UTC') : null;
 
                 if ($pairs !== null) {
                     // Several pairs: first in, last closed out, worked = sum (+ the running pair today).
@@ -423,6 +441,7 @@ class TodayAttendance
                     $closedOuts = array_filter(array_column($pairs['pairs'], 1), fn ($value): bool => $value !== null);
                     $out = $closedOuts !== [] ? max($closedOuts) : null;
                     $open = $pairs['open_at'] !== null;
+                    $openAt = $pairs['open_at'];
                     $worked = $pairs['closed_seconds'];
                     if ($open && $now !== null) {
                         $worked += max(0, (int) $pairs['open_at']->diffInSeconds($now, false));
@@ -435,6 +454,7 @@ class TodayAttendance
                     'in'           => $in,
                     'out'          => $out,
                     'open'         => $open,
+                    'open_at'      => $openAt,
                     'intervals'    => $pairs['pairs'],
                     'worked'       => $worked,
                     'source'       => $source,
