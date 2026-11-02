@@ -4,6 +4,13 @@
 .gitignore
 .agents
 .codex
+.claude
+.dev-tools
+_stage
+scratch
+test-invoices
+credentials
+CLAUDE_HANDOVER_ATTENDANCE.md
 .env
 .env.*
 !.env.example

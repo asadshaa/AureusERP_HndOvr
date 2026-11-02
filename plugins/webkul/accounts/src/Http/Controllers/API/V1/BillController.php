@@ -29,6 +29,7 @@ use Webkul\Account\Models\Bill;
 use Webkul\Account\Models\MoveReversal;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Accounting\Models\Journal;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Bills', 'Manage vendor bills')]
@@ -50,7 +51,7 @@ class BillController extends Controller
     {
         Gate::authorize('viewAny', Bill::class);
 
-        $invoices = QueryBuilder::for(Bill::class)
+        $invoices = QueryBuilder::for(CurrentCompany::scopeMemberships(Bill::query()))
             ->where('move_type', MoveType::IN_INVOICE)
             ->allowedFilters(
                 AllowedFilter::exact('id'),
@@ -150,7 +151,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $invoice = QueryBuilder::for(Bill::where('id', $id)->where('move_type', MoveType::IN_INVOICE))
+        $invoice = QueryBuilder::for(CurrentCompany::scopeMemberships(Bill::where('id', $id)->where('move_type', MoveType::IN_INVOICE)))
             ->allowedIncludes(
                 'partner',
                 'currency',
@@ -199,7 +200,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(BillRequest $request, string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -238,7 +239,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('delete', $invoice);
 
@@ -263,7 +264,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function confirm(string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -295,7 +296,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function cancel(string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -319,7 +320,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function pay(MovePaymentRequest $request, string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -389,7 +390,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function reverse(Request $request, string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -451,7 +452,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function resetToDraft(string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 
@@ -481,7 +482,7 @@ class BillController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function setAsChecked(string $id)
     {
-        $invoice = Bill::where('move_type', MoveType::IN_INVOICE)->findOrFail($id);
+        $invoice = CurrentCompany::scopeMemberships(Bill::where('move_type', MoveType::IN_INVOICE))->findOrFail($id);
 
         Gate::authorize('update', $invoice);
 

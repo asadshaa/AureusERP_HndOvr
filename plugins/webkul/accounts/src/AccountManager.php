@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\DisplayType;
+use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Enums\PaymentState;
@@ -23,6 +24,7 @@ use Webkul\Account\Facades\Tax as TaxFacade;
 use Webkul\Account\Mail\Invoice\Actions\InvoiceEmail;
 use Webkul\Account\Models\Account;
 use Webkul\Account\Models\FullReconcile;
+use Webkul\Account\Models\Journal;
 use Webkul\Account\Models\Move as AccountMove;
 use Webkul\Account\Models\MoveLine;
 use Webkul\Account\Models\PartialReconcile;
@@ -31,6 +33,7 @@ use Webkul\Account\Models\Payment;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Account\Services\PeriodLockService;
 use Webkul\Account\Settings\DefaultAccountSettings;
+use Webkul\Support\Models\Company;
 use Webkul\Support\Services\EmailService;
 
 class AccountManager
@@ -1786,11 +1789,15 @@ class AccountManager
             return null;
         }
 
-        $defaultAccountsSettings = new DefaultAccountSettings;
+        // Lines reconciled together always share one company (see
+        // isReconciliationAllowedForLines()).
+        $company = $amountsList[0]['line']->company;
 
-        $journalId = $defaultAccountsSettings->currency_exchange_journal_id;
-        $expenseAccountId = $defaultAccountsSettings->expense_currency_exchange_account_id;
-        $incomeAccountId = $defaultAccountsSettings->income_currency_exchange_account_id;
+        [
+            'journal_id'         => $journalId,
+            'income_account_id'  => $incomeAccountId,
+            'expense_account_id' => $expenseAccountId,
+        ] = $this->exchangeDifferenceConfiguration($company);
 
         if (! $journalId || ! $expenseAccountId || ! $incomeAccountId) {
             throw new Exception('Exchange difference journal and accounts must be configured');
@@ -1799,6 +1806,7 @@ class AccountManager
         $moveValues = [
             'move_type'  => MoveType::ENTRY,
             'date'       => now()->format('Y-m-d'),
+            'company_id' => $company->id,
             'journal_id' => $journalId,
             'lines'      => [],
         ];
@@ -1849,6 +1857,37 @@ class AccountManager
         return [
             'move_values'  => $moveValues,
             'to_reconcile' => $toReconcile,
+        ];
+    }
+
+    /**
+     * Where one company's exchange differences post: the default exchange
+     * journal when it belongs to that company, otherwise the company's own
+     * Exchange Difference journal (code EXCH) -- never another company's --
+     * and the company's FX gain / loss accounts, falling back to the default
+     * exchange difference accounts.
+     *
+     * @return array{journal_id: int|null, income_account_id: int|null, expense_account_id: int|null}
+     */
+    public function exchangeDifferenceConfiguration(Company $company): array
+    {
+        $defaultAccountsSettings = new DefaultAccountSettings;
+
+        $journalId = Journal::query()
+            ->where('company_id', $company->id)
+            ->whereKey($defaultAccountsSettings->currency_exchange_journal_id)
+            ->value('id')
+            ?? Journal::query()
+                ->where('company_id', $company->id)
+                ->where('code', 'EXCH')
+                ->where('type', JournalType::GENERAL)
+                ->orderBy('id')
+                ->value('id');
+
+        return [
+            'journal_id'         => $journalId,
+            'income_account_id'  => $company->fx_gain_account_id ?: $defaultAccountsSettings->income_currency_exchange_account_id,
+            'expense_account_id' => $company->fx_loss_account_id ?: $defaultAccountsSettings->expense_currency_exchange_account_id,
         ];
     }
 

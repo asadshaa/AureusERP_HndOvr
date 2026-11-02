@@ -8,6 +8,7 @@ use Webkul\Account\Models\Partner;
 use Webkul\Account\Models\Product;
 use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
 use Webkul\Support\Models\UOM;
@@ -40,7 +41,8 @@ afterEach(fn () => SecurityHelper::restoreUserEvents());
 
 function actingAsCreditNoteApiUser(array $permissions = []): User
 {
-    $user = SecurityHelper::authenticateWithPermissions($permissions);
+    // A group owner belongs to every company, so the company-scoped API finds the factory records.
+    $user = SecurityHelper::authenticateWithPermissions([...$permissions, CurrentCompany::MANAGE_MEMBERSHIPS]);
 
     $user->forceFill([
         'resource_permission' => PermissionType::GLOBAL,

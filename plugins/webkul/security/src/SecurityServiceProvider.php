@@ -3,10 +3,17 @@
 namespace Webkul\Security;
 
 use Filament\Panel;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\AliasLoader;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
+use Laravel\Sanctum\Sanctum;
 use Webkul\PluginManager\Package;
 use Webkul\PluginManager\PackageServiceProvider;
 use Webkul\Security\Facades\Bouncer as BouncerFacade;
+use Webkul\Security\Models\User;
 
 class SecurityServiceProvider extends PackageServiceProvider
 {
@@ -46,6 +53,25 @@ class SecurityServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         require_once __DIR__.'/Helpers/helpers.php';
+
+        $this->configureApiAuthentication();
+    }
+
+    /**
+     * API login throttling (per email + IP, as Laravel's own login limiter
+     * does) and the token check run by the Sanctum guard on every API request:
+     * a deactivated user's existing tokens stop working immediately, however
+     * the user was deactivated (form, bulk action or direct database change).
+     */
+    protected function configureApiAuthentication(): void
+    {
+        RateLimiter::for('api-login', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by(Str::transliterate(Str::lower((string) $request->input('email'))).'|'.$request->ip()));
+
+        Sanctum::authenticateAccessTokensUsing(
+            fn (PersonalAccessToken $accessToken, bool $isValid): bool => $isValid
+                && (! $accessToken->tokenable instanceof User || $accessToken->tokenable->is_active)
+        );
     }
 
     public function packageRegistered(): void

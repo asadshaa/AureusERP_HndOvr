@@ -2,12 +2,17 @@
 
 namespace Webkul\Employee\Database\Seeders;
 
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Collection;
 use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Models\Account;
 use Webkul\Account\Models\Journal;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Models\ApprovalDecision;
 use Webkul\Support\Models\ApprovalStep;
 use Webkul\Support\Models\ApprovalWorkflow;
 use Webkul\Support\Models\Company;
@@ -46,6 +51,12 @@ use Webkul\Support\Models\Company;
  * emails; Raza Afzal is the existing CEO account. Update the placeholder
  * emails in USER_EMAILS below once the real addresses are known -- no other
  * change is needed, the workflow re-seeds against whichever account matches.
+ *
+ * That named chain belongs to Truck It In only: it is applied to the company
+ * the named people work for (their default company). Any other company
+ * (ShipLine, OpenPort, a company created later) gets a company-local chain
+ * from provisionCompanyChain(): Line Manager Review -> the company's HR
+ * approvers -> the company's accounting managers.
  *
  * VP_FINANCE_THRESHOLD is not part of the client's diagram -- removed. If a
  * value-based extra sign-off is wanted later, add it as a further step via
@@ -150,36 +161,235 @@ class ClaimsWorkflowSeeder extends Seeder
         ],
     ];
 
+    /**
+     * Finance role whose members (in the claim's company) give the last
+     * sign-off in a company-local claims chain.
+     */
+    public const FinanceApproverRole = 'accounting_manager';
+
     public function run(): void
     {
-        $approvers = collect(self::USER_EMAILS)->mapWithKeys(
-            fn (string $email, string $key) => [$key => User::query()->where('email', $email)->first()]
-        );
+        $approvers = $this->namedApprovers();
 
         $missing = $approvers->filter(fn (?User $user) => ! $user)->keys();
         if ($missing->isNotEmpty()) {
             $this->command?->warn('ClaimsWorkflowSeeder: missing User accounts for '.$missing->implode(', ').' -- their approval steps will be skipped until those accounts exist.');
         }
 
-        Company::query()->each(function (Company $company) use ($approvers): void {
-            // A real vendor Bill (move_type = IN_INVOICE) must post through a
-            // PURCHASE-type journal -- see EmployeeRequestService::createAccountingDraft().
-            $journal = Journal::query()->where('company_id', $company->id)->where('type', JournalType::PURCHASE)->first();
-            $debitAccount = Account::query()->where('code', '600000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
-            // Still resolved and stored on credit_account_id for backward
-            // compatibility / admin visibility, even though posting no
-            // longer reads it (the Bill's payable line is auto-resolved --
-            // see createAccountingDraft()'s doc comment).
-            $creditAccount = Account::query()->where('code', '211000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
-            $isFinancial = (bool) ($journal && $debitAccount && $creditAccount);
-            if (! $isFinancial) {
-                $this->command?->warn("ClaimsWorkflowSeeder: company #{$company->id} has no Purchase journal / Expenses (600000) / Accounts Payable (211000) account -- claim types seeded as non-financial (no accounting handoff) until configured via the Employee Request Types admin UI.");
+        Company::query()->each(fn (Company $company) => $this->provisionForCompany($company, $approvers));
+    }
+
+    /**
+     * The named org-chart chain applies only to the company those people
+     * work for (their default company -- Truck It In). Every other company
+     * gets the company-local chain: line manager -> that company's HR ->
+     * that company's finance manager, never another company's named people.
+     *
+     * @param  Collection<string, User|null>|null  $approvers
+     * @return array{chain: string, financial: bool, types_created: int, types_updated: int, workflows_created: int, steps_created: int, finance_step: bool}
+     */
+    public function provisionForCompany(Company $company, ?Collection $approvers = null): array
+    {
+        $approvers ??= $this->namedApprovers();
+
+        $accounting = $this->claimAccounting($company);
+        if (! $accounting['financial']) {
+            $this->command?->warn("ClaimsWorkflowSeeder: company #{$company->id} has no Purchase journal / Expenses (600000) / Accounts Payable (211000) account -- claim types seeded as non-financial (no accounting handoff) until configured via the Employee Request Types admin UI.");
+        }
+
+        if ($this->usesNamedChain($company, $approvers)) {
+            return $this->provisionNamedChain($company, $approvers, $accounting);
+        }
+
+        return $this->provisionCompanyChain($company, $accounting);
+    }
+
+    /** @return Collection<string, User|null> */
+    private function namedApprovers(): Collection
+    {
+        return collect(self::USER_EMAILS)->mapWithKeys(
+            fn (string $email, string $key) => [$key => User::query()->where('email', $email)->first()]
+        );
+    }
+
+    /**
+     * @param  Collection<string, User|null>  $approvers
+     */
+    private function usesNamedChain(Company $company, Collection $approvers): bool
+    {
+        return $approvers->filter()->contains(fn (User $user): bool => (int) $user->default_company_id === (int) $company->id);
+    }
+
+    /**
+     * @return array{financial: bool, journal: Journal|null, debit: Account|null, credit: Account|null}
+     */
+    private function claimAccounting(Company $company): array
+    {
+        // A real vendor Bill (move_type = IN_INVOICE) must post through a
+        // PURCHASE-type journal -- see EmployeeRequestService::createAccountingDraft().
+        $journal = Journal::query()->where('company_id', $company->id)->where('type', JournalType::PURCHASE)->first();
+        $debitAccount = Account::query()->where('code', '600000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
+        // Still resolved and stored on credit_account_id for backward
+        // compatibility / admin visibility, even though posting no
+        // longer reads it (the Bill's payable line is auto-resolved --
+        // see createAccountingDraft()'s doc comment).
+        $creditAccount = Account::query()->where('code', '211000')->whereHas('companies', fn ($q) => $q->where('companies.id', $company->id))->first();
+
+        return [
+            'financial' => (bool) ($journal && $debitAccount && $creditAccount),
+            'journal'   => $journal,
+            'debit'     => $debitAccount,
+            'credit'    => $creditAccount,
+        ];
+    }
+
+    /**
+     * @param  Collection<string, User|null>  $approvers
+     * @param  array{financial: bool, journal: Journal|null, debit: Account|null, credit: Account|null}  $accounting
+     * @return array{chain: string, financial: bool, types_created: int, types_updated: int, workflows_created: int, steps_created: int, finance_step: bool}
+     */
+    private function provisionNamedChain(Company $company, Collection $approvers, array $accounting): array
+    {
+        $isFinancial = $accounting['financial'];
+        $journal = $accounting['journal'];
+        $debitAccount = $accounting['debit'];
+        $creditAccount = $accounting['credit'];
+        $summary = ['chain' => 'named', 'financial' => $isFinancial, 'types_created' => 0, 'types_updated' => 0, 'workflows_created' => 0, 'steps_created' => 0, 'finance_step' => false];
+
+        foreach (self::CATEGORIES as $category => $config) {
+            $requestTypeCode = 'claim_'.$category;
+
+            $typeData = [
+                'name'                  => $config['name'],
+                'category'              => $category,
+                'approval_request_type' => $requestTypeCode,
+                'requires_amount'       => true,
+                'requires_document'     => true,
+                'is_active'             => true,
+                'configuration'         => ['expense_natures' => $config['natures']],
+            ];
+
+            $existingType = EmployeeRequestType::query()->where('company_id', $company->id)->where('code', $requestTypeCode)->first();
+            if ($isFinancial) {
+                $typeData['is_financial'] = true;
+                $typeData['journal_id'] = $journal->id;
+                $typeData['debit_account_id'] = $debitAccount->id;
+                $typeData['credit_account_id'] = $creditAccount->id;
+            } elseif (! $existingType) {
+                $typeData['is_financial'] = false;
             }
 
-            foreach (self::CATEGORIES as $category => $config) {
-                $requestTypeCode = 'claim_'.$category;
+            $requestType = EmployeeRequestType::query()->updateOrCreate(
+                ['company_id' => $company->id, 'code' => $requestTypeCode],
+                $typeData
+            );
+            $summary[$existingType ? 'types_updated' : 'types_created']++;
 
-                $typeData = [
+            $workflow = ApprovalWorkflow::query()->firstOrCreate(
+                ['company_id' => $company->id, 'request_type' => $requestTypeCode],
+                ['name' => $config['name'].' Approval', 'is_active' => true]
+            );
+            $summary['workflows_created'] += $workflow->wasRecentlyCreated ? 1 : 0;
+
+            // Steps that already carry approval decisions are part of the
+            // approval history and cannot be deleted; keep them as they are.
+            if (ApprovalDecision::query()->whereIn('step_id', $workflow->steps()->pluck('id'))->exists()) {
+                $this->command?->warn("ClaimsWorkflowSeeder: {$config['name']} approval of company #{$company->id} already has decisions -- its steps were kept; change them in the Approval Workflow admin UI.");
+
+                continue;
+            }
+
+            // Rebuild the steps every run so a corrected hierarchy (or a
+            // placeholder email finally matching a real account) actually
+            // takes effect, rather than silently keeping stale steps.
+            $workflow->steps()->delete();
+
+            $sequence = 1;
+
+            $level1 = $approvers->get('mehwish');
+            if ($level1) {
+                ApprovalStep::query()->create([
+                    'workflow_id' => $workflow->id, 'sequence' => $sequence++,
+                    'name'        => 'HR Review', 'approver_user_id' => $level1->id, 'required_approvals' => 1,
+                ]);
+            }
+
+            if ($config['route']) {
+                ApprovalStep::query()->create([
+                    'workflow_id'     => $workflow->id, 'sequence' => $sequence++,
+                    'name'            => $config['route'] === 'department_manager' ? 'Department Head Review' : 'Line Manager Review',
+                    'hierarchy_route' => $config['route'], 'required_approvals' => 1,
+                ]);
+            } elseif (! empty($config['level2'])) {
+                // No hierarchy route for this category (e.g. Real Estate) --
+                // level 2 is a specific named approver instead.
+                $level2 = $approvers->get($config['level2']);
+                if ($level2) {
+                    ApprovalStep::query()->create([
+                        'workflow_id' => $workflow->id, 'sequence' => $sequence++,
+                        'name'        => 'Level 2 Approval', 'approver_user_id' => $level2->id, 'required_approvals' => 1,
+                    ]);
+                }
+            }
+
+            $level3 = $config['level3'] ? $approvers->get($config['level3']) : null;
+            if ($level3) {
+                ApprovalStep::query()->create([
+                    'workflow_id' => $workflow->id, 'sequence' => $sequence++,
+                    'name'        => 'Level 3 Approval', 'approver_user_id' => $level3->id, 'required_approvals' => 1,
+                ]);
+            }
+
+            $level4 = $config['level4'] ? $approvers->get($config['level4']) : null;
+            if ($level4) {
+                ApprovalStep::query()->create([
+                    'workflow_id' => $workflow->id, 'sequence' => $sequence++,
+                    'name'        => 'Level 4 Approval', 'approver_user_id' => $level4->id, 'required_approvals' => 1,
+                ]);
+            }
+
+            $summary['steps_created'] += $sequence - 1;
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Company-local chain for every claim category: Line Manager Review
+     * (the employee's own manager) -> HR Review (the company's HR approvers,
+     * ApprovalEngine "hr" route) -> Finance Review (the company's
+     * accounting_manager members). The finance step is added once the
+     * company has an active accounting manager, as with the loan workflow.
+     *
+     * Idempotent: an existing claim type keeps an admin's configuration (it is
+     * only given the company's Purchase journal and accounts when it has none
+     * yet), and existing steps are kept unless they are pinned to a named
+     * person of another company (the org-chart chain seeded into the wrong
+     * company), which is replaced.
+     *
+     * @param  array{financial: bool, journal: Journal|null, debit: Account|null, credit: Account|null}  $accounting
+     * @return array{chain: string, financial: bool, types_created: int, types_updated: int, workflows_created: int, steps_created: int, finance_step: bool}
+     */
+    private function provisionCompanyChain(Company $company, array $accounting): array
+    {
+        $financeRole = $this->financeApproverRole($company);
+        $summary = ['chain' => 'company', 'financial' => $accounting['financial'], 'types_created' => 0, 'types_updated' => 0, 'workflows_created' => 0, 'steps_created' => 0, 'finance_step' => (bool) $financeRole];
+
+        foreach (self::CATEGORIES as $category => $config) {
+            $requestTypeCode = 'claim_'.$category;
+            $accountingData = $accounting['financial'] ? [
+                'is_financial'      => true,
+                'journal_id'        => $accounting['journal']->id,
+                'debit_account_id'  => $accounting['debit']->id,
+                'credit_account_id' => $accounting['credit']->id,
+            ] : ['is_financial' => false];
+
+            $requestType = EmployeeRequestType::query()->where('company_id', $company->id)->where('code', $requestTypeCode)->first();
+
+            if (! $requestType) {
+                EmployeeRequestType::query()->create([
+                    'company_id'            => $company->id,
+                    'code'                  => $requestTypeCode,
                     'name'                  => $config['name'],
                     'category'              => $category,
                     'approval_request_type' => $requestTypeCode,
@@ -187,77 +397,91 @@ class ClaimsWorkflowSeeder extends Seeder
                     'requires_document'     => true,
                     'is_active'             => true,
                     'configuration'         => ['expense_natures' => $config['natures']],
-                ];
+                    ...$accountingData,
+                ]);
+                $summary['types_created']++;
+            } elseif ($accounting['financial'] && ! $requestType->journal_id && ! $requestType->debit_account_id) {
+                $requestType->update($accountingData);
+                $summary['types_updated']++;
+            }
 
-                $existingType = EmployeeRequestType::query()->where('company_id', $company->id)->where('code', $requestTypeCode)->first();
-                if ($isFinancial) {
-                    $typeData['is_financial'] = true;
-                    $typeData['journal_id'] = $journal->id;
-                    $typeData['debit_account_id'] = $debitAccount->id;
-                    $typeData['credit_account_id'] = $creditAccount->id;
-                } elseif (! $existingType) {
-                    $typeData['is_financial'] = false;
-                }
+            $workflow = ApprovalWorkflow::query()->firstOrCreate(
+                ['company_id' => $company->id, 'request_type' => $requestTypeCode],
+                ['name' => $config['name'].' Approval', 'is_active' => true]
+            );
+            $summary['workflows_created'] += $workflow->wasRecentlyCreated ? 1 : 0;
 
-                $requestType = EmployeeRequestType::query()->updateOrCreate(
-                    ['company_id' => $company->id, 'code' => $requestTypeCode],
-                    $typeData
-                );
+            $steps = $workflow->steps()->orderBy('sequence')->get();
+            $replaceSteps = $steps->isEmpty() || $this->pinnedToAnotherCompany($steps, $company);
 
-                $workflow = ApprovalWorkflow::query()->firstOrCreate(
-                    ['company_id' => $company->id, 'request_type' => $requestTypeCode],
-                    ['name' => $config['name'].' Approval', 'is_active' => true]
-                );
+            // Decided steps are part of the approval history and cannot be removed.
+            if ($replaceSteps && $steps->isNotEmpty() && ApprovalDecision::query()->whereIn('step_id', $steps->modelKeys())->exists()) {
+                $this->command?->warn("ClaimsWorkflowSeeder: {$config['name']} approval of company #{$company->id} names approvers of another company but already has decisions -- change its steps in the Approval Workflow admin UI.");
+                $replaceSteps = false;
+            }
 
-                // Rebuild the steps every run so a corrected hierarchy (or a
-                // placeholder email finally matching a real account) actually
-                // takes effect, rather than silently keeping stale steps.
+            if ($replaceSteps) {
                 $workflow->steps()->delete();
 
                 $sequence = 1;
-
-                $level1 = $approvers->get('mehwish');
-                if ($level1) {
-                    ApprovalStep::query()->create([
-                        'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'HR Review', 'approver_user_id' => $level1->id, 'required_approvals' => 1,
-                    ]);
-                }
-
-                if ($config['route']) {
+                foreach ([['Line Manager Review', 'requester_manager'], ['HR Review', 'hr']] as [$name, $route]) {
                     ApprovalStep::query()->create([
                         'workflow_id'     => $workflow->id, 'sequence' => $sequence++,
-                        'name'            => $config['route'] === 'department_manager' ? 'Department Head Review' : 'Line Manager Review',
-                        'hierarchy_route' => $config['route'], 'required_approvals' => 1,
-                    ]);
-                } elseif (! empty($config['level2'])) {
-                    // No hierarchy route for this category (e.g. Real Estate) --
-                    // level 2 is a specific named approver instead.
-                    $level2 = $approvers->get($config['level2']);
-                    if ($level2) {
-                        ApprovalStep::query()->create([
-                            'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                            'name'        => 'Level 2 Approval', 'approver_user_id' => $level2->id, 'required_approvals' => 1,
-                        ]);
-                    }
-                }
-
-                $level3 = $config['level3'] ? $approvers->get($config['level3']) : null;
-                if ($level3) {
-                    ApprovalStep::query()->create([
-                        'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'Level 3 Approval', 'approver_user_id' => $level3->id, 'required_approvals' => 1,
+                        'name'            => $name, 'hierarchy_route' => $route, 'required_approvals' => 1,
                     ]);
                 }
 
-                $level4 = $config['level4'] ? $approvers->get($config['level4']) : null;
-                if ($level4) {
+                if ($financeRole) {
                     ApprovalStep::query()->create([
-                        'workflow_id' => $workflow->id, 'sequence' => $sequence++,
-                        'name'        => 'Level 4 Approval', 'approver_user_id' => $level4->id, 'required_approvals' => 1,
+                        'workflow_id'      => $workflow->id, 'sequence' => $sequence++,
+                        'name'             => 'Finance Review', 'approver_role_id' => $financeRole->id, 'required_approvals' => 1,
                     ]);
                 }
+
+                $summary['steps_created'] += $sequence - 1;
+
+                continue;
             }
-        });
+
+            // A workflow still in the two seeded steps gets its finance step
+            // once the company has an accounting manager.
+            if ($financeRole && $steps->count() === 2 && $steps->pluck('hierarchy_route')->all() === ['requester_manager', 'hr']) {
+                ApprovalStep::query()->create([
+                    'workflow_id'      => $workflow->id, 'sequence' => 3,
+                    'name'             => 'Finance Review', 'approver_role_id' => $financeRole->id, 'required_approvals' => 1,
+                ]);
+                $summary['steps_created']++;
+            }
+        }
+
+        return $summary;
+    }
+
+    /** The finance role for the last claim step, when it has an active member in the company. */
+    public function financeApproverRole(Company $company): ?Role
+    {
+        $role = Role::query()->where('name', self::FinanceApproverRole)->where('guard_name', 'web')->first();
+
+        if (! $role || ! CurrentCompany::scopeUsersOf(User::query(), (int) $company->id)
+            ->where('is_active', true)
+            ->whereHas('roles', fn ($query) => $query->whereKey($role->id))
+            ->exists()) {
+            return null;
+        }
+
+        return $role;
+    }
+
+    /**
+     * @param  EloquentCollection<int, ApprovalStep>  $steps
+     */
+    private function pinnedToAnotherCompany(EloquentCollection $steps, Company $company): bool
+    {
+        $pinnedUserIds = $steps->pluck('approver_user_id')->filter()->unique()->values();
+
+        return $pinnedUserIds->isNotEmpty() && User::query()
+            ->whereKey($pinnedUserIds->all())
+            ->where(fn ($query) => $query->whereNull('default_company_id')->orWhere('default_company_id', '!=', $company->id))
+            ->exists();
     }
 }

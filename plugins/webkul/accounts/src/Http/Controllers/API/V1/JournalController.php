@@ -18,6 +18,7 @@ use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Http\Requests\JournalRequest;
 use Webkul\Account\Http\Resources\V1\JournalResource;
 use Webkul\Account\Models\Journal;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Journals', 'Manage accounting journals')]
@@ -40,7 +41,7 @@ class JournalController extends Controller
     {
         Gate::authorize('viewAny', Journal::class);
 
-        $journals = QueryBuilder::for(Journal::class)
+        $journals = QueryBuilder::for(CurrentCompany::scopeMemberships(Journal::query()))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -119,7 +120,7 @@ class JournalController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $journal = QueryBuilder::for(Journal::where('id', $id))
+        $journal = QueryBuilder::for(CurrentCompany::scopeMemberships(Journal::where('id', $id)))
             ->allowedIncludes(
                 'company',
                 'currency',
@@ -147,7 +148,7 @@ class JournalController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(JournalRequest $request, string $id)
     {
-        $journal = Journal::findOrFail($id);
+        $journal = CurrentCompany::scopeMemberships(Journal::query())->findOrFail($id);
 
         Gate::authorize('update', $journal);
 
@@ -180,7 +181,7 @@ class JournalController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $journal = Journal::findOrFail($id);
+        $journal = CurrentCompany::scopeMemberships(Journal::query())->findOrFail($id);
 
         Gate::authorize('delete', $journal);
 

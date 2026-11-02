@@ -5,6 +5,7 @@ use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Models\Journal;
 use Webkul\Account\Models\Product as AccountProduct;
 use Webkul\Account\Models\Tax;
+use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 
 require_once __DIR__.'/../../Helpers/AccountHelper.php';
@@ -130,4 +131,55 @@ it('scopes taxes by company when selecting products on customer invoices and ven
     // Taxes for TII should not overlap with ShipLine taxes
     $intersect = $tiiTaxes->pluck('id')->intersect($fleetTaxes->pluck('id'));
     expect($intersect->isEmpty())->toBeTrue();
+});
+
+it('keeps an existing first company identity and only fills in blank fields on a re-run', function () {
+    $company = Company::findOrFail(1);
+    $company->forceFill(['name' => 'Renamed Holding', 'tax_id' => 'NTN-KEEP', 'strn' => null])->saveQuietly();
+
+    (new LogisticsCompanyAndProductSeeder)->run();
+
+    $company->refresh();
+
+    expect($company->name)->toBe('Renamed Holding')
+        ->and($company->tax_id)->toBe('NTN-KEEP')
+        ->and($company->strn)->toBe('3277876123456');
+});
+
+it('replaces the installer placeholder identity of the first company on a fresh install', function () {
+    Company::findOrFail(1)->forceFill(['name' => 'Default Company', 'tax_id' => null, 'email' => 'admin@example.com'])->saveQuietly();
+
+    (new LogisticsCompanyAndProductSeeder)->run();
+
+    $company = Company::findOrFail(1);
+
+    expect($company->name)->toBe('Truck It In (Pvt) Ltd')
+        ->and($company->tax_id)->toBe('4289104-7')
+        ->and($company->email)->toBe('accounts@truckitin.com');
+});
+
+it('never adds existing users to the seeded companies', function () {
+    $user = User::factory()->create(['default_company_id' => 1, 'is_active' => true]);
+    $shipLine = Company::where('name', 'ShipLine')->firstOrFail();
+    $openPort = Company::where('name', 'OpenPort')->firstOrFail();
+
+    (new LogisticsCompanyAndProductSeeder)->run();
+
+    expect($user->allowedCompanies()->pluck('companies.id')->all())
+        ->not->toContain($shipLine->id)
+        ->not->toContain($openPort->id);
+});
+
+it('adds only the initial admin to the companies the seeder creates', function () {
+    Company::where('name', 'OpenPort')->firstOrFail()->forceFill(['name' => 'OpenPort (renamed)', 'company_id' => 'OPP-OLD'])->saveQuietly();
+    $user = User::factory()->create(['default_company_id' => 1, 'is_active' => true]);
+    $admin = User::query()->where('is_default', true)->orderBy('id')->first() ?? User::query()->orderBy('id')->firstOrFail();
+
+    (new LogisticsCompanyAndProductSeeder)->run();
+    (new LogisticsCompanyAndProductSeeder)->run();
+
+    $created = Company::where('name', 'OpenPort')->firstOrFail();
+
+    expect($admin->allowedCompanies()->whereKey($created->id)->count())->toBe(1)
+        ->and($user->allowedCompanies()->whereKey($created->id)->exists())->toBeFalse();
 });

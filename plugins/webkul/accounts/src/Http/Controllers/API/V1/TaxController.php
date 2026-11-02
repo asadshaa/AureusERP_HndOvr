@@ -23,6 +23,7 @@ use Webkul\Account\Http\Requests\TaxRequest;
 use Webkul\Account\Http\Resources\V1\TaxResource;
 use Webkul\Account\Models\Tax;
 use Webkul\Account\Models\TaxPartition;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Taxes', 'Manage taxes')]
@@ -49,7 +50,7 @@ class TaxController extends Controller
     {
         Gate::authorize('viewAny', Tax::class);
 
-        $taxes = QueryBuilder::for(Tax::class)
+        $taxes = QueryBuilder::for(CurrentCompany::scopeMemberships(Tax::query()))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -138,7 +139,7 @@ class TaxController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $tax = QueryBuilder::for(Tax::where('id', $id))
+        $tax = QueryBuilder::for(CurrentCompany::scopeMemberships(Tax::where('id', $id)))
             ->allowedIncludes(
                 'company',
                 'taxGroup',
@@ -164,7 +165,7 @@ class TaxController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(TaxRequest $request, string $id)
     {
-        $tax = Tax::findOrFail($id);
+        $tax = CurrentCompany::scopeMemberships(Tax::query())->findOrFail($id);
 
         Gate::authorize('update', $tax);
 
@@ -256,7 +257,7 @@ class TaxController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $tax = Tax::findOrFail($id);
+        $tax = CurrentCompany::scopeMemberships(Tax::query())->findOrFail($id);
 
         Gate::authorize('delete', $tax);
 

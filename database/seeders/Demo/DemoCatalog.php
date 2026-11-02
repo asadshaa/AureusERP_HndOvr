@@ -19,6 +19,7 @@ final class DemoCatalog
      *     domain: string,
      *     base_manager: string,
      *     office: string,
+     *     workplace: array{name: string, latitude: float, longitude: float},
      *     existing: array<string, array<string, mixed>>,
      *     staff: array<string, array<string, mixed>>,
      *     department_managers: array<string, string>,
@@ -31,6 +32,7 @@ final class DemoCatalog
             'domain'       => 'shipline.demo',
             'base_manager' => 'kamran',
             'office'       => 'ShipLine House, Plot 14, West Wharf Road, Kemari, Karachi',
+            'workplace'    => ['name' => 'ShipLine Head Office, Keamari, Karachi (demo)', 'latitude' => 24.8372, 'longitude' => 66.9784],
             'existing'     => [
                 'hina'   => ['joined' => '2020-02-03', 'gender' => 'female', 'born' => '1987-06-14', 'salary' => 340000, 'grade' => 'M2', 'city' => 'karachi', 'parent' => 'tariq', 'marital' => 'married', 'study' => ['MBA (HR)', 'IBA Karachi']],
                 'saad'   => ['joined' => '2021-08-16', 'gender' => 'male', 'born' => '1993-01-22', 'salary' => 165000, 'grade' => 'E3', 'city' => 'karachi', 'parent' => 'hina', 'marital' => 'single', 'study' => ['BBA', 'SZABIST Karachi']],
@@ -120,6 +122,7 @@ final class DemoCatalog
             'domain'       => 'openport.demo',
             'base_manager' => 'nadia',
             'office'       => 'OpenPort Terminal Office, Berth 6, Port Qasim, Karachi',
+            'workplace'    => ['name' => 'OpenPort Terminal, Port Qasim, Karachi (demo)', 'latitude' => 24.7785, 'longitude' => 67.3422],
             'existing'     => [
                 'mariam' => ['joined' => '2019-11-18', 'gender' => 'female', 'born' => '1985-10-09', 'salary' => 350000, 'grade' => 'M2', 'city' => 'karachi', 'parent' => 'khalid', 'marital' => 'married', 'study' => ['MBA (HRM)', 'Karachi University Business School']],
                 'omer'   => ['joined' => '2022-04-04', 'gender' => 'male', 'born' => '1994-08-28', 'salary' => 160000, 'grade' => 'E3', 'city' => 'karachi', 'parent' => 'mariam', 'marital' => 'single', 'study' => ['BBA (HR)', 'Bahria University Karachi']],

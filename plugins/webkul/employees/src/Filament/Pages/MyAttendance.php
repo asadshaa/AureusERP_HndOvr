@@ -10,6 +10,7 @@ use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -30,6 +31,7 @@ use Webkul\Employee\Services\Attendance\ShiftRosterService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Models\CalendarLeave;
 use Webkul\TimeOff\Models\Leave;
 
 /**
@@ -241,6 +243,17 @@ class MyAttendance extends Page
         $resolver = app(AttendanceScheduleResolver::class);
         $schedules = $resolver->setsFor([$employee], $monthStart->toDateString(), $monthEnd->toDateString())[(int) $employee->id] ?? [];
 
+        // Public holidays as the monthly report reads them: the company's or shared, every calendar or the employee's.
+        $calendarId = $employee->calendar_id ? (int) $employee->calendar_id : null;
+        $holidays = CalendarLeave::query()
+            ->where(fn (Builder $query) => $query->where('time_type', 'leave')->orWhereNull('time_type'))
+            ->where(fn (Builder $query) => $query->where('company_id', $employee->company_id)->orWhereNull('company_id'))
+            ->where(fn (Builder $query) => $query->whereNull('calendar_id')->when($calendarId, fn (Builder $inner) => $inner->orWhere('calendar_id', $calendarId)))
+            ->whereDate('date_from', '<=', $monthEnd->toDateString())
+            ->whereDate('date_to', '>=', $monthStart->toDateString())
+            ->orderBy('date_from')
+            ->get(['name', 'date_from', 'date_to']);
+
         $daysPresent = 0;
         $totalHours = 0.0;
         $lateDays = 0;
@@ -271,6 +284,8 @@ class MyAttendance extends Page
             $dayLeaves = $leaves->filter(fn ($l) => ApprovedLeaveLookup::covers($l, $dateStr));
             $matchingLeave = $dayLeaves->first(fn ($l) => ApprovedLeaveLookup::isApproved($l));
             $pendingLeave = $matchingLeave ? null : $dayLeaves->first();
+            $holiday = $isWeekend ? null : $holidays->first(fn (CalendarLeave $h): bool => Carbon::parse($h->date_from)->toDateString() <= $dateStr
+                && Carbon::parse($h->date_to)->toDateString() >= $dateStr);
 
             $status = 'none';
             $workedHours = null;
@@ -311,6 +326,11 @@ class MyAttendance extends Page
 
                 $checkIn = $record->check_in ? $record->check_in->setTimezone($timezone)->format('h:i A') : null;
                 $checkOut = $record->check_out ? $record->check_out->setTimezone($timezone)->format('h:i A') : null;
+            } elseif ($holiday) {
+                // A public holiday on a working day is an off day (as in the monthly report), never "Missing".
+                $status = 'holiday';
+                $badgeColor = 'info';
+                $label = 'Holiday';
             } elseif ($matchingLeave) {
                 $leaveDays++;
                 $status = 'leave';
@@ -339,6 +359,7 @@ class MyAttendance extends Page
                 'isToday'     => $isToday,
                 'isFuture'    => $isFuture,
                 'isWeekend'   => $isWeekend,
+                'holidayName' => $holiday ? (string) $holiday->name : null,
                 'status'      => $status,
                 'badgeColor'  => $badgeColor,
                 'label'       => $label,

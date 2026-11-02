@@ -19,6 +19,7 @@ use Webkul\Account\Http\Requests\PaymentDueTermRequest;
 use Webkul\Account\Http\Resources\V1\PaymentDueTermResource;
 use Webkul\Account\Models\PaymentDueTerm;
 use Webkul\Account\Models\PaymentTerm;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Payment Due Terms', 'Manage payment term due terms')]
@@ -37,7 +38,7 @@ class PaymentDueTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function index(string $paymentTerm)
     {
-        $paymentTermModel = PaymentTerm::findOrFail($paymentTerm);
+        $paymentTermModel = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($paymentTerm);
 
         Gate::authorize('view', $paymentTermModel);
 
@@ -64,7 +65,7 @@ class PaymentDueTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function store(PaymentDueTermRequest $request, string $paymentTerm)
     {
-        $paymentTermModel = PaymentTerm::findOrFail($paymentTerm);
+        $paymentTermModel = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($paymentTerm);
 
         Gate::authorize('update', $paymentTermModel);
 
@@ -88,7 +89,7 @@ class PaymentDueTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $paymentTerm, string $paymentDueTerm)
     {
-        $paymentTermModel = PaymentTerm::findOrFail($paymentTerm);
+        $paymentTermModel = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($paymentTerm);
 
         Gate::authorize('view', $paymentTermModel);
 
@@ -111,7 +112,7 @@ class PaymentDueTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(PaymentDueTermRequest $request, string $paymentTerm, string $paymentDueTerm)
     {
-        $paymentTermModel = PaymentTerm::findOrFail($paymentTerm);
+        $paymentTermModel = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($paymentTerm);
 
         Gate::authorize('update', $paymentTermModel);
 
@@ -131,7 +132,7 @@ class PaymentDueTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $paymentTerm, string $paymentDueTerm)
     {
-        $paymentTermModel = PaymentTerm::findOrFail($paymentTerm);
+        $paymentTermModel = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($paymentTerm);
 
         Gate::authorize('update', $paymentTermModel);
 

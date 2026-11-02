@@ -23,6 +23,7 @@ use Random\Randomizer;
 use RuntimeException;
 use Spatie\Permission\PermissionRegistrar;
 use Throwable;
+use Webkul\Employee\Enums\WorkLocation as WorkLocationType;
 use Webkul\Employee\Models\AttendanceInterval;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Department;
@@ -32,6 +33,10 @@ use Webkul\Employee\Models\EmployeeCodeSequence;
 use Webkul\Employee\Models\EmployeeDocument;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Employee\Models\WorkLocation;
+use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
+use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
+use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\DocumentExpiryReminderService;
 use Webkul\Employee\Services\EmployeeDocumentService;
 use Webkul\Employee\Services\EmployeeRequestService;
@@ -53,6 +58,7 @@ use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
+use Webkul\Support\Models\CalendarLeave;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Services\ApprovalEngine;
 use Webkul\TimeOff\Enums\State;
@@ -64,7 +70,9 @@ use Webkul\TimeOff\Services\LeaveCancellationService;
 
 /**
  * Lived-in HR demo data for ShipLine and OpenPort (php artisan demo:seed):
- * about 23 staff each with reporting lines, ~10 weeks of office attendance
+ * about 23 staff each with reporting lines, a geofenced office workplace
+ * every employee checks in at (demo coordinates HR must confirm; seedWorkplace()),
+ * ~10 weeks of office attendance
  * (10:00-18:00 Karachi, intervals included), leave in every state, loans,
  * salary advances and HR letters, employee documents (some expiring) and a
  * recruitment pipeline with interviews this week and next.
@@ -78,8 +86,10 @@ use Webkul\TimeOff\Services\LeaveCancellationService;
  * does. Every created row is recorded in demo_records (DemoRecorder), so a
  * re-run creates nothing twice and demo:purge removes only demo rows.
  *
- * Truck It In is never touched: it is a live company (real staff, real
- * attendance reports and digests, a live careers website).
+ * demo:seed never touches Truck It In: it is a live company (real staff,
+ * real attendance reports and digests, a live careers website). Only on
+ * request does demo:attendance fill the attendance days its employees have
+ * no record for (fillLiveAttendance()), tracked the same way.
  */
 class DemoActivitySeeder extends Seeder
 {
@@ -93,6 +103,9 @@ class DemoActivitySeeder extends Seeder
     public array $companyNames = ['ShipLine', 'OpenPort'];
 
     public bool $freshActivity = false;
+
+    /** Only the demo workplace of each company and its staff assignment (demo:seed --workplaces). */
+    public bool $workplacesOnly = false;
 
     /** @var array<string, array<string, int|string>> */
     public array $summary = [];
@@ -140,12 +153,14 @@ class DemoActivitySeeder extends Seeder
         $this->windowStart = $this->today->copy()->subWeeks(10)->startOfWeek();
 
         $this->sandbox->isolate();
-        $this->ensureBaseStaff();
+        if (! $this->workplacesOnly) {
+            $this->ensureBaseStaff();
+        }
         $this->recorder->start();
 
         try {
             foreach ($this->companyNames as $name) {
-                $this->seedCompany($name);
+                $this->workplacesOnly ? $this->seedCompanyWorkplace($name) : $this->seedCompany($name);
             }
         } finally {
             Carbon::setTestNow();
@@ -204,6 +219,7 @@ class DemoActivitySeeder extends Seeder
         $this->recorder->transaction(fn () => $this->seedStaff());
         $this->writeCredentials();
         $this->loadPeople();
+        $this->seedWorkplace($company, $setup['workplace']);
 
         $this->recorder->context($company->id, DemoRecord::PHASE_ACTIVITY);
         $this->leaveTypes = $this->companyLeaveTypes();
@@ -221,6 +237,129 @@ class DemoActivitySeeder extends Seeder
 
         $this->summary[$name] = ['created' => $this->recorder->created(), 'totals' => $this->totals() + ['document_reminders_sent' => $this->reminders]];
         $this->recorder->context(null, DemoRecord::PHASE_STAFF);
+    }
+
+    /** demo:seed --workplaces: only the company's demo workplace and its staff assignment, acting as its HR manager. */
+    private function seedCompanyWorkplace(string $name): void
+    {
+        $setup = DemoCatalog::COMPANIES[$name] ?? null;
+        $company = Company::query()->where('name', $name)->first();
+
+        if (! $setup || ! $company) {
+            $this->warn("{$name}: company not found, skipped.");
+
+            return;
+        }
+
+        $this->company = $company;
+        $this->setup = $setup;
+        $this->recorder->resetCreated();
+
+        $hr = User::query()->where('email', $this->hrManagerKey()."@{$setup['domain']}")->first();
+        if ($hr) {
+            Auth::guard('web')->setUser($hr);
+        }
+
+        $result = $this->seedWorkplace($company, $setup['workplace']);
+
+        $this->summary[$name] = ['created' => $this->recorder->created(), 'totals' => [
+            'workplace'                     => $result['workplace'] ? "#{$result['workplace']->id} {$result['workplace']->name}" : 'none',
+            'total_employees'               => Employee::query()->where('company_id', $company->id)->where('is_active', true)->count(),
+            'total_employees_on_workplace'  => $result['workplace'] ? Employee::query()->where('company_id', $company->id)->where('is_active', true)->where('work_location_id', $result['workplace']->id)->count() : 0,
+            'total_employees_assigned_now'  => $result['assigned'],
+        ]];
+        $this->recorder->context(null, DemoRecord::PHASE_STAFF);
+    }
+
+    // ---------------------------------------------------------------------
+    // Workplace
+    // ---------------------------------------------------------------------
+
+    /**
+     * The company's office as one active, geofenced workplace (DemoCatalog
+     * "workplace", radius the config default), so its staff can check in on
+     * My Attendance. The coordinates are a demo placement: the name and the
+     * location number say so, and HR must confirm them and the radius.
+     *
+     * Every active employee of the company without a primary workplace gets
+     * this one; each value written is remembered (rememberFill) so demo:purge
+     * puts it back, and the workplace itself is a recorded row. Idempotent: a
+     * re-run finds the workplace by its demo key (or its name) and never
+     * changes it, so HR's corrections stay; a workplace HR has since
+     * deactivated or deleted is not given to anyone.
+     *
+     * Public for tests; the caller's signed-in user (the HR manager in
+     * demo:seed) must be allowed to manage geofences, or nobody is signed in.
+     *
+     * @param  array{name: string, latitude: float, longitude: float}  $spec
+     * @return array{workplace: ?WorkLocation, created: bool, assigned: int}
+     */
+    public function seedWorkplace(Company $company, array $spec): array
+    {
+        $demoKey = "workplace:{$company->id}";
+        $this->recorder->start();
+        $this->recorder->context($company->id, DemoRecord::PHASE_STAFF);
+
+        try {
+            return $this->recorder->transaction(function () use ($company, $spec, $demoKey): array {
+                $tracked = $this->recorder->find($demoKey);
+                $workplace = ($tracked ? WorkLocation::withTrashed()->find($tracked->record_id) : null)
+                    ?? WorkLocation::withTrashed()->where('company_id', $company->id)->where('name', $spec['name'])->first();
+                $created = false;
+
+                if (! $workplace) {
+                    $workplace = WorkLocation::query()->create([
+                        'company_id'             => $company->id,
+                        'name'                   => $spec['name'],
+                        'location_type'          => WorkLocationType::Office,
+                        'location_number'        => 'Demo location: HR must confirm the coordinates and radius',
+                        'latitude'               => $spec['latitude'],
+                        'longitude'              => $spec['longitude'],
+                        'geofence_radius_meters' => (int) config('hr_attendance_geofence.default_radius_meters', 150),
+                        'geofence_enabled'       => true,
+                        'is_active'              => true,
+                    ]);
+                    $this->recorder->mark($demoKey, $workplace);
+                    $created = true;
+                }
+
+                if (! $workplace->isGeofenceUsable()) {
+                    $this->warn("{$company->name}: workplace \"{$workplace->name}\" is inactive, deleted or has no complete geofence; no employee was assigned to it.");
+
+                    return ['workplace' => $workplace, 'created' => $created, 'assigned' => 0];
+                }
+
+                $assigned = 0;
+                $employees = Employee::query()
+                    ->where('company_id', $company->id)
+                    ->where('is_active', true)
+                    ->whereNull('work_location_id')
+                    ->orderBy('id')
+                    ->get();
+
+                foreach ($employees as $employee) {
+                    $leaveManager = $employee->getRawOriginal('leave_manager_id');
+                    $employee->fill(['work_location_id' => $workplace->id])->save();
+
+                    $original = ['work_location_id' => null];
+                    $applied = ['work_location_id' => $workplace->id];
+                    // Saving re-derives the leave approver from the line manager: remember it too when it moved.
+                    if ((string) $leaveManager !== (string) $employee->getRawOriginal('leave_manager_id')) {
+                        $original['leave_manager_id'] = $leaveManager;
+                        $applied['leave_manager_id'] = $employee->getRawOriginal('leave_manager_id');
+                    }
+
+                    $this->recorder->rememberFill($employee, $original, $applied);
+                    $assigned++;
+                }
+
+                return ['workplace' => $workplace, 'created' => $created, 'assigned' => $assigned];
+            });
+        } catch (Throwable $e) {
+            $this->warn("{$company->name}: demo workplace skipped: ".Str::limit($e->getMessage(), 180));
+
+            return ['workplace' => null, 'created' => false, 'assigned' => 0];
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -952,6 +1091,14 @@ class DemoActivitySeeder extends Seeder
             ->get()
             ->groupBy('employee_id');
 
+        // Public holidays are days off, as the monthly report reads them: nobody is shown at work.
+        $holidays = CalendarLeave::query()
+            ->where(fn ($query) => $query->where('time_type', 'leave')->orWhereNull('time_type'))
+            ->where(fn ($query) => $query->where('company_id', $this->company->id)->orWhereNull('company_id'))
+            ->whereDate('date_from', '<=', $this->today->toDateString())
+            ->whereDate('date_to', '>=', $this->windowStart->toDateString())
+            ->get(['date_from', 'date_to', 'calendar_id']);
+
         $index = 0;
         foreach ($this->people as $key => $person) {
             $employee = $person['employee'];
@@ -967,10 +1114,15 @@ class DemoActivitySeeder extends Seeder
             $forgets = $index % 9 === 4;
             $days = [];
 
+            $calendarId = $employee->calendar_id ? (int) $employee->calendar_id : null;
+
             for ($day = $from->copy(); $day->lessThanOrEqualTo($this->today); $day->addDay()) {
                 $date = $day->toDateString();
 
-                if ($day->isWeekend() || isset($existing[$date])) {
+                if ($day->isWeekend() || isset($existing[$date])
+                    || $holidays->contains(fn (CalendarLeave $holiday): bool => Carbon::parse($holiday->date_from)->toDateString() <= $date
+                        && Carbon::parse($holiday->date_to)->toDateString() >= $date
+                        && ($holiday->calendar_id === null || (int) $holiday->calendar_id === $calendarId))) {
                     continue;
                 }
 
@@ -1002,7 +1154,195 @@ class DemoActivitySeeder extends Seeder
     }
 
     /**
-     * @param  array<string, array{intervals: array<int, array{0: Carbon, 1: ?Carbon}>, status: string, source: string, notes: ?string, overtime: float}>  $days
+     * Demo attendance for a live company (php artisan demo:attendance): only
+     * the days, from $from to $to (Karachi), on which an employee has no
+     * attendance record yet; nothing that exists is changed. Never today or
+     * later (real check-ins happen today) and never an open day, so no
+     * forgotten-shift or missing check-out notice can follow.
+     *
+     * Work days follow each employee's resolved schedule
+     * (AttendanceScheduleResolver: day override, roster, work schedule, then
+     * the company default). Skipped: placeholder employees, days outside the
+     * employment dates (joining date, else the day the employee was created;
+     * leaving / departure date), finalised (locked) months, public holidays and
+     * approved full-day leave; an approved half day or short leave shapes the
+     * day as in the demo companies. Bulk inserts fire no model events (no
+     * late check-in notice is queued) and run inside DemoSandbox. Every row is
+     * recorded in demo_records under the company in the same transaction, so
+     * demo:purge --company=<the company> removes exactly those rows.
+     *
+     * @return array{employees: int, employees_filled: int, days: int, intervals: int, existing: int, locked: int, locked_months: array<int, string>, holidays: int, leave: int, absent: int, placeholders: array<int, string>, from: string, to: string}
+     */
+    public function fillLiveAttendance(Company $company, string $from, string $to): array
+    {
+        $this->realNow = Carbon::now();
+        $this->today = Carbon::now(self::TIMEZONE)->startOfDay();
+        $this->company = $company;
+
+        $first = Carbon::parse($from, self::TIMEZONE)->startOfDay();
+        $last = Carbon::parse($to, self::TIMEZONE)->startOfDay()->min($this->today->copy()->subDay());
+        $stats = [
+            'employees'        => 0,
+            'employees_filled' => 0,
+            'days'             => 0,
+            'intervals'        => 0,
+            'existing'         => 0,
+            'locked'           => 0,
+            'locked_months'    => [],
+            'holidays'         => 0,
+            'leave'            => 0,
+            'absent'           => 0,
+            'placeholders'     => [],
+            'from'             => $first->toDateString(),
+            'to'               => $last->toDateString(),
+        ];
+
+        [$placeholders, $employees] = Employee::query()
+            ->where('company_id', $company->id)
+            ->where('is_active', true)
+            ->with('department:id,name')
+            ->orderBy('id')
+            ->get()
+            ->partition(fn (Employee $employee): bool => Str::contains((string) $employee->name, '(Placeholder)'));
+        $stats['placeholders'] = $placeholders->pluck('name')->values()->all();
+        $stats['employees'] = $employees->count();
+
+        if ($first->greaterThan($last) || $employees->isEmpty()) {
+            return $stats;
+        }
+
+        $this->sandbox->isolate();
+        $this->recorder->context($company->id, DemoRecord::PHASE_ACTIVITY);
+        $this->recorder->resetCreated();
+
+        $locks = app(AttendanceMonthLockService::class);
+        $locked = [];
+        for ($month = $first->copy()->startOfMonth(); $month->lessThanOrEqualTo($last); $month->addMonthNoOverflow()) {
+            if ($locks->isLocked($company->id, $month->toDateString())) {
+                $locked[$month->format('Y-m')] = true;
+            }
+        }
+        $stats['locked_months'] = array_keys($locked);
+
+        $resolver = app(AttendanceScheduleResolver::class);
+        $schedules = $resolver->setsFor($employees, $first->toDateString(), $last->toDateString());
+        // The monthly report's public holidays (MonthlyAttendanceReport::holidays()).
+        $holidays = CalendarLeave::query()
+            ->where(fn ($query) => $query->where('time_type', 'leave')->orWhereNull('time_type'))
+            ->where(fn ($query) => $query->where('company_id', $company->id)->orWhereNull('company_id'))
+            ->whereDate('date_from', '<=', $last->toDateString())
+            ->whereDate('date_to', '>=', $first->toDateString())
+            ->get(['name', 'date_from', 'date_to', 'calendar_id']);
+        $leaves = ApprovedLeaveLookup::overlapping(
+            Leave::query()->whereIn('employee_id', $employees->modelKeys())->where('state', State::VALIDATE_TWO->value),
+            $first->toDateString(),
+            $last->toDateString(),
+        )->get()->groupBy('employee_id');
+
+        try {
+            DB::transaction(function () use ($employees, $first, $last, $locked, $resolver, $schedules, $holidays, $leaves, &$stats): void {
+                // Any record of the employee on the day (whatever its company) keeps the day as it is.
+                $existing = AttendanceRecord::query()
+                    ->whereIn('employee_id', $employees->modelKeys())
+                    ->whereDate('attendance_date', '>=', $first->toDateString())
+                    ->whereDate('attendance_date', '<=', $last->toDateString())
+                    ->get(['employee_id', 'attendance_date'])
+                    ->mapWithKeys(fn (AttendanceRecord $record): array => [$record->employee_id.'|'.$record->attendance_date->toDateString() => true])
+                    ->all();
+
+                foreach ($employees as $employee) {
+                    $key = 'employee-'.$employee->id;
+                    $profile = $this->attendanceProfile($key, ['dept' => $employee->department?->name]);
+                    $joined = $this->localDate($employee->joining_date ?? $employee->created_at?->copy()->setTimezone(self::TIMEZONE)->toDateString() ?? $first);
+                    $leftOn = collect([$employee->leaving_date, $employee->departure_date])->filter()->map(fn ($date): string => Carbon::parse($date)->toDateString())->min();
+                    $calendarId = $employee->calendar_id ? (int) $employee->calendar_id : null;
+                    $days = [];
+
+                    for ($day = $first->max($joined)->copy(); $day->lessThanOrEqualTo($last); $day->addDay()) {
+                        $date = $day->toDateString();
+
+                        if ($leftOn !== null && $date > $leftOn) {
+                            break;
+                        }
+
+                        if (isset($existing[$employee->id.'|'.$date])) {
+                            $stats['existing']++;
+
+                            continue;
+                        }
+
+                        $schedule = $resolver->pick($schedules[$employee->id] ?? [], $date);
+
+                        if (! $schedule->isWorkingDay($date)) {
+                            continue;
+                        }
+
+                        if (isset($locked[substr($date, 0, 7)])) {
+                            $stats['locked']++;
+
+                            continue;
+                        }
+
+                        if ($holidays->contains(fn (CalendarLeave $holiday): bool => Carbon::parse($holiday->date_from)->toDateString() <= $date
+                            && Carbon::parse($holiday->date_to)->toDateString() >= $date
+                            && ($holiday->calendar_id === null || (int) $holiday->calendar_id === $calendarId))) {
+                            $stats['holidays']++;
+
+                            continue;
+                        }
+
+                        $dayLeaves = ($leaves->get($employee->id) ?? collect())->filter(fn (Leave $leave): bool => ApprovedLeaveLookup::covers($leave, $date));
+
+                        if ($dayLeaves->contains(fn (Leave $leave): bool => ! $leave->request_unit_half && ! $leave->request_unit_hours)) {
+                            $stats['leave']++;
+
+                            continue;
+                        }
+
+                        $window = [intdiv($schedule->startSeconds, 60), intdiv($schedule->endSeconds, 60)];
+                        $plan = $this->dayPlan(
+                            $day->copy(),
+                            $profile,
+                            $this->rng("attendance:{$this->company->id}:{$key}:{$date}"),
+                            $dayLeaves->first(fn (Leave $leave): bool => (bool) $leave->request_unit_half),
+                            $dayLeaves->first(fn (Leave $leave): bool => (bool) $leave->request_unit_hours),
+                            null,
+                            false,
+                            ...$window,
+                        );
+
+                        if ($plan === null) {
+                            $stats['absent']++;
+
+                            continue;
+                        }
+
+                        $days[$date] = $plan + ['forgotten' => false, 'window' => $window];
+                    }
+
+                    $this->insertAttendance($employee, $days);
+                    $stats['employees_filled'] += $days === [] ? 0 : 1;
+                }
+
+                // Recorded before the commit: a demo row never exists untracked.
+                $this->recorder->flush();
+            });
+
+            $created = $this->recorder->created();
+            $stats['days'] = (int) ($created['employees_attendance_records'] ?? 0);
+            $stats['intervals'] = (int) ($created['employees_attendance_intervals'] ?? 0);
+        } finally {
+            $this->recorder->context(null, DemoRecord::PHASE_STAFF);
+        }
+
+        return $stats;
+    }
+
+    /**
+     * $plan['window']: the day's scheduled start / end in minutes after local
+     * midnight (default the 10:00-18:00 office day).
+     *
+     * @param  array<string, array{intervals: array<int, array{0: Carbon, 1: ?Carbon}>, status: string, source: string, notes: ?string, overtime: float, forgotten?: bool, window?: array{0: int, 1: int}}>  $days
      */
     private function insertAttendance(Employee $employee, array $days): void
     {
@@ -1019,8 +1359,9 @@ class DemoActivitySeeder extends Seeder
             $last = end($intervals);
             $open = $last[1] === null;
             $workedMinutes = array_sum(array_map(fn (array $pair): int => $pair[1] ? (int) $pair[0]->diffInMinutes($pair[1]) : 0, $intervals));
-            $scheduledStart = $this->local($date, '10:00');
-            $scheduledEnd = $this->local($date, '18:00');
+            [$windowStart, $windowEnd] = $plan['window'] ?? [self::OFFICE_START, self::OFFICE_END];
+            $scheduledStart = $this->local($date, '00:00')->addMinutes($windowStart);
+            $scheduledEnd = $this->local($date, '00:00')->addMinutes($windowEnd);
 
             $rows[] = [
                 'company_id'              => $employee->company_id,
@@ -1048,6 +1389,7 @@ class DemoActivitySeeder extends Seeder
         }
 
         $records = AttendanceRecord::query()
+            ->where('company_id', $employee->company_id)
             ->where('employee_id', $employee->id)
             ->whereIn('attendance_date', array_keys($days))
             ->get(['id', 'attendance_date', 'source']);
@@ -1105,41 +1447,43 @@ class DemoActivitySeeder extends Seeder
     /**
      * One working day: punches in minutes from midnight (Karachi), shaped by
      * the person's habits, an approved half day or short leave, and (today)
-     * the current time.
+     * the current time. $start / $end: the scheduled day in minutes after
+     * midnight (default the 10:00-18:00 office day; an overnight end is past 1440).
      *
      * @param  array{late: float, absent: float, split: float, overtime: float, early: float}  $profile
      * @return array{intervals: array<int, array{0: Carbon, 1: ?Carbon}>, status: string, source: string, notes: ?string, overtime: float}|null
      */
-    private function dayPlan(Carbon $day, array $profile, Randomizer $r, ?Leave $half, ?Leave $short, ?Carbon $now, bool $forgetCheckOut): ?array
+    private function dayPlan(Carbon $day, array $profile, Randomizer $r, ?Leave $half, ?Leave $short, ?Carbon $now, bool $forgetCheckOut, int $start = self::OFFICE_START, int $end = self::OFFICE_END): ?array
     {
         if (! $half && ! $short && $this->chance($r, $profile['absent'])) {
             return null;
         }
 
-        $arrive = $this->chance($r, $profile['late']) ? self::OFFICE_START + $r->getInt(5, 40) : self::OFFICE_START - $r->getInt(0, 18);
+        $midday = intdiv($start + $end, 2);
+        $arrive = $this->chance($r, $profile['late']) ? $start + $r->getInt(5, 40) : $start - $r->getInt(0, 18);
         $roll = $r->getFloat(0, 1);
         $leave = match (true) {
-            $roll < $profile['overtime']                     => self::OFFICE_END + $r->getInt(60, 170),
-            $roll < $profile['overtime'] + $profile['early'] => self::OFFICE_END - $r->getInt(15, 50),
-            default                                          => self::OFFICE_END + $r->getInt(0, 35),
+            $roll < $profile['overtime']                     => $end + $r->getInt(60, 170),
+            $roll < $profile['overtime'] + $profile['early'] => $end - $r->getInt(15, 50),
+            default                                          => $end + $r->getInt(0, 35),
         };
         $pairs = [[$arrive, $leave]];
 
         if ($half) {
             $morningOff = ($half->request_date_from_period?->value ?? $half->request_date_from_period) === 'morning';
             $pairs = $morningOff
-                ? [[14 * 60 + $r->getInt(-12, 12), self::OFFICE_END + $r->getInt(0, 25)]]
-                : [[$arrive, 14 * 60 + $r->getInt(-5, 15)]];
+                ? [[$midday + $r->getInt(-12, 12), $end + $r->getInt(0, 25)]]
+                : [[$arrive, $midday + $r->getInt(-5, 15)]];
         } elseif ($short) {
             $from = (int) round((float) $short->request_hour_from * 60);
             $to = (int) round((float) $short->request_hour_to * 60);
             $pairs = match (true) {
-                $from <= self::OFFICE_START => [[$to + $r->getInt(0, 12), $leave]],
-                $to >= self::OFFICE_END     => [[$arrive, $from - $r->getInt(0, 6)]],
-                default                     => [[$arrive, $from - $r->getInt(0, 5)], [$to + $r->getInt(0, 10), $leave]],
+                $from <= $start => [[$to + $r->getInt(0, 12), $leave]],
+                $to >= $end     => [[$arrive, $from - $r->getInt(0, 6)]],
+                default         => [[$arrive, $from - $r->getInt(0, 5)], [$to + $r->getInt(0, 10), $leave]],
             };
         } elseif ($this->chance($r, $profile['split'])) {
-            $out = $r->getInt(12 * 60 + 30, 15 * 60);
+            $out = $r->getInt($start + 150, $start + 300);
             $back = $out + $r->getInt(30, 80);
             if ($back < $leave - 60) {
                 $pairs = [[$arrive, $out], [$back, $leave]];
@@ -1191,7 +1535,7 @@ class DemoActivitySeeder extends Seeder
             'status'    => $status,
             'source'    => $manual ? 'manual' : 'biometric',
             'notes'     => $manual ? 'Biometric device was offline; entered by HR from the attendance register.' : null,
-            'overtime'  => ! $open && $closedEnd >= self::OFFICE_END + 60 ? round(($closedEnd - self::OFFICE_END) / 60, 2) : 0.0,
+            'overtime'  => ! $open && $closedEnd >= $end + 60 ? round(($closedEnd - $end) / 60, 2) : 0.0,
         ];
     }
 

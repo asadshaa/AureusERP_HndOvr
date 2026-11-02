@@ -28,10 +28,13 @@ use Webkul\Support\Models\UOM;
 
 class LogisticsCompanyAndProductSeeder extends Seeder
 {
+    /** Names erp:install and the support CompanySeeder give the first company before it is set up. */
+    protected const PLACEHOLDER_COMPANY_NAMES = ['Default Company', 'DummyCorp LLC'];
+
     public function run(): void
     {
         if (! Auth::check()) {
-            $admin = User::first();
+            $admin = $this->initialAdmin();
             if ($admin) {
                 Auth::login($admin);
             }
@@ -72,42 +75,39 @@ class LogisticsCompanyAndProductSeeder extends Seeder
     {
         $pakistan = Country::where('code', 'PK')->first();
 
-        // 1. Truck It In (Pvt) Ltd - Core Freight Tech & Brokerage Platform
+        // 1. Truck It In (Pvt) Ltd - Core Freight Tech & Brokerage Platform.
+        // Its identity is only written on a fresh install (no company yet, or
+        // the installer's placeholder company); on an existing database only
+        // blank fields are filled in, so a re-run never overwrites real values.
+        $identity = [
+            'name'                    => 'Truck It In (Pvt) Ltd',
+            'company_id'              => 'TII-001',
+            'registration_number'     => '0145892',
+            'tax_id'                  => '4289104-7',
+            'is_sales_tax_registered' => true,
+            'strn'                    => '3277876123456',
+            'email'                   => 'accounts@truckitin.com',
+            'phone'                   => '+92-21-35894100',
+            'street1'                 => 'Plot 14-C, Bukhari Commercial, DHA Phase 6',
+            'city'                    => 'Karachi',
+            'country_id'              => $pakistan?->id ?? 177,
+            'currency_id'             => $currencies['PKR']->id ?? 159,
+            'website'                 => 'https://truckitin.com',
+            'is_active'               => true,
+        ];
+
         $company1 = Company::find(1);
-        if ($company1) {
-            $company1->update([
-                'name'                    => 'Truck It In (Pvt) Ltd',
-                'company_id'              => 'TII-001',
-                'registration_number'     => '0145892',
-                'tax_id'                  => '4289104-7',
-                'is_sales_tax_registered' => true,
-                'strn'                    => '3277876123456',
-                'email'                   => 'accounts@truckitin.com',
-                'phone'                   => '+92-21-35894100',
-                'street1'                 => 'Plot 14-C, Bukhari Commercial, DHA Phase 6',
-                'city'                    => 'Karachi',
-                'country_id'              => $pakistan?->id ?? 177,
-                'currency_id'             => $currencies['PKR']->id ?? 159,
-                'website'                 => 'https://truckitin.com',
-                'is_active'               => true,
-            ]);
+
+        if (! $company1) {
+            $company1 = Company::create($identity);
+        } elseif (in_array($company1->name, self::PLACEHOLDER_COMPANY_NAMES, true)) {
+            $company1->update($identity);
         } else {
-            $company1 = Company::create([
-                'name'                    => 'Truck It In (Pvt) Ltd',
-                'company_id'              => 'TII-001',
-                'registration_number'     => '0145892',
-                'tax_id'                  => '4289104-7',
-                'is_sales_tax_registered' => true,
-                'strn'                    => '3277876123456',
-                'email'                   => 'accounts@truckitin.com',
-                'phone'                   => '+92-21-35894100',
-                'street1'                 => 'Plot 14-C, Bukhari Commercial, DHA Phase 6',
-                'city'                    => 'Karachi',
-                'country_id'              => $pakistan?->id ?? 177,
-                'currency_id'             => $currencies['PKR']->id ?? 159,
-                'website'                 => 'https://truckitin.com',
-                'is_active'               => true,
-            ]);
+            $company1->update(array_filter(
+                $identity,
+                fn (mixed $value, string $field): bool => blank($company1->getAttribute($field)),
+                ARRAY_FILTER_USE_BOTH,
+            ));
         }
 
         // 2. ShipLine - sister company (Pakistan, PKR). Registration, tax and
@@ -155,15 +155,23 @@ class LogisticsCompanyAndProductSeeder extends Seeder
     }
 
     /**
+     * Company membership is set per user (erp:company-access or the Users
+     * screen), never in bulk here: only the initial admin is added to the
+     * seeded companies. Adding without detaching keeps re-runs idempotent and
+     * leaves every other user's access exactly as it was.
+     *
      * @param  array<string, Company>  $companies
      */
     protected function assignUsersToCompanies(array $companies): void
     {
-        $companyIds = collect($companies)->pluck('id')->all();
+        $this->initialAdmin()?->allowedCompanies()->syncWithoutDetaching(collect($companies)->pluck('id')->all());
+    }
 
-        foreach (User::all() as $user) {
-            $user->allowedCompanies()->syncWithoutDetaching($companyIds);
-        }
+    /** The administrator erp:install created (is_default), else the first user. */
+    protected function initialAdmin(): ?User
+    {
+        return User::query()->where('is_default', true)->orderBy('id')->first()
+            ?? User::query()->orderBy('id')->first();
     }
 
     /**

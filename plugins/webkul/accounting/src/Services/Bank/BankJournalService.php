@@ -299,9 +299,12 @@ class BankJournalService
 
             $expectedInbound = $sides->first() === 'inbound';
 
+            // A clearing account may be shared by several companies; only
+            // this company's postings make up its balance.
             $currentBalance = DB::table('accounts_account_move_lines')
                 ->join('accounts_account_moves', 'accounts_account_moves.id', '=', 'accounts_account_move_lines.move_id')
                 ->where('accounts_account_moves.state', MoveState::POSTED->value)
+                ->where('accounts_account_moves.company_id', $move->company_id)
                 ->where('accounts_account_move_lines.account_id', $line->account_id)
                 ->selectRaw('COALESCE(SUM(accounts_account_move_lines.debit), 0) - COALESCE(SUM(accounts_account_move_lines.credit), 0) as balance')
                 ->value('balance');

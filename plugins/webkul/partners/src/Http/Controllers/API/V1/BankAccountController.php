@@ -17,6 +17,7 @@ use Webkul\Partner\Http\Requests\BankAccountRequest;
 use Webkul\Partner\Http\Resources\V1\BankAccountResource;
 use Webkul\Partner\Models\BankAccount;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Partner API Management')]
 #[Subgroup('Bank Accounts', 'Manage partner bank accounts')]
@@ -35,7 +36,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function index(string $partner)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('view', $partnerModel);
 
@@ -62,7 +63,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function store(BankAccountRequest $request, string $partner)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -86,7 +87,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $partner, string $bankAccount)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('view', $partnerModel);
 
@@ -109,7 +110,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(BankAccountRequest $request, string $partner, string $bankAccount)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -128,7 +129,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $partner, string $bankAccount)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -148,7 +149,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $partner, string $bankAccount)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -172,7 +173,7 @@ class BankAccountController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $partner, string $bankAccount)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 

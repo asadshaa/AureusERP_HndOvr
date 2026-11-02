@@ -2,6 +2,8 @@
 
 use Webkul\Partner\Enums\AccountType;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Models\Company;
 
 require_once __DIR__.'/../../../../../support/tests/Helpers/SecurityHelper.php';
 require_once __DIR__.'/../../../../../support/tests/Helpers/TestBootstrapHelper.php';
@@ -15,7 +17,8 @@ afterEach(fn () => SecurityHelper::restoreUserEvents());
 
 function actingAsPartnerApiUser(array $permissions = []): void
 {
-    SecurityHelper::authenticateWithPermissions($permissions);
+    // A group owner belongs to every company, so the company-scoped API finds the factory records.
+    SecurityHelper::authenticateWithPermissions([...$permissions, CurrentCompany::MANAGE_MEMBERSHIPS]);
 }
 
 function partnerPayload(array $overrides = []): array
@@ -34,7 +37,7 @@ function createPartnerRecord(array $overrides = []): Partner
 {
     return Partner::factory()->create(array_merge([
         'account_type' => AccountType::INDIVIDUAL,
-        'company_id'   => null,
+        'company_id'   => Company::query()->orderBy('id')->value('id'),
         'title_id'     => null,
         'industry_id'  => null,
     ], $overrides));

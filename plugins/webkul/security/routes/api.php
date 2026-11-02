@@ -6,7 +6,7 @@ use Webkul\Security\Http\Controllers\API\V1\DeviceController;
 
 // Authentication routes (public)
 Route::prefix('admin/api/v1')->group(function () {
-    Route::post('login', [AuthController::class, 'login']);
+    Route::post('login', [AuthController::class, 'login'])->middleware('throttle:api-login');
 });
 
 // Protected routes (require authentication)

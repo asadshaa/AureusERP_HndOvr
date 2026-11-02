@@ -26,6 +26,7 @@ use Webkul\Account\Http\Resources\V1\MoveResource;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Account\Models\Refund;
 use Webkul\Accounting\Models\Journal;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Refunds', 'Manage vendor refunds')]
@@ -47,7 +48,7 @@ class RefundController extends Controller
     {
         Gate::authorize('viewAny', Refund::class);
 
-        $refunds = QueryBuilder::for(Refund::class)
+        $refunds = QueryBuilder::for(CurrentCompany::scopeMemberships(Refund::query()))
             ->where('move_type', MoveType::IN_REFUND)
             ->allowedFilters(
                 AllowedFilter::exact('id'),
@@ -147,7 +148,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $refund = QueryBuilder::for(Refund::where('id', $id)->where('move_type', MoveType::IN_REFUND))
+        $refund = QueryBuilder::for(CurrentCompany::scopeMemberships(Refund::where('id', $id)->where('move_type', MoveType::IN_REFUND)))
             ->allowedIncludes(
                 'partner',
                 'currency',
@@ -196,7 +197,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(BillRequest $request, string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 
@@ -235,7 +236,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('delete', $refund);
 
@@ -260,7 +261,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function confirm(string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 
@@ -292,7 +293,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function cancel(string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 
@@ -316,7 +317,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function pay(MovePaymentRequest $request, string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 
@@ -386,7 +387,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function resetToDraft(string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 
@@ -416,7 +417,7 @@ class RefundController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function setAsChecked(string $id)
     {
-        $refund = Refund::where('move_type', MoveType::IN_REFUND)->findOrFail($id);
+        $refund = CurrentCompany::scopeMemberships(Refund::where('move_type', MoveType::IN_REFUND))->findOrFail($id);
 
         Gate::authorize('update', $refund);
 

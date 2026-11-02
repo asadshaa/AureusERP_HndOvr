@@ -16,6 +16,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Account\Http\Requests\VendorRequest;
 use Webkul\Account\Http\Resources\V1\PartnerResource;
 use Webkul\Account\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Vendors', 'Manage vendors/suppliers with accounting properties')]
@@ -40,7 +41,7 @@ class VendorController extends Controller
     {
         Gate::authorize('viewAny', Partner::class);
 
-        $vendors = QueryBuilder::for(Partner::class)
+        $vendors = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::query()))
             ->where('supplier_rank', '>', 0)
             ->allowedFilters(
                 AllowedFilter::exact('id'),
@@ -108,7 +109,7 @@ class VendorController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $vendor = QueryBuilder::for(Partner::where('id', $id)->where('supplier_rank', '>', 0))
+        $vendor = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::where('id', $id)->where('supplier_rank', '>', 0)))
             ->allowedIncludes(
                 'parent',
                 'country',
@@ -145,7 +146,7 @@ class VendorController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(VendorRequest $request, string $id)
     {
-        $vendor = Partner::where('supplier_rank', '>', 0)->findOrFail($id);
+        $vendor = CurrentCompany::scopeMemberships(Partner::where('supplier_rank', '>', 0))->findOrFail($id);
 
         Gate::authorize('update', $vendor);
 
@@ -162,7 +163,7 @@ class VendorController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $vendor = Partner::where('supplier_rank', '>', 0)->findOrFail($id);
+        $vendor = CurrentCompany::scopeMemberships(Partner::where('supplier_rank', '>', 0))->findOrFail($id);
 
         Gate::authorize('delete', $vendor);
 
@@ -180,7 +181,7 @@ class VendorController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $id)
     {
-        $vendor = Partner::where('supplier_rank', '>', 0)->withTrashed()->findOrFail($id);
+        $vendor = CurrentCompany::scopeMemberships(Partner::where('supplier_rank', '>', 0)->withTrashed())->findOrFail($id);
 
         Gate::authorize('restore', $vendor);
 
@@ -198,7 +199,7 @@ class VendorController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $id)
     {
-        $vendor = Partner::where('supplier_rank', '>', 0)->withTrashed()->findOrFail($id);
+        $vendor = CurrentCompany::scopeMemberships(Partner::where('supplier_rank', '>', 0)->withTrashed())->findOrFail($id);
 
         Gate::authorize('forceDelete', $vendor);
 

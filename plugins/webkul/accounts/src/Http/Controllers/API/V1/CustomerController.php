@@ -16,6 +16,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Account\Http\Requests\CustomerRequest;
 use Webkul\Account\Http\Resources\V1\PartnerResource;
 use Webkul\Account\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Customers', 'Manage customers with accounting properties')]
@@ -40,7 +41,7 @@ class CustomerController extends Controller
     {
         Gate::authorize('viewAny', Partner::class);
 
-        $customers = QueryBuilder::for(Partner::class)
+        $customers = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::query()))
             ->where('customer_rank', '>', 0)
             ->allowedFilters(
                 AllowedFilter::exact('id'),
@@ -108,7 +109,7 @@ class CustomerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $customer = QueryBuilder::for(Partner::where('id', $id)->where('customer_rank', '>', 0))
+        $customer = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::where('id', $id)->where('customer_rank', '>', 0)))
             ->allowedIncludes(
                 'parent',
                 'country',
@@ -145,7 +146,7 @@ class CustomerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(CustomerRequest $request, string $id)
     {
-        $customer = Partner::where('customer_rank', '>', 0)->findOrFail($id);
+        $customer = CurrentCompany::scopeMemberships(Partner::where('customer_rank', '>', 0))->findOrFail($id);
 
         Gate::authorize('update', $customer);
 
@@ -162,7 +163,7 @@ class CustomerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $customer = Partner::where('customer_rank', '>', 0)->findOrFail($id);
+        $customer = CurrentCompany::scopeMemberships(Partner::where('customer_rank', '>', 0))->findOrFail($id);
 
         Gate::authorize('delete', $customer);
 
@@ -180,7 +181,7 @@ class CustomerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $id)
     {
-        $customer = Partner::where('customer_rank', '>', 0)->withTrashed()->findOrFail($id);
+        $customer = CurrentCompany::scopeMemberships(Partner::where('customer_rank', '>', 0)->withTrashed())->findOrFail($id);
 
         Gate::authorize('restore', $customer);
 
@@ -198,7 +199,7 @@ class CustomerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $id)
     {
-        $customer = Partner::where('customer_rank', '>', 0)->withTrashed()->findOrFail($id);
+        $customer = CurrentCompany::scopeMemberships(Partner::where('customer_rank', '>', 0)->withTrashed())->findOrFail($id);
 
         Gate::authorize('forceDelete', $customer);
 

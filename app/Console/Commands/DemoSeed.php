@@ -10,7 +10,8 @@ use Webkul\Support\Models\Company;
 
 /**
  * Fills the demo companies (ShipLine, OpenPort) with lived-in HR data:
- * staff, attendance, leave, employee requests, documents and recruitment.
+ * staff, a geofenced workplace, attendance, leave, employee requests,
+ * documents and recruitment (--workplaces: the workplace step alone).
  * Idempotent; every row it creates is recorded in demo_records so
  * demo:purge can remove exactly that. Truck It In (a live company) is
  * never touched. Nothing is emailed and real users get no notifications.
@@ -19,7 +20,8 @@ class DemoSeed extends Command
 {
     protected $signature = 'demo:seed
         {--company=* : ShipLine and/or OpenPort (name or id); default both}
-        {--fresh-activity : Remove the demo activity created earlier (attendance, leave, requests, documents, recruitment) and create it again; staff are kept}';
+        {--fresh-activity : Remove the demo activity created earlier (attendance, leave, requests, documents, recruitment) and create it again; staff are kept}
+        {--workplaces : Only create each company\'s demo geofenced workplace and assign its staff to it (nothing else is seeded)}';
 
     protected $description = 'Seed realistic, idempotent HR demo data for the ShipLine and OpenPort demo companies';
 
@@ -35,6 +37,13 @@ class DemoSeed extends Command
         $seeder->setCommand($this);
         $seeder->companyNames = $companies;
         $seeder->freshActivity = (bool) $this->option('fresh-activity');
+        $seeder->workplacesOnly = (bool) $this->option('workplaces');
+
+        if ($seeder->freshActivity && $seeder->workplacesOnly) {
+            $this->error('--workplaces cannot be combined with --fresh-activity.');
+
+            return self::INVALID;
+        }
 
         $started = microtime(true);
         $seeder->run();

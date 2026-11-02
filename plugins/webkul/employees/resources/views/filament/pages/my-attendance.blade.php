@@ -58,6 +58,18 @@
             opacity: 0.55;
         }
 
+        .att-holiday-dot {
+            background-color: #0ea5e9;
+        }
+        .att-holiday-label {
+            background-color: rgba(14, 165, 233, 0.1);
+            color: #0369a1;
+        }
+        .dark .att-holiday-label {
+            background-color: rgba(14, 165, 233, 0.18);
+            color: #7dd3fc;
+        }
+
         .att-stat-chip {
             background-color: #f8fafc;
             border: 1px solid rgba(0, 0, 0, 0.05);
@@ -420,7 +432,7 @@
                                     <div class="att-day-cell min-h-[4.25rem] p-1.5 flex flex-col justify-between
                                         {{ $cell['isToday'] ? 'att-day-today' : '' }}
                                         {{ $cell['isWeekend'] ? 'att-day-weekend' : '' }}
-                                    ">
+                                    " @if ($cell['holidayName'] ?? null) title="Public holiday: {{ $cell['holidayName'] }}" @endif>
                                         {{-- Top row: Day Number & Status Dot --}}
                                         <div class="flex items-center justify-between">
                                             <span class="text-xs font-semibold {{ $cell['isToday'] ? 'text-primary-600 dark:text-primary-400 font-bold' : 'text-gray-800 dark:text-gray-200' }}">
@@ -441,6 +453,8 @@
                                                 <span class="h-2 w-2 rounded-full bg-orange-500"></span>
                                             @elseif ($cell['status'] === 'absent')
                                                 <span class="h-2 w-2 rounded-full bg-rose-500"></span>
+                                            @elseif ($cell['status'] === 'holiday')
+                                                <span class="att-holiday-dot h-2 w-2 rounded-full"></span>
                                             @endif
                                         </div>
 
@@ -454,6 +468,7 @@
                                                 {{ $cell['status'] === 'needs_review' ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300' : '' }}
                                                 {{ $cell['status'] === 'absent' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : '' }}
                                                 {{ $cell['status'] === 'weekend' ? 'text-gray-400 dark:text-gray-500' : '' }}
+                                                {{ $cell['status'] === 'holiday' ? 'att-holiday-label' : '' }}
                                             ">
                                                 {{ $cell['label'] }}
                                             </div>

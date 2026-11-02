@@ -17,6 +17,7 @@ use Webkul\Partner\Enums\AccountType;
 use Webkul\Partner\Http\Requests\PartnerRequest;
 use Webkul\Partner\Http\Resources\V1\PartnerResource;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Partner API Management')]
 #[Subgroup('Partners', 'Manage partners (customers, suppliers, contacts)')]
@@ -46,7 +47,7 @@ class PartnerController extends Controller
     {
         Gate::authorize('viewAny', Partner::class);
 
-        $partners = QueryBuilder::for(Partner::class)
+        $partners = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::query()))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::exact('account_type'),
@@ -106,7 +107,7 @@ class PartnerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $partner = QueryBuilder::for(Partner::where('id', $id))
+        $partner = QueryBuilder::for(CurrentCompany::scopeMemberships(Partner::where('id', $id)))
             ->allowedIncludes(
                 'parent',
                 'country',
@@ -136,7 +137,7 @@ class PartnerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(PartnerRequest $request, string $id)
     {
-        $partner = Partner::findOrFail($id);
+        $partner = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($id);
 
         Gate::authorize('update', $partner);
 
@@ -153,7 +154,7 @@ class PartnerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $partner = Partner::findOrFail($id);
+        $partner = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($id);
 
         Gate::authorize('delete', $partner);
 
@@ -169,7 +170,7 @@ class PartnerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $id)
     {
-        $partner = Partner::onlyTrashed()->findOrFail($id);
+        $partner = CurrentCompany::scopeMemberships(Partner::onlyTrashed())->findOrFail($id);
 
         Gate::authorize('restore', $partner);
 
@@ -185,7 +186,7 @@ class PartnerController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $id)
     {
-        $partner = Partner::withTrashed()->findOrFail($id);
+        $partner = CurrentCompany::scopeMemberships(Partner::withTrashed())->findOrFail($id);
 
         Gate::authorize('forceDelete', $partner);
 

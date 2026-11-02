@@ -25,6 +25,7 @@ class AuthController extends Controller
     #[Response(status: 200, description: 'Login successful', content: '{"message": "Login successful", "token": "1|abcd1234efgh5678ijkl...", "token_type": "Bearer", "user": {"id": 1, "name": "Admin User", "email": "admin@example.com"}}')]
     #[Response(status: 422, description: 'Validation error', content: '{"message": "The given data was invalid.", "errors": {"email": ["The email field is required."], "password": ["The password field is required."]}}')]
     #[Response(status: 401, description: 'Invalid credentials', content: '{"message": "The provided credentials are incorrect."}')]
+    #[Response(status: 429, description: 'Too many login attempts', content: '{"message": "Too Many Attempts."}')]
     public function login(Request $request)
     {
         $request->validate([
@@ -34,7 +35,9 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        if (! $user || ! Hash::check($request->password, $user->password)) {
+        // A deactivated account gets the same answer as a wrong password, so
+        // the response never reveals which accounts exist or are disabled.
+        if (! $user || ! Hash::check($request->password, $user->password) || ! $user->is_active) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);

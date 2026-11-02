@@ -18,6 +18,7 @@ use Webkul\Partner\Enums\AddressType;
 use Webkul\Partner\Http\Requests\AddressRequest;
 use Webkul\Partner\Http\Resources\V1\AddressResource;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Partner API Management')]
 #[Subgroup('Addresses', 'Manage partner addresses')]
@@ -40,7 +41,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function index(string $partner)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('view', $partnerModel);
 
@@ -70,7 +71,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function store(AddressRequest $request, string $partner)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -95,7 +96,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $partner, string $address)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('view', $partnerModel);
 
@@ -121,7 +122,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(AddressRequest $request, string $partner, string $address)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -144,7 +145,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $partner, string $address)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -168,7 +169,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $partner, string $address)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 
@@ -193,7 +194,7 @@ class AddressController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $partner, string $address)
     {
-        $partnerModel = Partner::findOrFail($partner);
+        $partnerModel = CurrentCompany::scopeMemberships(Partner::query())->findOrFail($partner);
 
         Gate::authorize('update', $partnerModel);
 

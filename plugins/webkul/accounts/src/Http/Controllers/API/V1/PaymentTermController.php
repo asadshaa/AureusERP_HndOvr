@@ -16,6 +16,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Account\Http\Requests\PaymentTermRequest;
 use Webkul\Account\Http\Resources\V1\PaymentTermResource;
 use Webkul\Account\Models\PaymentTerm;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Payment Terms', 'Manage payment terms')]
@@ -36,7 +37,7 @@ class PaymentTermController extends Controller
     {
         Gate::authorize('viewAny', PaymentTerm::class);
 
-        $paymentTerms = QueryBuilder::for(PaymentTerm::class)
+        $paymentTerms = QueryBuilder::for(CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -80,7 +81,7 @@ class PaymentTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $paymentTerm = QueryBuilder::for(PaymentTerm::where('id', $id))
+        $paymentTerm = QueryBuilder::for(CurrentCompany::scopeMemberships(PaymentTerm::where('id', $id), includeShared: true))
             ->allowedIncludes(
                 'company',
                 'creator',
@@ -101,7 +102,7 @@ class PaymentTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(PaymentTermRequest $request, string $id)
     {
-        $paymentTerm = PaymentTerm::findOrFail($id);
+        $paymentTerm = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('update', $paymentTerm);
 
@@ -118,7 +119,7 @@ class PaymentTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $paymentTerm = PaymentTerm::findOrFail($id);
+        $paymentTerm = CurrentCompany::scopeMemberships(PaymentTerm::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('delete', $paymentTerm);
 
@@ -136,7 +137,7 @@ class PaymentTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $id)
     {
-        $paymentTerm = PaymentTerm::withTrashed()->findOrFail($id);
+        $paymentTerm = CurrentCompany::scopeMemberships(PaymentTerm::withTrashed(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('restore', $paymentTerm);
 
@@ -153,7 +154,7 @@ class PaymentTermController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $id)
     {
-        $paymentTerm = PaymentTerm::withTrashed()->findOrFail($id);
+        $paymentTerm = CurrentCompany::scopeMemberships(PaymentTerm::withTrashed(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('forceDelete', $paymentTerm);
 

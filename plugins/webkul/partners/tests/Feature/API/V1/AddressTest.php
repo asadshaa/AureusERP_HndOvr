@@ -3,6 +3,8 @@
 use Webkul\Partner\Enums\AccountType;
 use Webkul\Partner\Enums\AddressType;
 use Webkul\Partner\Models\Partner;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Models\Company;
 
 require_once __DIR__.'/../../../../../support/tests/Helpers/SecurityHelper.php';
 require_once __DIR__.'/../../../../../support/tests/Helpers/TestBootstrapHelper.php';
@@ -16,14 +18,15 @@ afterEach(fn () => SecurityHelper::restoreUserEvents());
 
 function actingAsAddressApiUser(array $permissions = []): void
 {
-    SecurityHelper::authenticateWithPermissions($permissions);
+    // A group owner belongs to every company, so the company-scoped API finds the factory records.
+    SecurityHelper::authenticateWithPermissions([...$permissions, CurrentCompany::MANAGE_MEMBERSHIPS]);
 }
 
 function createParentPartner(): Partner
 {
     return Partner::factory()->create([
         'account_type' => AccountType::INDIVIDUAL,
-        'company_id'   => null,
+        'company_id'   => Company::query()->orderBy('id')->value('id'),
         'title_id'     => null,
         'industry_id'  => null,
     ]);
@@ -35,7 +38,7 @@ function createAddressRecord(Partner $partner, array $overrides = []): Partner
         'account_type' => AccountType::ADDRESS,
         'sub_type'     => AddressType::INVOICE,
         'parent_id'    => $partner->id,
-        'company_id'   => null,
+        'company_id'   => Company::query()->orderBy('id')->value('id'),
         'title_id'     => null,
         'industry_id'  => null,
     ], $overrides));

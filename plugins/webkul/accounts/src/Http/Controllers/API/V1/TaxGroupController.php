@@ -16,6 +16,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Account\Http\Requests\TaxGroupRequest;
 use Webkul\Account\Http\Resources\V1\TaxGroupResource;
 use Webkul\Account\Models\TaxGroup;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Tax Groups', 'Manage tax groups')]
@@ -36,7 +37,7 @@ class TaxGroupController extends Controller
     {
         Gate::authorize('viewAny', TaxGroup::class);
 
-        $taxGroups = QueryBuilder::for(TaxGroup::class)
+        $taxGroups = QueryBuilder::for(CurrentCompany::scopeMemberships(TaxGroup::query(), includeShared: true))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -80,7 +81,7 @@ class TaxGroupController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $taxGroup = QueryBuilder::for(TaxGroup::where('id', $id))
+        $taxGroup = QueryBuilder::for(CurrentCompany::scopeMemberships(TaxGroup::where('id', $id), includeShared: true))
             ->allowedIncludes(
                 'company',
                 'country',
@@ -101,7 +102,7 @@ class TaxGroupController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(TaxGroupRequest $request, string $id)
     {
-        $taxGroup = TaxGroup::findOrFail($id);
+        $taxGroup = CurrentCompany::scopeMemberships(TaxGroup::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('update', $taxGroup);
 
@@ -118,7 +119,7 @@ class TaxGroupController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $taxGroup = TaxGroup::findOrFail($id);
+        $taxGroup = CurrentCompany::scopeMemberships(TaxGroup::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('delete', $taxGroup);
 

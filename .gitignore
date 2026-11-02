@@ -50,6 +50,9 @@ Thumbs.db
 # Credential files (keystores, private keys, etc.)
 /credentials/
 
+# Local handover notes with real user logins and passwords (never commit)
+/CLAUDE_HANDOVER_ATTENDANCE.md
+
 # Local scratch/backup staging area (not part of the application)
 /_stage/
 

@@ -918,7 +918,10 @@ class Move extends Model implements Sortable
             return in_array($line->account?->account_type, [AccountType::ASSET_RECEIVABLE, AccountType::LIABILITY_PAYABLE]);
         });
 
+        // Accounts and partners can be shared by several companies; only this
+        // invoice's company's open items can settle it.
         $outstandingLines = MoveLine::whereIn('account_id', $paymentTermLines->pluck('account_id'))
+            ->where('company_id', $this->company_id)
             ->where('parent_state', MoveState::POSTED)
             ->where('partner_id', $this->commercial_partner_id)
             ->where('reconciled', false)

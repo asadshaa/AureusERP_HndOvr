@@ -42,14 +42,46 @@ docker compose exec app php artisan hr:sync-permissions
 docker compose exec app php artisan erp:doctor
 ```
 
-The root seeder contains only security, support/reference, plugin-state, and
-permission configuration. It does not create local companies, journals,
-transactions, imported files, or demo business records. Never seed after
-restoring an existing production database.
+`php artisan db:seed` (`Database\Seeders\DatabaseSeeder`) creates or ensures,
+in this order:
 
-Create the first company and administrator through the normal installation or
-onboarding workflow. Until then, `php artisan erp:doctor` will correctly report
-that no company or login user exists.
+- reference data: currencies, countries, states, units of measure;
+- plugin state, admin-panel permissions, the `Admin` role (all permissions),
+  and the finance and HR roles;
+- per existing company: leave types and leave, attendance, recruitment,
+  job-opening, claims and sensitive-change approval workflows, and starter
+  screening questions;
+- the three group companies (`LogisticsCompanyAndProductSeeder`):
+  - company #1, Truck It In (Pvt) Ltd. Its name, NTN, STRN, address and
+    contact details are written only when there is no company yet or company
+    #1 still has the installer's placeholder name (`Default Company` or
+    `DummyCorp LLC`). On an existing database only blank fields are filled
+    in; existing values are never overwritten;
+  - ShipLine and OpenPort (Pakistan, PKR), created only if missing;
+  - per company: enabled currencies, the INV, BILL, BANK, CASH and MISC
+    journals (created only if missing), a tax group with sales and input
+    taxes, and the freight and procurement product catalogue with its
+    categories and taxes. Note: on a re-run the seeded taxes and catalogue
+    products are reset to the seeded rates, prices, accounts and tax links.
+
+It does not create users, employees, transactions, imported files or demo
+records, and it never changes which companies users belong to. The only
+membership it adds is the initial administrator (the `is_default` user from
+`erp:install`, otherwise the first user) to the three seeded companies.
+Everyone else is given access per user with
+`php artisan erp:company-access <email> --companies=... --default=...` or on
+the Users screen.
+
+Every step is idempotent, so `db:seed` can be re-run. On a brand-new database
+run it a second time after the first company and administrator exist: the
+per-company workflows only cover companies that existed when they ran, and the
+administrator is only added to the companies once that user exists. Do not
+seed after restoring an existing production database unless you have checked
+what the seeders will add to it.
+
+Create the first administrator through the normal installation or onboarding
+workflow. Until then, `php artisan erp:doctor` will correctly report that no
+login user exists.
 
 The application is available at `APP_URL` in `.env`, which the setup script sets
 to `http://localhost:8080` only when the template value is still unchanged.
@@ -152,6 +184,17 @@ volume as a rollback checkpoint.
 - An external managed database requires an environment-specific Compose override
   that removes the bundled `mysql` dependency and supplies the external DB host;
   do not edit production data volumes in place.
+
+## Queue worker timeout
+
+The `queue` service runs `queue:work --timeout=300`, so a job may run for up to
+five minutes. The queue connection's `retry_after` (config/queue.php,
+`DB_QUEUE_RETRY_AFTER`, default 360 seconds) must stay longer than that
+timeout. Otherwise a job that is still running is handed to a second worker
+and runs twice. If you raise `--timeout`, raise `DB_QUEUE_RETRY_AFTER` in
+`.env` to a value at least a minute above it (the Redis and Beanstalkd
+connections use `REDIS_QUEUE_RETRY_AFTER` and `BEANSTALKD_QUEUE_RETRY_AFTER`,
+also 360 by default).
 
 ## Health and troubleshooting
 

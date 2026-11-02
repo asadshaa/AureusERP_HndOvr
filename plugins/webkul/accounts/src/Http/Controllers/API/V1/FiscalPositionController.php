@@ -17,6 +17,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Account\Http\Requests\FiscalPositionRequest;
 use Webkul\Account\Http\Resources\V1\FiscalPositionResource;
 use Webkul\Account\Models\FiscalPosition;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
 #[Subgroup('Fiscal Positions', 'Manage fiscal positions')]
@@ -38,7 +39,7 @@ class FiscalPositionController extends Controller
     {
         Gate::authorize('viewAny', FiscalPosition::class);
 
-        $fiscalPositions = QueryBuilder::for(FiscalPosition::class)
+        $fiscalPositions = QueryBuilder::for(CurrentCompany::scopeMemberships(FiscalPosition::query()))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -108,7 +109,7 @@ class FiscalPositionController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $fiscalPosition = QueryBuilder::for(FiscalPosition::where('id', $id))
+        $fiscalPosition = QueryBuilder::for(CurrentCompany::scopeMemberships(FiscalPosition::where('id', $id)))
             ->allowedIncludes(
                 'company',
                 'country',
@@ -132,7 +133,7 @@ class FiscalPositionController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(FiscalPositionRequest $request, string $id)
     {
-        $fiscalPosition = FiscalPosition::findOrFail($id);
+        $fiscalPosition = CurrentCompany::scopeMemberships(FiscalPosition::query())->findOrFail($id);
 
         Gate::authorize('update', $fiscalPosition);
 
@@ -165,7 +166,7 @@ class FiscalPositionController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $fiscalPosition = FiscalPosition::findOrFail($id);
+        $fiscalPosition = CurrentCompany::scopeMemberships(FiscalPosition::query())->findOrFail($id);
 
         Gate::authorize('delete', $fiscalPosition);
 
