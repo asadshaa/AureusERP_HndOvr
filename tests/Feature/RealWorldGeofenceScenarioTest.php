@@ -68,7 +68,7 @@ it('detects a rooted phone reporting suspiciously tight 0.5m accuracy and flags 
         ->call('checkIn', $payload)
         ->assertSet('outcome.ok', true)
         ->assertSet('outcome.result', 'needs_review')
-        ->assertSee('Checked in at 05:00 AM')
+        ->assertSee('Checked in at 10:00 AM') // Asia/Karachi: the profile has no timezone of its own
         ->assertSee('could not be confirmed precisely, so HR may review it');
 
     $record = AttendanceRecord::query()

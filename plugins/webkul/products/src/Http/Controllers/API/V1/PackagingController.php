@@ -16,6 +16,7 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Webkul\Product\Http\Requests\PackagingRequest;
 use Webkul\Product\Http\Resources\V1\PackagingResource;
 use Webkul\Product\Models\Packaging;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Product API Management')]
 #[Subgroup('Packaging', 'Manage product packaging')]
@@ -35,7 +36,7 @@ class PackagingController extends Controller
     {
         Gate::authorize('viewAny', Packaging::class);
 
-        $packagings = QueryBuilder::for(Packaging::class)
+        $packagings = QueryBuilder::for(CurrentCompany::scopeMemberships(Packaging::query(), includeShared: true))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::partial('name'),
@@ -76,7 +77,7 @@ class PackagingController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $packaging = QueryBuilder::for(Packaging::where('id', $id))
+        $packaging = QueryBuilder::for(CurrentCompany::scopeMemberships(Packaging::where('id', $id), includeShared: true))
             ->allowedIncludes(
                 'product',
                 'creator',
@@ -97,7 +98,7 @@ class PackagingController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(PackagingRequest $request, string $id)
     {
-        $packaging = Packaging::findOrFail($id);
+        $packaging = CurrentCompany::scopeMemberships(Packaging::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('update', $packaging);
 
@@ -114,7 +115,7 @@ class PackagingController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $packaging = Packaging::findOrFail($id);
+        $packaging = CurrentCompany::scopeMemberships(Packaging::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('delete', $packaging);
 

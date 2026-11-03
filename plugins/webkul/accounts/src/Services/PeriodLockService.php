@@ -30,11 +30,20 @@ class PeriodLockService
     /**
      * Throws if $date falls on or before the company's current lock date.
      * Every direct posting chokepoint (confirmMove, BankJournalService::post,
-     * ManualAdjustmentService::post, MigrationJournalService::createJournal)
-     * must call this before writing state=posted -- there is no single
-     * shared low-level "write posted" function these all funnel through.
+     * ManualAdjustmentService::post, ImportExecutionService's opening-balance
+     * import and MigrationJournalService::createJournal) must call this
+     * before writing state=posted -- there is no single shared low-level
+     * "write posted" function these all funnel through. Taking a posted
+     * entry back out of the ledger (AccountManager::resetToDraftMove) is
+     * guarded the same way, with $action naming what was refused.
+     *
+     * MigrationJournalService is the one caller with an explicit override:
+     * its createForBatch() accepts overridePeriodLock for the initial,
+     * admin-run historical migration, which by design writes balances that
+     * predate any lock. Without that flag it asserts the lock like everyone
+     * else.
      */
-    public function assertNotLocked(int $companyId, CarbonInterface|string|null $date): void
+    public function assertNotLocked(int $companyId, CarbonInterface|string|null $date, string $action = 'post'): void
     {
         $lockedThrough = $this->lockedThrough($companyId);
         if (! $lockedThrough || $date === null) {
@@ -45,7 +54,7 @@ class PeriodLockService
 
         if ($date->lte($lockedThrough)) {
             throw new RuntimeException(
-                "Cannot post: {$date->toDateString()} falls in a closed accounting period (locked through {$lockedThrough->toDateString()}). Ask whoever manages period locks to reopen it if this entry genuinely needs to land there."
+                "Cannot {$action}: {$date->toDateString()} falls in a closed accounting period (locked through {$lockedThrough->toDateString()}). Ask whoever manages period locks to reopen it if this entry genuinely needs to land there."
             );
         }
     }

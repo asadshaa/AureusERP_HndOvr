@@ -26,7 +26,9 @@ use Webkul\Accounting\Models\DriveIngestionClassification;
 use Webkul\Accounting\Models\FsTag;
 use Webkul\Accounting\Services\DocumentService;
 use Webkul\Accounting\Services\FsTagService;
+use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\ApprovalRequest;
 use Webkul\Support\Models\Currency;
 
@@ -168,15 +170,29 @@ class DriveInvoicePostingService
         }
     }
 
+    /**
+     * Direct "Post to GL" (no approval workflow in between): the acting user
+     * must hold the same Post Journal permission every other posting action
+     * requires, and belong to the classification's company. Checked here,
+     * not only through the Filament action's authorize(), so no caller can
+     * post on someone else's behalf. The approval-workflow path
+     * (handleDecision) is authorized by the workflow's own approvers.
+     */
     public function postClassification(DriveIngestionClassification $classification, ?User $actor = null): Move
     {
         if ($classification->created_invoice_id !== null) {
             return Move::findOrFail($classification->created_invoice_id);
         }
 
-        $actor = $actor
-            ?? Auth::user()
-            ?? User::query()->where('default_company_id', $classification->company_id)->first();
+        $actor ??= Auth::user();
+
+        if (! $actor instanceof User || ! $actor->can(AccountingPermissions::PostJournal)) {
+            throw new RuntimeException('Posting a Drive document to the General Ledger requires the Post Journal permission.');
+        }
+
+        if (! CurrentCompany::canAccess((int) $classification->company_id, $actor)) {
+            throw new RuntimeException('You do not belong to the company this Drive document was ingested for.');
+        }
 
         return DB::transaction(function () use ($classification, $actor): Move {
             $locked = DriveIngestionClassification::query()
@@ -283,6 +299,14 @@ class DriveInvoicePostingService
         // (throwing, reverting state to DRAFT) if the result isn't
         // balanced -- no hand-rolled debit/credit balancing here.
         $move = AccountFacade::confirmMove($move->fresh('lines'));
+
+        // confirmMove() records the authenticated user, which is not
+        // necessarily who posted this: the explicit actor of a direct post,
+        // or the approver whose decision completed the workflow.
+        $postedBy = $actor ?? $request?->decisions()->latest('id')->first()?->actor;
+        if ($postedBy && (int) $move->posted_by_id !== (int) $postedBy->id) {
+            Move::query()->whereKey($move->id)->update(['posted_by_id' => $postedBy->id]);
+        }
 
         // Belt-and-braces on top of confirmMove()'s own balance check: it
         // already guarantees this or throws, but assert it explicitly

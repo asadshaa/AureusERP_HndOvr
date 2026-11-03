@@ -36,16 +36,23 @@ final class ReportColumnSpec
 
     /**
      * The context this column's values are computed under. An entity override
-     * narrows the scope to that entity; a consolidated column (and a plain
-     * column) uses the full run scope.
+     * narrows the scope to that entity — but only within the companies the
+     * viewer is authorised for; null means the column is not available to
+     * this viewer and must never carry figures. A consolidated column (and a
+     * plain column) uses the full run scope.
      */
-    public function contextFor(ReportContext $base): ReportContext
+    public function contextFor(ReportContext $base): ?ReportContext
     {
         if ($this->companyIds !== null && $this->companyIds !== []) {
-            return ReportContext::forCompanies($this->companyIds, $base->postedOnly, $base->originalCurrencyId);
+            return $base->narrowTo($this->companyIds);
         }
 
         return $base;
+    }
+
+    public function isAvailableIn(ReportContext $base): bool
+    {
+        return $this->isSpacer() || $this->contextFor($base) !== null;
     }
 
     public function toArray(): array

@@ -95,7 +95,12 @@ class ReportSpreadsheetExport implements FromArray, WithColumnWidths, WithEvents
 
                 $value = $row->valueFor($column->key);
 
-                $cells[] = $value !== null && abs($value) >= 0.005 ? round($value, 2) : 0;
+                // null = an entity the viewer cannot access: never a figure.
+                $cells[] = match (true) {
+                    $value === null        => __('accounting::filament/clusters/reporting/pages/financial-reports.content.not-available'),
+                    abs($value) >= 0.005   => round($value, 2),
+                    default                => 0,
+                };
             }
 
             $grid[] = $cells;

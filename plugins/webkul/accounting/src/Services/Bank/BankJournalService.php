@@ -174,6 +174,11 @@ class BankJournalService
                 // Drop the "Draft " prefix the entry was created with, so a
                 // posted entry is not labelled as a draft in the ledger.
                 'name'          => $mapping->map_reference,
+                // Same posting audit trail confirmMove() and
+                // ManualAdjustmentService::post() record.
+                'posted_by_id'  => $reviewer->id,
+                'posted_at'     => now(),
+                'posted_before' => true,
                 'updated_at'    => now(),
             ]);
             DB::table('accounts_account_move_lines')->where('move_id', $move->id)->update([
@@ -279,7 +284,12 @@ class BankJournalService
             return;
         }
 
+        // Only this company's payments decide whether an account is one of
+        // its clearing accounts and on which side it rests: accounts are
+        // shared between companies, and another company's payments say
+        // nothing about this company's balance (which is also scoped below).
         $expectedSides = DB::table('accounts_account_payments')
+            ->where('company_id', $move->company_id)
             ->whereIn('outstanding_account_id', $clearingAccountIds)
             ->whereNotNull('outstanding_account_id')
             ->select('outstanding_account_id', 'payment_type')
@@ -287,6 +297,25 @@ class BankJournalService
             ->get()
             ->groupBy('outstanding_account_id')
             ->map(fn ($rows) => $rows->pluck('payment_type')->unique());
+
+        $guardedAccountIds = $expectedSides
+            ->filter(fn ($sides) => $sides->count() === 1)
+            ->keys()
+            ->map(fn ($id): int => (int) $id)
+            ->sort()
+            ->values();
+
+        if ($guardedAccountIds->isEmpty()) {
+            return;
+        }
+
+        // Serialize concurrent postings against the same clearing account:
+        // without this, two transactions can each read the same pre-posting
+        // balance, both pass, and together overdraw it. The account rows are
+        // locked in id order (deadlock-safe) for the rest of post()'s
+        // transaction, and the balance below is a locking read so it sees
+        // what a transaction that held the lock before us committed.
+        DB::table('accounts_accounts')->whereIn('id', $guardedAccountIds)->orderBy('id')->lockForUpdate()->pluck('id');
 
         foreach ($lines as $line) {
             $sides = $expectedSides->get($line->account_id);
@@ -307,6 +336,7 @@ class BankJournalService
                 ->where('accounts_account_moves.company_id', $move->company_id)
                 ->where('accounts_account_move_lines.account_id', $line->account_id)
                 ->selectRaw('COALESCE(SUM(accounts_account_move_lines.debit), 0) - COALESCE(SUM(accounts_account_move_lines.credit), 0) as balance')
+                ->sharedLock()
                 ->value('balance');
 
             $newBalance = BigDecimal::of((string) ($currentBalance ?? '0'))

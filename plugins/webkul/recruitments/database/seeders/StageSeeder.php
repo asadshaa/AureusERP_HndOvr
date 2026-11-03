@@ -10,10 +10,14 @@ use Webkul\Security\Models\User;
 
 class StageSeeder extends Seeder
 {
+    /**
+     * Idempotent and non-destructive: adds the default shared pipeline stages
+     * that are missing (matched by name among shared stages) and links jobs
+     * without a stage to the default one. Existing stages, applications and
+     * company-specific pipelines are never deleted or changed.
+     */
     public function run(): void
     {
-        DB::table('recruitments_stages')->delete();
-
         $user = User::first();
 
         $recruitmentStages = [
@@ -102,20 +106,34 @@ class StageSeeder extends Seeder
             ],
         ];
 
-        DB::table('recruitments_stages')->insert($recruitmentStages);
+        $existing = DB::table('recruitments_stages')->whereNull('company_id')->pluck('name')->map(fn ($name): string => mb_strtolower(trim((string) $name)))->all();
+        $missing = array_values(array_filter($recruitmentStages, fn (array $stage): bool => ! in_array(mb_strtolower($stage['name']), $existing, true)));
 
-        $jobs = EmployeeJobPosition::all();
-        $stage = Stage::first();
-
-        $recruitmentStagesJobs = [];
-
-        foreach ($jobs as $job) {
-            $recruitmentStagesJobs[] = [
-                'stage_id' => $stage->id,
-                'job_id'   => $job->id,
-            ];
+        if ($missing !== [] && DB::table('recruitments_stages')->whereNull('company_id')->where('is_default', true)->exists()) {
+            // Keep the existing default stage the only shared default.
+            $missing = array_map(fn (array $stage): array => ['is_default' => 0] + $stage, $missing);
         }
 
-        DB::table('recruitments_stages_jobs')->insert($recruitmentStagesJobs);
+        if ($missing !== []) {
+            DB::table('recruitments_stages')->insert($missing);
+        }
+
+        $stage = Stage::defaultFor(null);
+
+        if (! $stage) {
+            return;
+        }
+
+        $linked = DB::table('recruitments_stages_jobs')->pluck('job_id')->all();
+
+        $recruitmentStagesJobs = EmployeeJobPosition::query()
+            ->whereNotIn('id', $linked)
+            ->pluck('id')
+            ->map(fn ($jobId): array => ['stage_id' => $stage->id, 'job_id' => $jobId])
+            ->all();
+
+        if ($recruitmentStagesJobs !== []) {
+            DB::table('recruitments_stages_jobs')->insert($recruitmentStagesJobs);
+        }
     }
 }

@@ -9,7 +9,7 @@
         <div class="message-content">
             <p>{!! __('recruitments::mails/applicant-not-interested.greeting') !!}</p>
             <p>{!! __('recruitments::mails/applicant-not-interested.thank-you-message', [
-                'company' => $payload['from']['company']['name']
+                'company' => e($payload['from']['company']['name'] ?? '')
             ]) !!}</p>
             <p>{!! __('recruitments::mails/applicant-not-interested.future-endeavors') !!}</p>
             <p>{!! __('recruitments::mails/applicant-not-interested.mistakes-note') !!}</p>
@@ -17,10 +17,10 @@
             <p>{!! __('recruitments::mails/applicant-not-interested.best-regards') !!}</p>
             <div class="admin-details">
                 <p><strong>{!! __('recruitments::mails/applicant-not-interested.admin-details.name', [
-                    'name' => $payload['from']['name']
+                    'name' => e($payload['from']['name'] ?? '')
                 ]) !!}</strong></p>
                 <p>{!! __('recruitments::mails/applicant-not-interested.admin-details.email', [
-                    'email' => $payload['from']['address']
+                    'email' => e($payload['from']['address'] ?? '')
                 ]) !!}</p>
             </div>
         </div>

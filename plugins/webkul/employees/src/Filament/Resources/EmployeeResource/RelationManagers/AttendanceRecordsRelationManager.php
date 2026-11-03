@@ -19,6 +19,7 @@ use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\AttendanceVerification;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Support\HrPermissions;
+use Webkul\Support\Models\CalendarLeave;
 
 class AttendanceRecordsRelationManager extends RelationManager
 {
@@ -66,11 +67,27 @@ class AttendanceRecordsRelationManager extends RelationManager
         $endOfMonth = $target->copy()->endOfMonth()->toDateString();
         $monthLabel = $target->format('F Y');
 
+        // Working days follow the employee's own schedule (override > roster > work schedule >
+        // calendar > company default) minus public holidays, as in the monthly report.
+        $resolver = app(AttendanceScheduleResolver::class);
+        $schedules = $resolver->setsFor([$employee], $startOfMonth, $endOfMonth)[(int) $employee->id] ?? [];
+        $calendarId = $employee->calendar_id ? (int) $employee->calendar_id : null;
+        $holidays = CalendarLeave::query()
+            ->where(fn (Builder $query) => $query->where('time_type', 'leave')->orWhereNull('time_type'))
+            ->where(fn (Builder $query) => $query->where('company_id', $employee->company_id)->orWhereNull('company_id'))
+            ->where(fn (Builder $query) => $query->whereNull('calendar_id')->when($calendarId, fn (Builder $inner) => $inner->orWhere('calendar_id', $calendarId)))
+            ->whereDate('date_from', '<=', $endOfMonth)
+            ->whereDate('date_to', '>=', $startOfMonth)
+            ->get(['date_from', 'date_to']);
+        $isWorkingDay = fn (string $date): bool => $resolver->pick($schedules, $date)->isWorkingDay($date)
+            && ! $holidays->contains(fn (CalendarLeave $holiday): bool => Carbon::parse($holiday->date_from)->toDateString() <= $date
+                && Carbon::parse($holiday->date_to)->toDateString() >= $date);
+
         $records = $employee->attendanceRecords()
             ->where('company_id', $employee->company_id)
             ->whereBetween('attendance_date', [$startOfMonth, $endOfMonth])
             ->get()
-            ->reject(fn ($r): bool => $r->attendance_date ? Carbon::parse($r->attendance_date)->isWeekend() : false);
+            ->filter(fn ($r): bool => $r->attendance_date !== null && $isWorkingDay(Carbon::parse($r->attendance_date)->toDateString()));
 
         // A remote working day is an attended day.
         $remote = $records->where('status', 'remote')->count();
@@ -83,12 +100,12 @@ class AttendanceRecordsRelationManager extends RelationManager
         $workedHours = (float) $records->sum('worked_hours');
         $overtimeHours = (float) $records->sum('overtime_hours');
 
-        // Total working days in this month (Monday - Friday)
+        // Working days in this month: the schedule's working days that are not public holidays.
         $workingDays = 0;
         $day = $target->copy()->startOfMonth();
         $end = $target->copy()->endOfMonth();
         while ($day->lte($end)) {
-            if (! $day->isWeekend()) {
+            if ($isWorkingDay($day->toDateString())) {
                 $workingDays++;
             }
             $day->addDay();
@@ -143,13 +160,13 @@ class AttendanceRecordsRelationManager extends RelationManager
                             $months->prepend($current);
                         }
 
-                        return $months->mapWithKeys(fn (string $ym): array => [$ym => Carbon::createFromFormat('Y-m', $ym)->format('F Y')])->all();
+                        // '!Y-m' anchors on the 1st: plain 'Y-m' borrows today's day and overflows on the 29th-31st.
+                        return $months->mapWithKeys(fn (string $ym): array => [$ym => Carbon::createFromFormat('!Y-m', $ym)->format('F Y')])->all();
                     })
                     ->query(function (Builder $query, array $data): void {
-                        if (! empty($data['value'])) {
-                            $start = Carbon::createFromFormat('Y-m', $data['value'])->startOfMonth()->toDateString();
-                            $end = Carbon::createFromFormat('Y-m', $data['value'])->endOfMonth()->toDateString();
-                            $query->whereBetween('attendance_date', [$start, $end]);
+                        if (! empty($data['value']) && preg_match('/^\d{4}-\d{2}$/', (string) $data['value'])) {
+                            $month = Carbon::createFromFormat('!Y-m', (string) $data['value']);
+                            $query->whereBetween('attendance_date', [$month->copy()->startOfMonth()->toDateString(), $month->copy()->endOfMonth()->toDateString()]);
                         }
                     }),
                 SelectFilter::make('status')->options([

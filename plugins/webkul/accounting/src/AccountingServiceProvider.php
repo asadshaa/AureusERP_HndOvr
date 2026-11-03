@@ -37,6 +37,7 @@ use Webkul\Accounting\Services\Bank\CommonWorkbookBankStatementParser;
 use Webkul\Accounting\Services\Bank\HblBankStatementParser;
 use Webkul\Accounting\Services\Bank\MeezanBankStatementParser;
 use Webkul\Accounting\Services\Drive\GoogleDriveClient;
+use Webkul\Accounting\Services\LedgerVersion;
 use Webkul\Accounting\Services\MeasureResolverRegistry;
 use Webkul\Accounting\Services\Peers\JsonV1InvoicePayloadFormatter;
 use Webkul\Accounting\Services\ReportValueProviderRegistry;
@@ -112,6 +113,7 @@ class AccountingServiceProvider extends PackageServiceProvider
                 '2026_09_17_000001_create_accounting_drive_ingestions_table',
                 '2026_09_18_000001_create_accounting_drive_ingestion_classifications_table',
                 '2026_09_19_000001_add_invoice_posting_fields_to_drive_ingestion_classifications_table',
+                '2026_11_02_500031_add_reconciliation_override_to_accounts_bank_statements_table',
             ])
             ->runsMigrations()
             ->hasSeeders([
@@ -147,6 +149,21 @@ class AccountingServiceProvider extends PackageServiceProvider
         $this->registerDocumentAttachmentRelations();
 
         $this->registerDriveSyncListener();
+
+        $this->registerLedgerVersionListener();
+    }
+
+    /**
+     * Rotate the report-cache ledger version whenever a Move or MoveLine (or
+     * any subclass) is saved or deleted through Eloquent. Wildcard listeners
+     * catch the subclasses, whose model events carry their own class name.
+     */
+    private function registerLedgerVersionListener(): void
+    {
+        Event::listen(
+            ['eloquent.saved: *', 'eloquent.deleted: *'],
+            fn (string $event, array $payload) => LedgerVersion::handleModelEvent($event, $payload),
+        );
     }
 
     /**

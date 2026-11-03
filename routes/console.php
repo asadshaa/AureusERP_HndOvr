@@ -89,8 +89,18 @@ if (config('accounting_drive.enabled')) {
 | verifications older than evidence_retention_days, keeping the result,
 | distance and review trail.
 |
+| hr:auto-complete-shifts closes open GPS shifts at their scheduled end only
+| when hr_attendance_geofence.auto_close_policy is "scheduled_end" (each one
+| marked needs-review, never verified). With the default policy "none" it
+| writes nothing and exits, so scheduling it is safe everywhere.
+|
 */
 Schedule::command('hr:flag-forgotten-shifts')
+    ->hourly()
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('hr:auto-complete-shifts')
     ->hourly()
     ->withoutOverlapping(30)
     ->onOneServer();
@@ -276,5 +286,29 @@ Schedule::command('hr:checklist-disable-users')
 Schedule::command('hr:appraisal-reminders')
     ->dailyAt('09:15')
     ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
+| Document transfer housekeeping (accounting peers / WebRTC):
+|
+| accounting:transfers:expire -- pending device transfers past expires_at
+| become "expired", so the recipient's inbox and reports stop showing them.
+|
+| accounting:webrtc:expire -- waiting / connected WebRTC signaling sessions
+| past expires_at become "expired".
+|
+| Both only flip a status with one conditional update (no rows deleted, the
+| audit trail stays in accounting_document_audits), so an overlap or a re-run
+| changes nothing. Neither is a security control: claim() and
+| isConnectable() already refuse anything past its expiry.
+*/
+Schedule::command('accounting:transfers:expire')
+    ->hourly()
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('accounting:webrtc:expire')
+    ->hourly()
     ->withoutOverlapping(30)
     ->onOneServer();

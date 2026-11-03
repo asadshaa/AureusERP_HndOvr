@@ -146,8 +146,16 @@ class CandidateResource extends Resource
                                 TextInput::make('email_from')
                                     ->label(__('recruitments::filament/clusters/applications/resources/candidate.form.sections.basic-information.fields.email'))
                                     ->email()
-                                    ->live()
-                                    ->maxLength(255),
+                                    // Duplicate detection (intake, imports) matches candidates by email.
+                                    ->required()
+                                    ->live(onBlur: true)
+                                    ->maxLength(255)
+                                    // Soft warning only: existing data may already hold duplicates.
+                                    ->hint(fn (?string $state, ?Candidate $record): ?string => ($others = Candidate::sameEmailInCompany($state, $record?->company_id ?? CurrentCompany::id(), $record?->id)->pluck('name')->all()) !== []
+                                        ? __('Also used by :names in this company: check for a duplicate candidate.', ['names' => implode(', ', array_slice($others, 0, 3))])
+                                        : null)
+                                    ->hintIcon(fn (?string $state, ?Candidate $record): ?string => Candidate::sameEmailInCompany($state, $record?->company_id ?? CurrentCompany::id(), $record?->id)->exists() ? 'heroicon-o-exclamation-triangle' : null)
+                                    ->hintColor('warning'),
                                 TextInput::make('phone')
                                     ->label(__('recruitments::filament/clusters/applications/resources/candidate.form.sections.basic-information.fields.phone'))
                                     ->tel()

@@ -124,7 +124,9 @@ class ViewApplicant extends ViewRecord
                             ->hiddenLabel()
                             ->inline()
                             ->live()
-                            ->options(RefuseReason::all()->pluck('name', 'id')),
+                            ->required()
+                            ->options(fn (): array => RefuseReason::optionsFor($record->company_id ? (int) $record->company_id : null))
+                            ->in(fn (): array => array_keys(RefuseReason::optionsFor($record->company_id ? (int) $record->company_id : null))),
                         Toggle::make('notify')
                             ->inline()
                             ->live()
@@ -133,12 +135,16 @@ class ViewApplicant extends ViewRecord
                             ->label(__('recruitments::filament/clusters/applications/resources/applicant/pages/view-applicant.header-actions.refuse.form.fields.notify')),
                         TextInput::make('email')
                             ->visible(fn (Get $get) => $get('notify') && $get('refuse_reason_id'))
-                            ->default($record->candidate->email_from)
+                            ->default($record->candidate?->email_from)
+                            ->email()
+                            ->required(fn (Get $get): bool => (bool) $get('notify') && filled($get('refuse_reason_id')))
+                            ->maxLength(255)
                             ->label(__('recruitments::filament/clusters/applications/resources/applicant/pages/view-applicant.header-actions.refuse.form.fields.email-to')),
                     ]);
                 })
                 ->action(function (array $data, Applicant $record) {
-                    $refuseReason = RefuseReason::find($data['refuse_reason_id']);
+                    // Only a reason of the application's company (or a shared one), whatever was posted.
+                    $refuseReason = RefuseReason::query()->availableTo($record->company_id ? (int) $record->company_id : null)->find($data['refuse_reason_id'] ?? null);
 
                     if (! $refuseReason) {
                         return null;

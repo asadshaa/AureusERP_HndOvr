@@ -3,6 +3,8 @@
 namespace Webkul\Accounting\Services\Bank;
 
 use Brick\Math\BigDecimal;
+use Webkul\Account\Enums\PaymentStatus;
+use Webkul\Account\Enums\PaymentType;
 use Webkul\Account\Models\BankStatement;
 use Webkul\Account\Models\Move;
 use Webkul\Account\Models\Payment;
@@ -33,8 +35,20 @@ final class BankMatchingPriorityService
         // Documents and payments claimed by an earlier mapping in this same
         // run must not be offered again to a later one -- otherwise two bank
         // lines can both independently see the same open invoice or payment
-        // as their unique match and both get suggested against it.
-        $claimedMoveIds = [];
+        // as their unique match and both get suggested against it. The same
+        // holds across runs: a document already held by a Suggested or
+        // Approved mapping from an earlier run (those mappings are not
+        // re-processed here, see matched_reference above) is claimed too.
+        $claimedMoveIds = BankTransactionMapping::query()
+            ->where('company_id', $companyId)
+            ->whereKeyNot($mappings->modelKeys())
+            ->whereNotNull('matched_move_id')
+            ->whereIn('review_status', [BankReviewStatus::Suggested, BankReviewStatus::Approved])
+            ->pluck('matched_move_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
         $claimedPaymentIds = [];
 
         foreach ($mappings as $mapping) {
@@ -120,8 +134,18 @@ final class BankMatchingPriorityService
                 continue;
             }
 
+            // Same direction rule as for documents: money in can only be a
+            // received (inbound) payment, money out a sent (outbound) one.
+            // And only a posted payment still waiting for the bank
+            // (in_process, not yet matched) leaves an outstanding/clearing
+            // balance for this line to clear -- a draft one never posted,
+            // a cancelled/rejected one was withdrawn, and a paid one already
+            // went straight to the bank account.
             $paymentQuery = Payment::query()
                 ->where('company_id', $companyId)
+                ->where('payment_type', $direction === 'credit' ? PaymentType::RECEIVE : PaymentType::SEND)
+                ->where('state', PaymentStatus::IN_PROCESS)
+                ->where(fn ($query) => $query->whereNull('is_matched')->orWhere('is_matched', false))
                 ->whereNotIn('id', $claimedPaymentIds)
                 ->where(fn ($query) => $query->where('payment_reference', $reference)->orWhere('name', $reference)->orWhere('memo', $reference));
             $paymentMatches = $reference === ''

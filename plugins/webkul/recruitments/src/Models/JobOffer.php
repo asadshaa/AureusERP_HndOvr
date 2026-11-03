@@ -73,6 +73,8 @@ class JobOffer extends Model implements NamesApprovalManager, ReturnableApproval
         'sent_to',
         'responded_at',
         'response_reason',
+        'response_channel',
+        'response_recorded_by',
         'response_ip',
         'response_user_agent',
         'submitted_at',
@@ -184,6 +186,12 @@ class JobOffer extends Model implements NamesApprovalManager, ReturnableApproval
     public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sent_by');
+    }
+
+    /** The recruiter / HR user who recorded an answer received by email, phone or in person. */
+    public function responseRecorder(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'response_recorded_by');
     }
 
     public function events(): HasMany

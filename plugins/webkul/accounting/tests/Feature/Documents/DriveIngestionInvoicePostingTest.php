@@ -463,14 +463,50 @@ it('lets the existing BankMatchingPriorityService match a real bank transaction 
 it('allows accounting manager to post classification directly via postClassification()', function () {
     $fx = postingFixture();
     $classification = postingClassification($fx);
+    $poster = documentTestUser($fx['company'], [AccountingPermissions::ManageDocuments, AccountingPermissions::PostJournal]);
 
     expect($classification->validation_status)->toBe(DriveClassificationStatus::Valid)
         ->and($classification->created_invoice_id)->toBeNull();
 
-    $move = app(DriveInvoicePostingService::class)->postClassification($classification, $fx['approver']);
+    $move = app(DriveInvoicePostingService::class)->postClassification($classification, $poster);
 
     $classification->refresh();
     expect($classification->created_invoice_id)->toBe($move->id)
         ->and($classification->validation_status)->toBe(DriveClassificationStatus::Posted)
-        ->and($move->state)->toBe(MoveState::POSTED);
+        ->and($move->state)->toBe(MoveState::POSTED)
+        ->and($move->fresh()->posted_by_id)->toBe($poster->id)
+        ->and($move->fresh()->posted_at)->not->toBeNull();
+});
+
+it('refuses a direct post by a user without the Post Journal permission, server-side', function () {
+    $fx = postingFixture();
+    $classification = postingClassification($fx);
+
+    // Document managers may classify and route for approval, but not post.
+    expect(fn () => app(DriveInvoicePostingService::class)->postClassification($classification, $fx['approver']))
+        ->toThrow(RuntimeException::class, 'Post Journal permission');
+
+    $classification->refresh();
+    expect($classification->created_invoice_id)->toBeNull()
+        ->and($classification->validation_status)->toBe(DriveClassificationStatus::Valid)
+        ->and(Move::query()->where('company_id', $fx['company']->id)->count())->toBe(0);
+});
+
+it('refuses a direct post by a Post Journal user of another company', function () {
+    $fx = postingFixture();
+    $classification = postingClassification($fx);
+    $outsider = documentTestUser(null, [AccountingPermissions::PostJournal]);
+
+    expect(fn () => app(DriveInvoicePostingService::class)->postClassification($classification, $outsider))
+        ->toThrow(RuntimeException::class, 'do not belong');
+
+    expect($classification->fresh()->created_invoice_id)->toBeNull();
+});
+
+it('records the deciding approver as posted_by on an approval-workflow post', function () {
+    $fx = postingFixture();
+    $result = submitAndApprove($fx, postingClassification($fx));
+
+    expect($result->createdInvoice->posted_by_id)->toBe($fx['approver']->id)
+        ->and($result->createdInvoice->posted_at)->not->toBeNull();
 });

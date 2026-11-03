@@ -29,6 +29,7 @@ use Webkul\Account\Models\Bill;
 use Webkul\Account\Models\MoveReversal;
 use Webkul\Account\Models\PaymentRegister;
 use Webkul\Accounting\Models\Journal;
+use Webkul\Security\Services\CompanyScopedRules;
 use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Account API Management')]
@@ -402,7 +403,8 @@ class BillController extends Controller
 
         $data = $request->validate([
             'reason'     => ['required', 'string', 'max:245'],
-            'journal_id' => ['required', 'integer', 'exists:accounts_journals,id'],
+            // The reversal is posted in the bill's company: only its journals.
+            'journal_id' => ['required', 'integer', CompanyScopedRules::exists('accounts_journals', [(int) $invoice->company_id])],
             'date'       => ['required', 'date'],
         ]);
 

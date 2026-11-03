@@ -5,6 +5,7 @@ namespace Webkul\Employee\Services;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
+use Webkul\Employee\Services\Attendance\OvertimeService;
 
 class HrAnalyticsService
 {
@@ -49,7 +50,12 @@ class HrAnalyticsService
             'attendance_records'        => (clone $attendance)->count(),
             'late_arrivals'             => (clone $attendance)->where('late_minutes', '>', 0)->count(),
             'early_departures'          => (clone $attendance)->where('early_departure_minutes', '>', 0)->count(),
-            'attendance_overtime_hours' => round((float) (clone $attendance)->sum('overtime_hours'), 2),
+            // Approved overtime requests (OvertimeService), not the attendance column.
+            'attendance_overtime_hours' => round(OvertimeService::approvedMinutesBetween(
+                $companyId,
+                Carbon::parse($from)->toDateString(),
+                Carbon::parse($to)->toDateString(),
+            ) / 60, 2),
             'leave_days'                => round((float) ApprovedLeaveLookup::overlapping(
                 DB::table('time_off_leaves')->where('company_id', $companyId)->where('state', ApprovedLeaveLookup::APPROVED_STATE),
                 Carbon::parse($from)->toDateString(),

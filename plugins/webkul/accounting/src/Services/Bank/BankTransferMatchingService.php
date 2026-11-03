@@ -15,6 +15,23 @@ use Webkul\Security\Models\User;
 class BankTransferMatchingService
 {
     /**
+     * Mapping states a line must not be in to be offered as a transfer leg:
+     * already approved/posted, or a reviewer's explicit decision (Rejected,
+     * Do not post) that detection must never override.
+     */
+    private const SETTLED_REVIEW_STATUSES = [
+        BankReviewStatus::Approved->value,
+        BankReviewStatus::Posted->value,
+        BankReviewStatus::Rejected->value,
+        BankReviewStatus::DoNotPost->value,
+    ];
+
+    private const SETTLED_POSTING_STATUSES = [
+        BankPostingStatus::Posted->value,
+        BankPostingStatus::DoNotPost->value,
+    ];
+
+    /**
      * @return array<int, BankTransferMatch>
      */
     public function detect(int $companyId, int $maximumDateDistance = 3): array
@@ -27,8 +44,8 @@ class BankTransferMatchingService
                 ->whereNotNull('transfer_match_id')
                 ->orWhereNotNull('matched_reference')
                 ->orWhereNotNull('move_id')
-                ->orWhereIn('review_status', [BankReviewStatus::Approved->value, BankReviewStatus::Posted->value])
-                ->orWhere('posting_status', BankPostingStatus::Posted->value)
+                ->orWhereIn('review_status', self::SETTLED_REVIEW_STATUSES)
+                ->orWhereIn('posting_status', self::SETTLED_POSTING_STATUSES)
             )
             ->orderBy('transaction_date')
             ->get();
@@ -41,8 +58,8 @@ class BankTransferMatchingService
                 ->whereNotNull('transfer_match_id')
                 ->orWhereNotNull('matched_reference')
                 ->orWhereNotNull('move_id')
-                ->orWhereIn('review_status', [BankReviewStatus::Approved->value, BankReviewStatus::Posted->value])
-                ->orWhere('posting_status', BankPostingStatus::Posted->value)
+                ->orWhereIn('review_status', self::SETTLED_REVIEW_STATUSES)
+                ->orWhereIn('posting_status', self::SETTLED_POSTING_STATUSES)
             )
             ->orderBy('transaction_date')
             ->get();

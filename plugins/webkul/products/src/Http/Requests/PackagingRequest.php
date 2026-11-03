@@ -4,6 +4,7 @@ namespace Webkul\Product\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Webkul\Security\Services\CompanyScopedRules;
 
 class PackagingRequest extends FormRequest
 {
@@ -30,8 +31,8 @@ class PackagingRequest extends FormRequest
             'barcode'    => ['nullable', 'string', 'max:255'],
             'qty'        => [...$requiredRule, 'numeric', 'min:0'],
             'sort'       => ['nullable', 'integer'],
-            'product_id' => [...$requiredRule, 'integer', 'exists:products_products,id'],
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'product_id' => [...$requiredRule, 'integer', CompanyScopedRules::exists('products_products', allowShared: true, user: $this->user())],
+            'company_id' => ['nullable', 'integer', CompanyScopedRules::company(user: $this->user())],
         ];
 
         return $rules;

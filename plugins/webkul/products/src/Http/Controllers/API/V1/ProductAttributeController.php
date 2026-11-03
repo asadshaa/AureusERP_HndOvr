@@ -18,6 +18,7 @@ use Webkul\Product\Http\Resources\V1\ProductAttributeResource;
 use Webkul\Product\Models\Product;
 use Webkul\Product\Models\ProductAttribute;
 use Webkul\Product\Models\ProductAttributeValue;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Product API Management')]
 #[Subgroup('Product Attributes', 'Manage product attributes')]
@@ -35,7 +36,7 @@ class ProductAttributeController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function index(string $product)
     {
-        $productModel = Product::findOrFail($product);
+        $productModel = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($product);
 
         Gate::authorize('view', $productModel);
 
@@ -63,7 +64,7 @@ class ProductAttributeController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function store(ProductAttributeRequest $request, string $product)
     {
-        $productModel = Product::findOrFail($product);
+        $productModel = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($product);
 
         Gate::authorize('update', $productModel);
 
@@ -102,7 +103,7 @@ class ProductAttributeController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $product, string $attribute)
     {
-        $productModel = Product::findOrFail($product);
+        $productModel = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($product);
 
         Gate::authorize('view', $productModel);
 
@@ -127,7 +128,7 @@ class ProductAttributeController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(ProductAttributeRequest $request, string $product, string $attribute)
     {
-        $productModel = Product::findOrFail($product);
+        $productModel = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($product);
 
         Gate::authorize('update', $productModel);
 
@@ -164,7 +165,7 @@ class ProductAttributeController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $product, string $attribute)
     {
-        $productModel = Product::findOrFail($product);
+        $productModel = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($product);
 
         Gate::authorize('update', $productModel);
 

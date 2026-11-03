@@ -560,9 +560,14 @@ class MyAttendance extends Page
             ->size('sm')
             ->link()
             ->modalHeading('Request an attendance correction')
+            ->modalDescription('A new check-in moves the start of your first check-in of the day; a new check-out moves the end of your last one. Breaks between your check-ins stay breaks.')
             ->schema([
-                DateTimePicker::make('requested_check_in')->seconds(false),
-                DateTimePicker::make('requested_check_out')->seconds(false),
+                // Typed in the employee's own timezone; Filament hands the service the app-timezone moment.
+                DateTimePicker::make('requested_check_in')->seconds(false)
+                    ->timezone(fn (): string => $this->employeeTimezone())
+                    ->helperText(fn (): string => 'Your local time ('.$this->employeeTimezone().').'),
+                DateTimePicker::make('requested_check_out')->seconds(false)
+                    ->timezone(fn (): string => $this->employeeTimezone()),
                 Textarea::make('reason')
                     ->label('Reason for the change (optional)')
                     ->placeholder('e.g. Traffic delay, badge issue, forgot to clock in'),
@@ -601,11 +606,15 @@ class MyAttendance extends Page
             ->icon('heroicon-o-calendar-days')
             ->color('gray')
             ->modalHeading('Request attendance for a missed day')
+            ->modalDescription('This records the whole day as one check-in / check-out pair. If the day already has check-ins by the time it is approved, they are replaced by this pair.')
             ->schema([
                 DatePicker::make('attendance_date')->required()->native(false)
                     ->minDate(now()->subDays(30)->toDateString())->maxDate(now()->toDateString()),
-                DateTimePicker::make('check_in')->seconds(false)->required(),
-                DateTimePicker::make('check_out')->seconds(false),
+                DateTimePicker::make('check_in')->seconds(false)->required()
+                    ->timezone(fn (): string => $this->employeeTimezone())
+                    ->helperText(fn (): string => 'Your local time ('.$this->employeeTimezone().').'),
+                DateTimePicker::make('check_out')->seconds(false)
+                    ->timezone(fn (): string => $this->employeeTimezone()),
                 Textarea::make('reason')
                     ->label('Reason (optional)')
                     ->placeholder('e.g. Forgot to clock in, badge failure'),
@@ -631,6 +640,15 @@ class MyAttendance extends Page
                     Notification::make()->danger()->title('Could not submit the request')->body($e->getMessage())->send();
                 }
             });
+    }
+
+    /** The signed-in employee's timezone (the attendance default when the profile has none). */
+    private function employeeTimezone(): string
+    {
+        $resolver = app(AttendanceScheduleResolver::class);
+        $employee = app(GeofencedAttendanceService::class)->resolveEmployee(Auth::user());
+
+        return $employee ? $resolver->timezoneFor($employee) : $resolver->defaultTimezone();
     }
 
     /** Only ever the signed-in employee's OWN record in their default company. */

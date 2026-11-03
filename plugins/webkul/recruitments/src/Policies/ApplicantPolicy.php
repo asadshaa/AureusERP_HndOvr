@@ -5,6 +5,7 @@ namespace Webkul\Recruitment\Policies;
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Security\Traits\HasScopedPermissions;
 
 class ApplicantPolicy
@@ -24,7 +25,8 @@ class ApplicantPolicy
      */
     public function view(User $user, Applicant $applicant): bool
     {
-        return $user->can('view_recruitment_applicant');
+        return $user->can('view_recruitment_applicant')
+            && $this->inMemberCompany($user, $applicant);
     }
 
     /**
@@ -44,7 +46,8 @@ class ApplicantPolicy
             return false;
         }
 
-        return $this->hasAccess($user, $applicant, 'recruiter');
+        return $this->inActiveCompany($user, $applicant)
+            && $this->hasAccess($user, $applicant, 'recruiter');
     }
 
     /**
@@ -56,7 +59,8 @@ class ApplicantPolicy
             return false;
         }
 
-        return $this->hasAccess($user, $applicant, 'recruiter');
+        return $this->inActiveCompany($user, $applicant)
+            && $this->hasAccess($user, $applicant, 'recruiter');
     }
 
     /**
@@ -76,7 +80,8 @@ class ApplicantPolicy
             return false;
         }
 
-        return $this->hasAccess($user, $applicant, 'recruiter');
+        return $this->inActiveCompany($user, $applicant)
+            && $this->hasAccess($user, $applicant, 'recruiter');
     }
 
     /**
@@ -96,7 +101,8 @@ class ApplicantPolicy
             return false;
         }
 
-        return $this->hasAccess($user, $applicant, 'recruiter');
+        return $this->inActiveCompany($user, $applicant)
+            && $this->hasAccess($user, $applicant, 'recruiter');
     }
 
     /**
@@ -105,5 +111,17 @@ class ApplicantPolicy
     public function restoreAny(User $user): bool
     {
         return $user->can('restore_any_recruitment_applicant');
+    }
+
+    /** Viewing: the record belongs to one of the user's companies. */
+    protected function inMemberCompany(User $user, Applicant $applicant): bool
+    {
+        return $applicant->company_id !== null && CurrentCompany::canAccess((int) $applicant->company_id, $user);
+    }
+
+    /** Changing: the record belongs to the user's active company. */
+    protected function inActiveCompany(User $user, Applicant $applicant): bool
+    {
+        return $applicant->company_id !== null && (int) $applicant->company_id === CurrentCompany::id($user);
     }
 }

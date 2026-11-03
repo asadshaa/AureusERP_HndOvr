@@ -205,7 +205,9 @@ class JobOfferResource extends Resource
                                             ->map(fn (JobOfferEvent $event): array => [
                                                 'when'  => $event->created_at?->timezone(OfferLetterRenderer::timezone())->format('d M Y H:i'),
                                                 'what'  => $event->label(),
-                                                'who'   => $event->actor?->name ?? ($event->event === 'accepted' || $event->event === 'declined' ? __('Candidate') : __('System')),
+                                                'who'   => in_array($event->event, ['accepted', 'declined'], true)
+                                                    ? ($event->actor ? __('Candidate (recorded by :name)', ['name' => $event->actor->name]) : __('Candidate'))
+                                                    : ($event->actor?->name ?? __('System')),
                                                 'note'  => $event->note,
                                             ])
                                             ->reverse()
@@ -248,6 +250,13 @@ class JobOfferResource extends Resource
                                         ->placeholder(__('Not sent')),
                                     TextEntry::make('responded_at')->label(__('Candidate answered'))->dateTime('d M Y H:i', OfferLetterRenderer::timezone())->placeholder('—'),
                                     TextEntry::make('response_reason')->label(__('Candidate\'s message'))->placeholder('—'),
+                                    TextEntry::make('response_channel')
+                                        ->label(__('Answer received'))
+                                        ->state(fn (JobOffer $record): ?string => $record->responded_at
+                                            ? JobOfferService::responseChannelLabel($record->response_channel ?? JobOfferService::RESPONSE_CHANNEL_LINK)
+                                                .($record->responseRecorder ? ' · '.__('recorded by :name', ['name' => $record->responseRecorder->name]) : '')
+                                            : null)
+                                        ->placeholder('—'),
                                     TextEntry::make('expired_at')->label(__('Expired'))->dateTime('d M Y H:i', OfferLetterRenderer::timezone())
                                         ->visible(fn (JobOffer $record): bool => $record->status === JobOfferStatus::EXPIRED),
                                     TextEntry::make('withdraw_reason')->label(__('Withdrawn'))

@@ -3,7 +3,8 @@
 /**
  * The partners API only reads and changes partners (and their addresses and
  * bank accounts) of the companies the token user belongs to (CurrentCompany
- * membership). Another company's partner is left out of lists and answers 404.
+ * membership). Another company's partner is left out of lists and answers 404,
+ * and a partner cannot be created in, moved to or parented by another company.
  */
 
 use Illuminate\Support\Str;
@@ -26,7 +27,7 @@ beforeEach(function () {
     $this->otherCompany = Company::factory()->create(['name' => 'API isolation otherCompany '.Str::random(8), 'is_active' => true]);
 
     $user = SecurityHelper::authenticateWithPermissions([
-        'view_any_partner_partner', 'view_partner_partner', 'update_partner_partner',
+        'view_any_partner_partner', 'view_partner_partner', 'create_partner_partner', 'update_partner_partner',
         'delete_partner_partner', 'restore_partner_partner', 'force_delete_partner_partner',
     ]);
 
@@ -85,4 +86,34 @@ it('hides another company\'s partner addresses and bank accounts', function () {
 
     expect(Partner::query()->whereKey($address->id)->exists())->toBeTrue()
         ->and(BankAccount::query()->whereKey($bankAccount->id)->exists())->toBeTrue();
+});
+
+it('creates and updates partners only in the API user\'s companies', function () {
+    $payload = ['name' => 'Isolation Partner', 'account_type' => AccountType::INDIVIDUAL->value];
+
+    $this->postJson(route('admin.api.v1.partners.partners.store'), [...$payload, 'company_id' => $this->otherCompany->id])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['company_id']);
+
+    $this->postJson(route('admin.api.v1.partners.partners.store'), [...$payload, 'parent_id' => companyIsolationPartner($this->otherCompany)->id])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['parent_id']);
+
+    // No company sent: the active company; an own parent is fine.
+    $id = $this->postJson(route('admin.api.v1.partners.partners.store'), [...$payload, 'parent_id' => companyIsolationPartner($this->ownCompany)->id])
+        ->assertCreated()
+        ->json('data.id');
+
+    $partner = Partner::query()->findOrFail($id);
+    expect($partner->company_id)->toBe($this->ownCompany->id);
+
+    // Neither moved to another company nor turned into a partner of no company.
+    $this->patchJson(route('admin.api.v1.partners.partners.update', $partner), ['company_id' => $this->otherCompany->id])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['company_id']);
+    $this->patchJson(route('admin.api.v1.partners.partners.update', $partner), ['company_id' => null])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['company_id']);
+
+    expect($partner->refresh()->company_id)->toBe($this->ownCompany->id);
 });

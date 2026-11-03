@@ -300,11 +300,77 @@ class MoveLine extends Model implements Sortable
     }
 
     /**
+     * Line kinds the accounting engine generates and regenerates itself.
+     *
+     * @var array<int, DisplayType>
+     */
+    private const ENGINE_GENERATED_DISPLAY_TYPES = [
+        DisplayType::TAX,
+        DisplayType::ROUNDING,
+        DisplayType::PAYMENT_TERM,
+    ];
+
+    private static int $dynamicLineSyncDepth = 0;
+
+    /**
+     * Runs the accounting engine's own dynamic-line regeneration
+     * (AccountManager::syncDynamicLines()). Inside it, generated tax /
+     * rounding / payment-term lines of a posted entry may be replaced; no
+     * other line, and no line outside it, may be deleted from a posted entry.
+     *
+     * @template TReturn
+     *
+     * @param  callable(): TReturn  $callback
+     * @return TReturn
+     */
+    public static function whileSyncingDynamicLines(callable $callback): mixed
+    {
+        self::$dynamicLineSyncDepth++;
+
+        try {
+            return $callback();
+        } finally {
+            self::$dynamicLineSyncDepth--;
+        }
+    }
+
+    /**
      * Bootstrap any application services.
      */
     protected static function boot()
     {
         parent::boot();
+
+        // A line of a posted entry is ledger history (see Move's own
+        // `deleting` guard and Move::withoutPostedGuard()); it is refused
+        // when both the move's persisted state and the line's persisted
+        // parent_state are posted. The one exception is the accounting
+        // engine replacing the generated tax / rounding / payment-term lines
+        // it owns (AccountManager::syncDynamicLines(), see
+        // whileSyncingDynamicLines()), which already happens on posted
+        // entries when they are re-computed.
+        static::deleting(function (MoveLine $moveLine): void {
+            if (Move::postedGuardIsBypassed()) {
+                return;
+            }
+
+            if (self::$dynamicLineSyncDepth > 0 && in_array($moveLine->display_type, self::ENGINE_GENERATED_DISPLAY_TYPES, true)) {
+                return;
+            }
+
+            $isPostedLedgerLine = DB::table('accounts_account_move_lines as lines')
+                ->join('accounts_account_moves as moves', 'moves.id', '=', 'lines.move_id')
+                ->where('lines.id', $moveLine->getKey())
+                ->where('lines.parent_state', MoveState::POSTED->value)
+                ->where('moves.state', MoveState::POSTED->value)
+                ->exists();
+
+            if ($isPostedLedgerLine) {
+                throw new \RuntimeException(
+                    'A line of a posted journal entry cannot be deleted. Use Reverse to create a correcting entry instead.'
+                );
+            }
+        });
 
         static::creating(function ($moveLine) {
             $moveLine->creator_id ??= Auth::id();

@@ -19,6 +19,7 @@ use Webkul\Accounting\Filament\Clusters\Configuration\Resources\PeerResource\Pag
 use Webkul\Accounting\Models\Peer;
 use Webkul\Accounting\Services\Peers\PeerPairingService;
 use Webkul\Accounting\Support\AccountingPermissions;
+use Webkul\Accounting\Support\Peers\PeerEndpointGuard;
 use Webkul\Partner\Models\Partner;
 
 /**
@@ -147,7 +148,13 @@ class PeerResource extends Resource
                     ])
                     ->action(function (array $data) {
                         try {
+                            // SSRF: check the typed URL BEFORE contacting it
+                            // (acceptPairingResponse() checks it again), and
+                            // never follow a redirect to somewhere unchecked.
+                            PeerEndpointGuard::assertAllowed($data['endpoint_url']);
+
                             $response = Http::acceptJson()
+                                ->withoutRedirecting()
                                 ->post(rtrim($data['endpoint_url'], '/').'/api/v1/peer/pair', [
                                     'code'         => $data['code'],
                                     'endpoint_url' => $data['our_url'],

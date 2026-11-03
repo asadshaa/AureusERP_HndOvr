@@ -10,6 +10,8 @@ use Webkul\Account\Models\Account;
 use Webkul\Account\Models\BankStatement;
 use Webkul\Account\Models\BankStatementLine;
 use Webkul\Account\Models\Journal;
+use Webkul\Accounting\Data\Bank\NormalizedBankStatement;
+use Webkul\Accounting\Data\Bank\NormalizedBankTransaction;
 use Webkul\Accounting\Enums\BankImportStatus;
 use Webkul\Accounting\Enums\BankPostingStatus;
 use Webkul\Accounting\Enums\BankReviewStatus;
@@ -19,6 +21,9 @@ use Webkul\Accounting\Models\BankTransactionMapping;
 use Webkul\Accounting\Services\Currency\CompanyCurrencyService;
 use Webkul\Accounting\Services\Currency\ExchangeRateService;
 use Webkul\Accounting\Services\FsTagService;
+use Webkul\Accounting\Support\AccountingPermissions;
+use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
 
@@ -252,6 +257,142 @@ class BankStatementImportService
 
             return $statement->fresh(['lines.mapping']);
         });
+    }
+
+    /**
+     * Re-runs the import's reconciliation checks against what is stored for
+     * a ReconciliationFailed statement (header figures and the imported
+     * lines), so a statement whose reported differences were resolved can
+     * become Validated -- the only status that may generate journals. If
+     * differences remain, it stays ReconciliationFailed and its
+     * validation_errors are replaced with the current findings.
+     */
+    public function revalidate(BankStatement $statement): BankStatement
+    {
+        return DB::transaction(function () use ($statement): BankStatement {
+            $statement = BankStatement::query()->lockForUpdate()->findOrFail($statement->id);
+
+            if ($statement->import_status !== BankImportStatus::ReconciliationFailed->value) {
+                throw new RuntimeException('Only a statement that failed reconciliation can be re-validated.');
+            }
+
+            $errors = $this->storedStatementErrors($statement);
+
+            if ($errors !== []) {
+                $statement->update(['validation_errors' => $errors]);
+
+                return $statement->fresh();
+            }
+
+            $statement->update([
+                'import_status'     => BankImportStatus::Validated->value,
+                'validation_errors' => [],
+            ]);
+            $statement->lines()->update(['import_status' => BankImportStatus::Validated->value]);
+
+            return $statement->fresh();
+        });
+    }
+
+    /**
+     * Explicit, audited acceptance of a ReconciliationFailed statement's
+     * reported differences (for example a duplicate row the bank confirms is
+     * genuine, or a header total the bank itself printed wrong), after which
+     * the statement is Validated and its lines can be mapped and posted as
+     * imported. Requires the Review Bank Transactions permission and a
+     * written reason; records who accepted it, when, why and exactly which
+     * errors were accepted. The original validation_errors stay as they were.
+     */
+    public function acceptReconciliationDifferences(BankStatement $statement, User $actor, string $reason): BankStatement
+    {
+        if (! $actor->can(AccountingPermissions::ReviewBankTransactions)) {
+            throw new RuntimeException('Accepting reconciliation differences requires the Review Bank Transactions permission.');
+        }
+
+        if (! CurrentCompany::canAccess((int) $statement->company_id, $actor)) {
+            throw new RuntimeException('You do not belong to the company this bank statement was imported for.');
+        }
+
+        $reason = trim($reason);
+        if (mb_strlen($reason) < 10) {
+            throw new RuntimeException('Give a written reason (at least 10 characters) for accepting these reconciliation differences.');
+        }
+
+        return DB::transaction(function () use ($statement, $actor, $reason): BankStatement {
+            $statement = BankStatement::query()->lockForUpdate()->findOrFail($statement->id);
+
+            if ($statement->import_status !== BankImportStatus::ReconciliationFailed->value) {
+                throw new RuntimeException('Only a statement that failed reconciliation can have its differences accepted.');
+            }
+
+            $statement->update([
+                'import_status'                  => BankImportStatus::Validated->value,
+                'reconciliation_override_by_id'  => $actor->id,
+                'reconciliation_override_at'     => now(),
+                'reconciliation_override_reason' => $reason,
+                'reconciliation_override_errors' => $statement->validation_errors ?? [],
+            ]);
+            $statement->lines()->update(['import_status' => BankImportStatus::Validated->value]);
+
+            return $statement->fresh();
+        });
+    }
+
+    /**
+     * The same checks import() runs (BankStatementValidationService plus the
+     * overlapping-period check), applied to the persisted statement.
+     *
+     * @return array<int, array{code: string, message: string, source_row: ?int}>
+     */
+    protected function storedStatementErrors(BankStatement $statement): array
+    {
+        $transactions = $statement->lines()->get()->map(fn (BankStatementLine $line): NormalizedBankTransaction => new NormalizedBankTransaction(
+            transactionDate: (string) $line->transaction_date?->toDateString(),
+            valueDate: $line->value_date?->toDateString(),
+            description: (string) $line->description,
+            reference: $line->reference,
+            debit: (string) ($line->original_debit ?? $line->debit ?? '0'),
+            credit: (string) ($line->original_credit ?? $line->credit ?? '0'),
+            runningBalance: $line->running_balance === null ? null : (string) $line->running_balance,
+            sourceRow: (int) $line->source_row,
+            rawRow: (array) ($line->raw_row ?? []),
+        ))->all();
+
+        $errors = $this->validator->validate(new NormalizedBankStatement(
+            bank: (string) $statement->bank_name,
+            bankAccountNumber: (string) $statement->bank_account_number,
+            accountTitle: (string) $statement->account_title,
+            currency: (string) $statement->detected_currency_code,
+            statementStartDate: (string) $statement->statement_start_date?->toDateString(),
+            statementEndDate: (string) $statement->statement_end_date?->toDateString(),
+            openingBalance: (string) $statement->opening_balance,
+            totalDebits: (string) $statement->total_debits,
+            totalCredits: (string) $statement->total_credits,
+            closingBalance: (string) $statement->closing_balance,
+            parser: (string) $statement->parser,
+            sourceSheet: $statement->source_sheet,
+            rawHeader: (array) ($statement->raw_header ?? []),
+            transactions: $transactions,
+        ));
+
+        $overlap = BankStatement::query()
+            ->whereKeyNot($statement->id)
+            ->where('company_id', $statement->company_id)
+            ->where('bank_account_number', $statement->bank_account_number)
+            ->where('currency_id', $statement->currency_id)
+            ->whereDate('statement_start_date', '<=', $statement->statement_end_date)
+            ->whereDate('statement_end_date', '>=', $statement->statement_start_date)
+            ->exists();
+
+        if ($overlap) {
+            $errors[] = [
+                'code'       => 'overlapping_period',
+                'message'    => 'Another statement for this bank account overlaps the imported period.',
+                'source_row' => null,
+            ];
+        }
+
+        return $errors;
     }
 
     /**

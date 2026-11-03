@@ -35,7 +35,10 @@ class DocumentTransferService
         ?string $note = null,
         ?string $ipAddress = null,
     ): DocumentTransfer {
-        if (! $sender->can(AccountingPermissions::TransferDocuments)) {
+        // Checked on the "web" guard every permission is registered under:
+        // over the sanctum API the default guard is "sanctum", where can()
+        // finds no permission at all and refuses everyone.
+        if (! $sender->checkPermissionTo(AccountingPermissions::TransferDocuments, 'web')) {
             throw new RuntimeException('You do not have permission to send documents to a device.');
         }
 

@@ -408,12 +408,14 @@ class ShiftRosterService
             $off                             => 'Weekend',
             $schedule->shiftId !== null      => (string) $schedule->name,
             $schedule->scheduleId !== null   => 'Schedule',
+            $schedule->calendarId !== null   => (string) ($schedule->name ?: 'Working hours'),
             default                          => 'Office hours',
         };
         $source = match ($schedule->source) {
             DaySchedule::SourceOverride => 'Changed for the day',
             DaySchedule::SourceRoster   => 'Roster'.($schedule->note ? ': '.$schedule->note : ''),
             DaySchedule::SourceSchedule => 'Work schedule',
+            DaySchedule::SourceCalendar => 'Working-time calendar'.($schedule->name ? ': '.$schedule->name : ''),
             default                     => 'Company office hours',
         };
 

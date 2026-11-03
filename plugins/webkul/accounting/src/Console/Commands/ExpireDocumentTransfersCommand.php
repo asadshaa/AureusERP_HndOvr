@@ -13,8 +13,7 @@ use Webkul\Accounting\Models\DocumentTransfer;
  * for reporting and for the recipient's inbox rather than a security
  * control -- an unrun sweep cannot let a stale transfer be claimed.
  *
- * This repository has no application scheduler wired (bootstrap/app.php
- * registers no withSchedule), so run it from external cron.
+ * Scheduled hourly in routes/console.php.
  */
 class ExpireDocumentTransfersCommand extends Command
 {

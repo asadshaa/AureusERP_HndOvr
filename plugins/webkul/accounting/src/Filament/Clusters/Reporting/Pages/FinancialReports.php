@@ -24,6 +24,7 @@ use Webkul\Accounting\Filament\Clusters\Reporting\Pages\Exports\ReportSpreadshee
 use Webkul\Accounting\Models\ReportTemplate;
 use Webkul\Accounting\Services\ReportQueryService;
 use Webkul\Accounting\Services\ReportTemplateValidator;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 
 /**
@@ -275,14 +276,17 @@ class FinancialReports extends Page implements HasForms
         }
 
         $year = (int) ($this->data['year'] ?? now()->year);
+        $authorizedCompanyIds = static::authorizedCompanyIds();
         $requestedCompanyIds = array_values(array_intersect(
             array_map('intval', $this->data['companies'] ?? []),
-            static::authorizedCompanyIds(),
+            $authorizedCompanyIds,
         ));
         if ($requestedCompanyIds === []) {
             return null;
         }
-        $context = ReportContext::forCompanies($requestedCompanyIds);
+        // Entity columns/lines of the template can only narrow to companies
+        // the viewer belongs to; any other entity renders as "not available".
+        $context = ReportContext::forCompanies($requestedCompanyIds)->restrictedTo($authorizedCompanyIds);
 
         $service = app(ReportQueryService::class);
 
@@ -292,12 +296,17 @@ class FinancialReports extends Page implements HasForms
         $issues = app(ReportTemplateValidator::class)->validate($template);
 
         return [
-            'template' => $template,
-            'year'     => $year,
-            'columns'  => $columns,
-            'rows'     => $rows,
-            'usd'      => in_array($template->currency_mode, [CurrencyMode::USD_ONLY, CurrencyMode::LEDGER_AND_USD], true),
-            'issues'   => $issues,
+            'template'    => $template,
+            'year'        => $year,
+            'columns'     => $columns,
+            'rows'        => $rows,
+            'usd'         => in_array($template->currency_mode, [CurrencyMode::USD_ONLY, CurrencyMode::LEDGER_AND_USD], true),
+            'issues'      => $issues,
+            'unavailable' => collect($columns)
+                ->reject(fn (ReportColumnSpec $column): bool => $column->isAvailableIn($context))
+                ->map(fn (ReportColumnSpec $column): string => $column->key)
+                ->values()
+                ->all(),
         ];
     }
 
@@ -321,9 +330,17 @@ class FinancialReports extends Page implements HasForms
         return $period->startDate->format('M').'-'.$period->endDate->format("M'y");
     }
 
+    /**
+     * A null value is "not available" (an entity the viewer cannot access),
+     * which is distinct from a zero ("-").
+     */
     public function formatValue(?float $value, bool $usd): string
     {
-        if ($value === null || abs($value) < 0.005) {
+        if ($value === null) {
+            return __('accounting::filament/clusters/reporting/pages/financial-reports.content.not-available');
+        }
+
+        if (abs($value) < 0.005) {
             return '-';
         }
 
@@ -337,23 +354,14 @@ class FinancialReports extends Page implements HasForms
     }
 
     /**
+     * The companies the signed-in user belongs to (CurrentCompany membership
+     * rules: allowed companies plus the default one, archived companies
+     * excluded, every active company for a group owner).
+     *
      * @return array<int, int>
      */
     protected static function authorizedCompanyIds(): array
     {
-        $user = Auth::user();
-
-        if (! $user) {
-            return [];
-        }
-
-        return $user->allowedCompanies()
-            ->pluck('companies.id')
-            ->push($user->default_company_id)
-            ->filter()
-            ->map(fn ($id): int => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
+        return CurrentCompany::membershipIds();
     }
 }

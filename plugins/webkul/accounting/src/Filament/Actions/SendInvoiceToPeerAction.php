@@ -124,11 +124,15 @@ class SendInvoiceToPeerAction
 
                     $url = route('accounting.claim.show', ['token' => $result['claim_token']]);
 
-                    Notification::make()->success()
-                        ->title('Secure link created')
-                        // Shown once -- only the hash is stored, so this URL
-                        // cannot be recovered later.
-                        ->body("Send this to {$data['email']}: {$url}")
+                    // Shown once -- only the hash is stored, so this URL
+                    // cannot be recovered later.
+                    ($result['emailed']
+                        ? Notification::make()->success()
+                            ->title('Secure link created and emailed')
+                            ->body("Emailed to {$data['email']}. You can also send them this link: {$url}")
+                        : Notification::make()->warning()
+                            ->title('Secure link created, but the email could not be sent')
+                            ->body("Send this link to {$data['email']} yourself: {$url}"))
                         ->persistent()
                         ->send();
                 } catch (\Throwable $e) {

@@ -5,6 +5,7 @@ namespace Webkul\Recruitment\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Webkul\Recruitment\Enums\JobOfferStatus;
+use Webkul\Recruitment\Services\JobOfferService;
 use Webkul\Security\Models\User;
 
 /**
@@ -59,12 +60,22 @@ class JobOfferEvent extends Model
             'withdrawn'        => __('Withdrawn'),
             'letter_generated' => __('Offer letter generated'),
             'sent'             => __('Sent to the candidate'),
-            'accepted'         => __('Accepted by the candidate'),
-            'declined'         => __('Declined by the candidate'),
+            'accepted'         => __('Accepted by the candidate').$this->recordedChannelSuffix(),
+            'declined'         => __('Declined by the candidate').$this->recordedChannelSuffix(),
             'expired'          => __('Expired'),
             'employee_created' => __('Employee created'),
             default            => str($this->event)->headline()->toString(),
         };
+    }
+
+    /** " (by phone)" when HR recorded the answer for the candidate. */
+    protected function recordedChannelSuffix(): string
+    {
+        $channel = $this->meta['channel'] ?? null;
+
+        return $this->actor_id !== null && $channel && $channel !== JobOfferService::RESPONSE_CHANNEL_LINK
+            ? ' ('.mb_strtolower(JobOfferService::responseChannelLabel($channel)).')'
+            : '';
     }
 
     public function toStatusLabel(): ?string

@@ -4,6 +4,7 @@ namespace Webkul\Recruitment\Services;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
 use RuntimeException;
 use Webkul\Recruitment\Models\Applicant;
@@ -12,6 +13,7 @@ use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\Stage;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Models\Company;
 
 class ApplicantIntakeService
@@ -24,14 +26,25 @@ class ApplicantIntakeService
     /** @param array<string, mixed> $payload */
     public function import(string $source, array $payload, User $actor): Applicant
     {
+        if (! Gate::forUser($actor)->allows('create', Applicant::class)) {
+            throw new RuntimeException('You are not allowed to import applicants.');
+        }
+
         $data = $this->normalizeAndValidate($source, $payload);
 
         $companyId = (int) ($data['company_id'] ?? $actor->default_company_id);
-        if (
-            (int) $actor->default_company_id !== $companyId
-            && ! $actor->allowedCompanies()->whereKey($companyId)->exists()
-        ) {
+        if (! CurrentCompany::canAccess($companyId, $actor)) {
             throw new RuntimeException('The applicant import company is outside the user’s allowed companies.');
+        }
+
+        // A re-import updates the existing application: the user must be allowed to change it.
+        $existing = Applicant::query()
+            ->where('company_id', $companyId)
+            ->where('external_application_id', $data['external_application_id'])
+            ->first();
+
+        if ($existing && ! Gate::forUser($actor)->allows('update', $existing)) {
+            throw new RuntimeException('You are not allowed to update this application.');
         }
 
         return $this->store($source, $data, $companyId, $actor);
@@ -101,13 +114,7 @@ class ApplicantIntakeService
                 ->where('job_id', $job->id)
                 ->first() ?? throw new RuntimeException('The posting does not belong to this job.')
             : null;
-        $stageId = $data['stage_id'] ?? Stage::query()
-            ->where(function ($query) use ($companyId): void {
-                $query->whereNull('company_id')->orWhere('company_id', $companyId);
-            })
-            ->orderByDesc('is_default')
-            ->orderBy('sort')
-            ->value('id');
+        $stageId = $data['stage_id'] ?? Stage::defaultFor($companyId)?->id;
         if ($stageId && ! Stage::query()->whereKey($stageId)->where(function ($query) use ($companyId): void {
             $query->whereNull('company_id')->orWhere('company_id', $companyId);
         })->exists()) {
@@ -160,13 +167,14 @@ class ApplicantIntakeService
                 'company_id'             => $companyId,
                 'job_id'                 => $job->id,
                 'department_id'          => $job->department_id,
-                'stage_id'               => $stageId,
+                // A re-import never moves a progressed application back: stage and creator only fill blanks.
+                'stage_id'               => $application->stage_id ?? $stageId,
                 'source_id'              => $data['source_id'] ?? $attribution['source_id'] ?? $application->source_id,
                 'job_posting_id'         => $effective?->id,
                 'medium_id'              => $data['medium_id'] ?? null,
                 'external_application_id'=> $data['external_application_id'],
                 'source_details'         => $data['source_details'],
-                'creator_id'             => $actor?->id ?? $application->creator_id,
+                'creator_id'             => $application->creator_id ?? $actor?->id,
                 'create_date'            => $application->create_date ?? now()->toDateString(),
                 'applicant_properties'   => [
                     ...(array) $application->applicant_properties,

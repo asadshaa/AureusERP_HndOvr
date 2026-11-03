@@ -61,7 +61,11 @@
                                         <th class="w-3 bg-gray-100/60 dark:bg-white/10"></th>
                                     @else
                                         <th class="px-4 pb-2 text-right text-xs font-normal text-gray-400 whitespace-nowrap">
-                                            {{ $this->columnSubLabel($column) }}
+                                            @if (in_array($column->key, $report['unavailable'], true))
+                                                {{ __('accounting::filament/clusters/reporting/pages/financial-reports.content.not-available-column') }}
+                                            @else
+                                                {{ $this->columnSubLabel($column) }}
+                                            @endif
                                         </th>
                                     @endif
                                 @endforeach
@@ -98,7 +102,8 @@
                                                 'font-bold' => $row->isBold,
                                                 'text-danger-600 font-semibold' => $checkFails,
                                                 'text-success-600' => $row->isCheck && ! $checkFails,
-                                                'text-gray-700 dark:text-gray-200' => ! $row->isCheck,
+                                                'text-gray-700 dark:text-gray-200' => ! $row->isCheck && $value !== null,
+                                                'text-gray-400 dark:text-gray-500' => ! $row->isCheck && $value === null,
                                             ])>
                                                 {{ $row->carriesValues() ? $this->formatValue($value, $report['usd']) : '' }}
                                             </td>

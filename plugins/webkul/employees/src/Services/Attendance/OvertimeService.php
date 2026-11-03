@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
@@ -32,7 +33,9 @@ use Webkul\Security\Models\User;
  *  - not for a day of a finalised attendance month.
  *
  * Approved minutes are taken out of that day's time bank by the monthly
- * report (see MonthlyAttendanceReport), so they are never counted twice.
+ * report (see MonthlyAttendanceReport), so they are never counted twice,
+ * and are written to the day's attendance record as overtime_hours (the
+ * column is read-only on the attendance forms).
  */
 class OvertimeService
 {
@@ -260,6 +263,104 @@ class OvertimeService
         $payload['approved_at'] = now()->toDateTimeString();
 
         $request->forceFill(['payload' => $payload])->save();
+
+        // The request is marked approved by the caller after this, so its minutes are added here.
+        $this->syncAttendanceRecord((int) $request->company_id, (int) $request->employee_id, $date, $approved, exceptRequestId: (int) $request->id);
+    }
+
+    /** Approved overtime minutes of a company for the days in [$from, $to] (Y-m-d). */
+    public static function approvedMinutesBetween(int $companyId, string $from, string $to): int
+    {
+        return (int) EmployeeRequest::query()
+            ->where('company_id', $companyId)
+            ->where('status', 'approved')
+            ->whereHas('requestType', fn (Builder $types) => $types->where('category', self::Category))
+            ->where('payload->attendance_date', '>=', $from)
+            ->where('payload->attendance_date', '<=', $to)
+            ->get(['id', 'payload'])
+            ->sum(fn (EmployeeRequest $request): int => (int) data_get($request->payload, 'approved_minutes', 0));
+    }
+
+    /** Approved overtime minutes of one employee-day (every approved request for it, but $exceptRequestId). */
+    public static function approvedMinutesOn(int $companyId, int $employeeId, string $date, ?int $exceptRequestId = null): int
+    {
+        return (int) EmployeeRequest::query()
+            ->where('company_id', $companyId)
+            ->where('employee_id', $employeeId)
+            ->where('status', 'approved')
+            ->when($exceptRequestId !== null, fn (Builder $query) => $query->whereKeyNot($exceptRequestId))
+            ->whereHas('requestType', fn (Builder $types) => $types->where('category', self::Category))
+            ->where('payload->attendance_date', $date)
+            ->get(['id', 'payload'])
+            ->sum(fn (EmployeeRequest $request): int => (int) data_get($request->payload, 'approved_minutes', 0));
+    }
+
+    /**
+     * Writes the day's attendance overtime_hours from its approved overtime
+     * (the column is never typed by hand). $pendingMinutes: minutes approved
+     * in the running transaction by request $exceptRequestId, not marked
+     * approved yet. $onlyWhenEmpty leaves a value already on the record
+     * alone (the backfill). Returns the number of records written.
+     */
+    public function syncAttendanceRecord(int $companyId, int $employeeId, string $date, int $pendingMinutes = 0, ?int $exceptRequestId = null, bool $onlyWhenEmpty = false): int
+    {
+        $minutes = self::approvedMinutesOn($companyId, $employeeId, $date, $exceptRequestId) + max(0, $pendingMinutes);
+
+        // A plain column write: the times, intervals and audit hooks are not involved
+        // (the caller has checked the month is open).
+        return AttendanceRecord::query()
+            ->where('company_id', $companyId)
+            ->where('employee_id', $employeeId)
+            ->whereDate('attendance_date', $date)
+            ->when($onlyWhenEmpty, fn (Builder $query) => $query->where(fn (Builder $empty) => $empty->whereNull('overtime_hours')->orWhere('overtime_hours', 0)))
+            ->update(['overtime_hours' => round($minutes / 60, 4)]);
+    }
+
+    /**
+     * Fills overtime_hours on the days with approved overtime where it is
+     * still empty; a value already there (typed by hand) and finalised months
+     * are left alone. Idempotent.
+     *
+     * @return array{approved_days: int, filled: int, already_in_sync: int, kept_manual_value: int, locked_month: int, no_record: int}
+     */
+    public function backfillAttendanceOvertimeHours(): array
+    {
+        $counts = ['approved_days' => 0, 'filled' => 0, 'already_in_sync' => 0, 'kept_manual_value' => 0, 'locked_month' => 0, 'no_record' => 0];
+
+        $days = EmployeeRequest::query()
+            ->where('status', 'approved')
+            ->whereHas('requestType', fn (Builder $types) => $types->where('category', self::Category))
+            ->get(['id', 'company_id', 'employee_id', 'payload'])
+            ->map(fn (EmployeeRequest $request): array => [(int) $request->company_id, (int) $request->employee_id, (string) data_get($request->payload, 'attendance_date')])
+            ->filter(fn (array $day): bool => preg_match('/^\d{4}-\d{2}-\d{2}$/', $day[2]) === 1)
+            ->unique(fn (array $day): string => implode('|', $day));
+
+        foreach ($days as [$companyId, $employeeId, $date]) {
+            $counts['approved_days']++;
+
+            $record = AttendanceRecord::query()->where('company_id', $companyId)->where('employee_id', $employeeId)->whereDate('attendance_date', $date)->first(['id', 'overtime_hours']);
+            if (! $record) {
+                $counts['no_record']++;
+
+                continue;
+            }
+            if ($this->locks->isLocked($companyId, $date)) {
+                $counts['locked_month']++;
+
+                continue;
+            }
+
+            $current = round((float) $record->overtime_hours, 4);
+            if ($current === round(self::approvedMinutesOn($companyId, $employeeId, $date) / 60, 4)) {
+                $counts['already_in_sync']++;
+            } elseif ($current > 0) {
+                $counts['kept_manual_value']++;
+            } else {
+                $counts['filled'] += $this->syncAttendanceRecord($companyId, $employeeId, $date, onlyWhenEmpty: true) > 0 ? 1 : 0;
+            }
+        }
+
+        return $counts;
     }
 
     /**

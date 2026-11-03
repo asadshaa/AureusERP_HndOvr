@@ -2,6 +2,7 @@
 
 namespace Webkul\Recruitment\Filament\Clusters\Configurations\Resources;
 
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -41,6 +42,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Filament\Resources\DepartmentResource;
 use Webkul\Employee\Models\Department;
@@ -241,7 +243,15 @@ class JobPositionResource extends Resource
                                             ->native(false),
                                         DatePicker::make('date_to')
                                             ->label(__('recruitments::filament/clusters/configurations/resources/job-position.form.sections.workforce-planning.fields.date-to'))
-                                            ->native(false),
+                                            ->native(false)
+                                            ->minDate(fn (Get $get): ?string => filled($get('date_from')) ? (string) $get('date_from') : null)
+                                            ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                                                $from = $get('date_from');
+
+                                                if (filled($value) && filled($from) && Carbon::parse($value)->lt(Carbon::parse($from)->startOfDay())) {
+                                                    $fail(__('The end date must be on or after the start date.'));
+                                                }
+                                            }),
                                     ])->columns(2),
                                 Section::make()
                                     ->schema([

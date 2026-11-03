@@ -65,6 +65,14 @@ class AttendanceRecord extends Model
     /** Reason stored on intervals voided by a direct edit (set by GeofencedAttendanceService::recordHrCorrection()). */
     public static ?string $pendingIntervalReason = null;
 
+    /**
+     * Set by a writer that explicitly replaces the whole day (an approved
+     * missed-day request on a day that already has a record): the direct edit
+     * then voids every interval and writes the one pair, instead of moving
+     * only the first start / last end (AttendanceIntervalService::applyDirectEdit()).
+     */
+    public static bool $replaceIntervalsOnEdit = false;
+
     protected function casts(): array
     {
         return [
@@ -221,9 +229,8 @@ class AttendanceRecord extends Model
 
             // attendance_date is the employee's LOCAL date while server_recorded_at is
             // stored in the app timezone, so match on the local day's time window.
-            $timezone = $record->employee
-                ? app(AttendanceScheduleResolver::class)->timezoneFor($record->employee)
-                : config('app.timezone');
+            $resolver = app(AttendanceScheduleResolver::class);
+            $timezone = $record->employee ? $resolver->timezoneFor($record->employee) : $resolver->defaultTimezone();
             $dayStart = Carbon::parse($date, $timezone)->startOfDay();
             $appTimezone = config('app.timezone');
 

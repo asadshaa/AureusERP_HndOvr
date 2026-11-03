@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 use Webkul\Accounting\Http\Controllers\API\V1\DocumentTransferController;
 use Webkul\Accounting\Http\Controllers\API\V1\PeerTransmissionController;
@@ -8,8 +9,11 @@ use Webkul\Accounting\Http\Middleware\VerifyPeerSignature;
 
 /*
  | Internal, user-authenticated transfer API (intra-instance).
+ | SubstituteBindings resolves {transfer}: these routes are outside the
+ | "api" middleware group, and without it the controller received an
+ | empty DocumentTransfer, so every claim and cancel was refused.
  */
-Route::prefix('admin/api/v1')->middleware(['auth:sanctum'])->group(function () {
+Route::prefix('admin/api/v1')->middleware(['auth:sanctum', SubstituteBindings::class])->group(function () {
     Route::get('document-transfers', [DocumentTransferController::class, 'index']);
     Route::post('document-transfers', [DocumentTransferController::class, 'store']);
     Route::post('document-transfers/{transfer}/claim', [DocumentTransferController::class, 'claim']);

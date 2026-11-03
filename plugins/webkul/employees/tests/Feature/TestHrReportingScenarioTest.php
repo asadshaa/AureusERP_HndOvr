@@ -94,6 +94,13 @@ function thrControlledFixture(): array
     DB_table_attendance($company->id, $employees[0]->id, $today, '09:20:00', '17:00:00', 1.5);
     DB_table_attendance($company->id, $employees[1]->id, $today, '09:10:00', '17:00:00', 0);
     DB_table_attendance($company->id, $employees[2]->id, $today, '09:00:00', '17:00:00', 0);
+    // Attendance overtime is reported from approved overtime requests (90 minutes = 1.5 h).
+    EmployeeRequest::query()->create([
+        'company_id'      => $company->id, 'employee_id' => $employees[0]->id,
+        'request_type_id' => EmployeeRequestType::query()->where('company_id', $company->id)->where('code', 'overtime')->value('id'),
+        'title'           => 'Overtime', 'status' => 'approved', 'approved_at' => now(),
+        'payload'         => ['kind' => 'overtime', 'attendance_date' => $today, 'approved_minutes' => 90],
+    ]);
 
     // Leave: one validated 3-day Annual Leave.
     $leaveType = LeaveType::query()->create(['company_id' => $company->id, 'name' => 'Annual Leave', 'is_active' => true, 'requires_allocation' => 'no']);

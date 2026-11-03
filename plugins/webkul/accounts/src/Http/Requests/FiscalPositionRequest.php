@@ -4,9 +4,19 @@ namespace Webkul\Account\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Webkul\Account\Http\Requests\Concerns\ValidatesCompanyReferences;
+use Webkul\Account\Models\FiscalPosition;
+use Webkul\Security\Services\CompanyScopedRules;
 
+/**
+ * A fiscal position belongs to one of the token user's companies; the taxes
+ * and accounts it maps must be that company's.
+ */
 class FiscalPositionRequest extends FormRequest
 {
+    use ValidatesCompanyReferences;
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -22,12 +32,15 @@ class FiscalPositionRequest extends FormRequest
      */
     public function rules(): array
     {
-        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+        $isUpdate = $this->isUpdateRequest();
         $requiredRule = $isUpdate ? ['sometimes', 'required'] : ['required'];
+        $companyId = $this->targetCompanyId(FiscalPosition::class);
+        $companyTax = Rule::exists('accounts_taxes', 'id')->where('company_id', $companyId ?? 0);
+        $companyAccount = $this->companyAccountRule($companyId);
 
         return [
             'name'             => [...$requiredRule, 'string', 'max:255'],
-            'company_id'       => [...$requiredRule, 'integer', 'exists:companies,id'],
+            'company_id'       => [...$requiredRule, 'integer', CompanyScopedRules::company(user: $this->apiUser())],
             'country_id'       => ['nullable', 'integer', 'exists:countries,id'],
             'country_group_id' => ['nullable', 'integer', 'exists:countries,id'],
             'zip_from'         => ['nullable', 'string', 'max:10'],
@@ -40,14 +53,14 @@ class FiscalPositionRequest extends FormRequest
             // Tax mappings
             'taxes'                          => ['nullable', 'array'],
             'taxes.*.id'                     => ['sometimes', 'integer', 'exists:accounts_fiscal_position_taxes,id'],
-            'taxes.*.tax_source_id'          => ['required', 'integer', 'exists:accounts_taxes,id'],
-            'taxes.*.tax_destination_id'     => ['nullable', 'integer', 'exists:accounts_taxes,id'],
+            'taxes.*.tax_source_id'          => ['required', 'integer', $companyTax],
+            'taxes.*.tax_destination_id'     => ['nullable', 'integer', $companyTax],
 
             // Account mappings
             'accounts'                          => ['nullable', 'array'],
             'accounts.*.id'                     => ['sometimes', 'integer', 'exists:accounts_fiscal_position_accounts,id'],
-            'accounts.*.account_source_id'      => ['required', 'integer', 'exists:accounts_accounts,id'],
-            'accounts.*.account_destination_id' => ['required', 'integer', 'exists:accounts_accounts,id'],
+            'accounts.*.account_source_id'      => ['required', 'integer', $companyAccount],
+            'accounts.*.account_destination_id' => ['required', 'integer', $companyAccount],
         ];
     }
 

@@ -75,7 +75,8 @@ trait HasApplicationStatus
                     'refuse_reason_id' => null,
                     'refuse_date'      => null,
                     'is_active'        => true,
-                    'stage_id'         => Stage::where('is_default', 1)->first()->id ?? null,
+                    // The default stage of this application's company, never another company's.
+                    'stage_id'         => Stage::defaultFor($this->company_id ? (int) $this->company_id : null)?->id,
                 ],
                 ApplicationStatus::ARCHIVED => [
                     'date_closed'      => null,

@@ -2,7 +2,6 @@
 
 namespace Webkul\Employee\Services\Attendance;
 
-use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use DateTimeZone;
 use Illuminate\Support\Facades\Log;
@@ -13,14 +12,18 @@ use Webkul\Employee\Models\Shift;
 use Webkul\Employee\Models\ShiftOverride;
 use Webkul\Employee\Models\ShiftRosterAssignment;
 use Webkul\Employee\Models\WorkSchedule;
+use Webkul\Employee\Services\Attendance\Data\CalendarHours;
 use Webkul\Employee\Services\Attendance\Data\DaySchedule;
 use Webkul\Employee\Services\Attendance\Data\ScheduleSet;
+use Webkul\Support\Models\Calendar;
 
 /**
- * Timezone, attendance-date and scheduled-window resolution. Reuses the
- * existing Employee.time_zone -> Calendar.timezone -> app timezone chain
- * (Company has no timezone column) and Calendar::getAttendanceIntervalsBatch()
- * for the day's working window; nothing is invented here.
+ * Timezone, attendance-date and scheduled-window resolution.
+ *
+ * Timezone: Employee.time_zone -> Calendar.timezone -> the attendance
+ * timezone (config attendance.monthly_report.timezone, Asia/Karachi). Company
+ * has no timezone column, and the app timezone (UTC) is never a person's
+ * local time, so it is not in the chain.
  *
  * The schedule of an employee on a date (HR parity plan 2.2, 3.4), first
  * match wins:
@@ -28,11 +31,14 @@ use Webkul\Employee\Services\Attendance\Data\ScheduleSet;
  *  2. a rotating roster (ShiftRosterAssignment): the employee's own, else
  *     their department's;
  *  3. the employee's effective-dated WorkSchedule covering the date;
- *  4. the company default -- the office hours of config/attendance.php
+ *  4. the employee's working-time Calendar, only when one is set on the
+ *     employee (Employee.calendar_id; its hours are local wall-clock times);
+ *  5. the company default -- the office hours of config/attendance.php
  *     (monthly_report.office_start / office_end, daily_required_minutes,
  *     weekend_days).
- * The monthly report, Today's attendance, the late check-in notice and
- * scheduledWindowFor() all resolve the day through here.
+ * The monthly report, Today's attendance, the late check-in notice, the
+ * attendance record's scheduled window (late / early minutes) and
+ * scheduledWindowFor() all resolve the day through here, so they agree.
  *
  * Overnight shifts (end before start, e.g. 22:00-06:00) belong to the date
  * they start. A punch after midnight belongs to the previous day's shift
@@ -116,15 +122,24 @@ class AttendanceScheduleResolver
     {
         $departments = [];
         $companies = [];
+        $calendars = [];
         $ids = [];
         foreach ($employees as $employee) {
-            // A model loaded without its company / department is looked up like a plain id.
-            if ($employee instanceof Employee && array_key_exists('department_id', $employee->getAttributes()) && array_key_exists('company_id', $employee->getAttributes())) {
-                $ids[] = (int) $employee->id;
-                $departments[(int) $employee->id] = $employee->department_id ? (int) $employee->department_id : null;
-                $companies[(int) $employee->id] = (int) $employee->company_id;
-            } else {
-                $ids[] = $employee instanceof Employee ? (int) $employee->id : (int) $employee;
+            $id = $employee instanceof Employee ? (int) $employee->id : (int) $employee;
+            $ids[] = $id;
+
+            if (! $employee instanceof Employee) {
+                continue;
+            }
+
+            // A model loaded without its company / department / calendar is looked up like a plain id.
+            $attributes = $employee->getAttributes();
+            if (array_key_exists('department_id', $attributes) && array_key_exists('company_id', $attributes)) {
+                $departments[$id] = $employee->department_id ? (int) $employee->department_id : null;
+                $companies[$id] = (int) $employee->company_id;
+            }
+            if (array_key_exists('calendar_id', $attributes)) {
+                $calendars[$id] = $employee->calendar_id ? (int) $employee->calendar_id : null;
             }
         }
 
@@ -134,17 +149,22 @@ class AttendanceScheduleResolver
 
         $periods = $this->periodsFor($ids, $from, $to);
 
-        if (! static::shiftsAvailable()) {
-            return array_combine($ids, array_map(fn (int $id): ScheduleSet => new ScheduleSet($periods[$id] ?? []), $ids));
+        $missing = array_values(array_diff($ids, array_intersect(array_keys($companies), array_keys($calendars))));
+        if ($missing !== []) {
+            Employee::query()->withTrashed()->whereIn('id', $missing)->get(['id', 'company_id', 'department_id', 'calendar_id'])
+                ->each(function (Employee $employee) use (&$departments, &$companies, &$calendars): void {
+                    $departments[(int) $employee->id] ??= $employee->department_id ? (int) $employee->department_id : null;
+                    $companies[(int) $employee->id] ??= (int) $employee->company_id;
+                    $calendars[(int) $employee->id] ??= $employee->calendar_id ? (int) $employee->calendar_id : null;
+                });
         }
 
-        $missing = array_values(array_diff($ids, array_keys($companies)));
-        if ($missing !== []) {
-            Employee::query()->withTrashed()->whereIn('id', $missing)->get(['id', 'company_id', 'department_id'])
-                ->each(function (Employee $employee) use (&$departments, &$companies): void {
-                    $departments[(int) $employee->id] = $employee->department_id ? (int) $employee->department_id : null;
-                    $companies[(int) $employee->id] = (int) $employee->company_id;
-                });
+        $hours = $this->calendarHours(array_values(array_unique(array_filter($calendars))));
+        $calendarOf = fn (int $id): ?CalendarHours => isset($calendars[$id]) ? ($hours[$calendars[$id]] ?? null) : null;
+        $plain = fn (int $id): ScheduleSet => new ScheduleSet($periods[$id] ?? [], calendar: $calendarOf($id));
+
+        if (! static::shiftsAvailable()) {
+            return array_combine($ids, array_map($plain, $ids));
         }
 
         // Only employees of companies that use rosters at all need the roster queries.
@@ -152,7 +172,7 @@ class AttendanceScheduleResolver
         $rosteredIds = array_values(array_filter($ids, fn (int $id): bool => in_array($companies[$id] ?? 0, $rosteredCompanies, true)));
 
         if ($rosteredIds === []) {
-            return array_combine($ids, array_map(fn (int $id): ScheduleSet => new ScheduleSet($periods[$id] ?? []), $ids));
+            return array_combine($ids, array_map($plain, $ids));
         }
 
         $departmentIds = array_values(array_unique(array_filter(array_map(fn (int $id): ?int => $departments[$id] ?? null, $rosteredIds))));
@@ -193,10 +213,39 @@ class AttendanceScheduleResolver
                 assignments: [...$own->values()->all(), ...$byDepartment->values()->all()],
                 overrides: $overrides->where('employee_id', $id)->keyBy(fn (ShiftOverride $override): string => $override->date->toDateString())->all(),
                 shifts: $shifts,
+                calendar: $calendarOf($id),
             );
         }
 
         return $sets;
+    }
+
+    /**
+     * The working hours of these calendars (two queries); calendars without
+     * working rows, or deleted ones, are left out.
+     *
+     * @param  array<int, int>  $calendarIds
+     * @return array<int, CalendarHours> keyed by calendar id
+     */
+    private function calendarHours(array $calendarIds): array
+    {
+        if ($calendarIds === []) {
+            return [];
+        }
+
+        $hours = [];
+        Calendar::query()
+            ->whereIn('id', $calendarIds)
+            ->with(['attendance' => fn ($query) => $query->whereNull('resource_id')->whereNull('display_type')->where('day_period', '!=', 'lunch')])
+            ->get(['id', 'name', 'two_weeks_calendar'])
+            ->each(function (Calendar $calendar) use (&$hours): void {
+                $calendarHours = CalendarHours::fromCalendar($calendar);
+                if ($calendarHours !== null) {
+                    $hours[(int) $calendar->id] = $calendarHours;
+                }
+            });
+
+        return $hours;
     }
 
     /**
@@ -272,15 +321,29 @@ class AttendanceScheduleResolver
         );
     }
 
+    /** The employee's local timezone: their own, else their calendar's, else the attendance default. */
     public function timezoneFor(Employee $employee): string
     {
-        foreach ([$employee->time_zone, $employee->calendar?->timezone, config('app.timezone')] as $candidate) {
-            if (is_string($candidate) && $candidate !== '' && in_array($candidate, DateTimeZone::listIdentifiers(), true)) {
+        foreach ([$employee->time_zone, $employee->calendar?->timezone] as $candidate) {
+            if (self::isTimezone($candidate)) {
                 return $candidate;
             }
         }
 
-        return 'UTC';
+        return $this->defaultTimezone();
+    }
+
+    /** config attendance.monthly_report.timezone (the companies' local time), never the app's UTC. */
+    public function defaultTimezone(): string
+    {
+        $configured = config('attendance.monthly_report.timezone', 'Asia/Karachi');
+
+        return self::isTimezone($configured) ? $configured : 'Asia/Karachi';
+    }
+
+    private static function isTimezone(mixed $candidate): bool
+    {
+        return is_string($candidate) && $candidate !== '' && in_array($candidate, DateTimeZone::listIdentifiers(), true);
     }
 
     /**
@@ -354,74 +417,87 @@ class AttendanceScheduleResolver
     }
 
     /**
-     * $set: the employee's schedule set when the caller already loaded one
-     * covering $attendanceDate (saves the queries).
+     * The day's scheduled window, from the same schedule the monthly report
+     * and Today's attendance use (override > roster > work schedule >
+     * calendar > company default), in the employee's timezone. $set: the
+     * employee's schedule set when the caller already loaded one covering
+     * $attendanceDate (saves the queries).
      *
      * @return array{0: ?CarbonImmutable, 1: ?CarbonImmutable} scheduled start/end in UTC, or nulls
-     *                                                         (no calendar, day off, or any calendar failure)
+     *                                                         (not a working day, or a resolution failure)
      */
     public function scheduledWindowFor(Employee $employee, string $attendanceDate, ?ScheduleSet $set = null): array
     {
-        // A roster, an override or an effective-dated work schedule wins over the employee's calendar.
         try {
             $schedule = $set !== null ? $this->pick($set, $attendanceDate) : $this->scheduleFor($employee, $attendanceDate);
-            if (! $schedule->isDefault()) {
-                if (! $schedule->isWorkingDay($attendanceDate)) {
-                    return [null, null];
-                }
-
-                $midnight = CarbonImmutable::parse($attendanceDate.' 00:00:00', $this->timezoneFor($employee));
-
-                return [$midnight->addSeconds($schedule->startSeconds)->utc(), $midnight->addSeconds($schedule->endSeconds)->utc()];
-            }
-        } catch (Throwable $e) {
-            Log::warning('Work schedule resolution failed: '.$e->getMessage(), ['employee_id' => $employee->id]);
-        }
-
-        $calendar = $employee->calendar;
-        if (! $calendar) {
-            return [null, null];
-        }
-
-        try {
-            $timezone = $this->timezoneFor($employee);
-
-            // Calendar::getAttendanceIntervalsBatch() (type-hinted to mutable
-            // Carbon) lays a calendar's hour_from/hour_to out as UTC wall-clock
-            // times, whatever timezone is passed. So ask it for the day in UTC
-            // and reinterpret those wall-clock values in the employee's own
-            // timezone: "09:00-17:00" then means 09:00-17:00 local. This still
-            // reuses the calendar's weekday, date-range and two-week logic.
-            $dayStart = Carbon::parse($attendanceDate.' 00:00:00', 'UTC');
-            $dayEnd = $dayStart->copy()->endOfDay();
-
-            $intervals = collect($calendar->getAttendanceIntervalsBatch($dayStart, $dayEnd, timezone: 'UTC')[null] ?? []);
-            if ($intervals->isEmpty()) {
+            if (! $schedule->isWorkingDay($attendanceDate)) {
                 return [null, null];
             }
 
-            $toLocal = fn ($moment): CarbonImmutable => CarbonImmutable::parse($moment->format('Y-m-d H:i:s'), $timezone)->utc();
+            $midnight = CarbonImmutable::parse($attendanceDate.' 00:00:00', $this->timezoneFor($employee));
 
-            return [
-                $intervals->map(fn (array $interval) => $toLocal($interval[0]))->min(),
-                $intervals->map(fn (array $interval) => $toLocal($interval[1]))->max(),
-            ];
+            return [$midnight->addSeconds($schedule->startSeconds)->utc(), $midnight->addSeconds($schedule->endSeconds)->utc()];
         } catch (Throwable $e) {
             // A schedule failure must never block attendance; it only means
-            // late/early minutes are not computed (same as no calendar).
+            // late/early minutes are not computed.
             Log::warning('Attendance schedule resolution failed: '.$e->getMessage(), ['employee_id' => $employee->id]);
 
             return [null, null];
         }
     }
 
-    /** The work schedule (or company default) underneath any roster / override. */
+    /**
+     * A working-time calendar as the schedule of one date: the date's working
+     * intervals give the start, end, required minutes (their sum) and unpaid
+     * break (the gaps). A date without working hours is a day off with the
+     * company default's times (for off-day work).
+     */
+    public function fromCalendar(CalendarHours $hours, string $date): DaySchedule
+    {
+        $weekday = CarbonImmutable::parse($date)->dayOfWeekIso;
+        $intervals = $hours->intervalsOn($date);
+
+        if ($intervals === []) {
+            $default = $this->defaultSchedule();
+
+            return new DaySchedule(
+                startSeconds: $default->startSeconds,
+                endSeconds: $default->endSeconds,
+                requiredMinutes: $default->requiredMinutes,
+                workingDays: array_values(array_diff($hours->workingWeekdays(), [$weekday])),
+                name: $hours->name,
+                source: DaySchedule::SourceCalendar,
+                calendarId: $hours->calendarId,
+            );
+        }
+
+        $startMinutes = $intervals[0][0];
+        $endMinutes = max(array_column($intervals, 1));
+        $requiredMinutes = array_sum(array_map(fn (array $interval): int => $interval[1] - $interval[0], $intervals));
+
+        return new DaySchedule(
+            startSeconds: $startMinutes * 60,
+            endSeconds: $endMinutes * 60,
+            requiredMinutes: $requiredMinutes,
+            workingDays: array_values(array_unique([...$hours->workingWeekdays(), $weekday])),
+            name: $hours->name,
+            breakMinutes: max(0, ($endMinutes - $startMinutes) - $requiredMinutes),
+            source: DaySchedule::SourceCalendar,
+            calendarId: $hours->calendarId,
+        );
+    }
+
+    /** The work schedule, else the employee's calendar, else the company default, underneath any roster / override. */
     private function underlying(ScheduleSet $set, string $date): DaySchedule
     {
         foreach ($set->periods as $period) {
             if ($period->covers($date)) {
                 return $this->fromPeriod($period);
             }
+        }
+
+        if ($set->calendar !== null) {
+            return $this->fromCalendar($set->calendar, $date);
         }
 
         return $this->defaultSchedule();

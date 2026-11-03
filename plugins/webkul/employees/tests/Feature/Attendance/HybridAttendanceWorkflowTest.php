@@ -130,9 +130,12 @@ it('with auto_close_policy=scheduled_end, closes a shift at its scheduled end an
 it('with auto_close_policy=scheduled_end, leaves a shift without a schedule open (no invented end time)', function () {
     config(['hr_attendance_geofence.auto_close_policy' => 'scheduled_end']);
     $f = geoFixture();
+    // Every working day has a schedule (at least the company default 10:00-18:00); a weekend shift has none.
+    $this->travelTo(CarbonImmutable::parse('2026-10-03 05:00:00', 'UTC'));
     $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
+    expect(AttendanceRecord::query()->where('employee_id', $f['employee']->id)->first()->scheduled_end)->toBeNull();
 
-    $now = CarbonImmutable::parse('2026-10-05 18:00:00', 'UTC');
+    $now = CarbonImmutable::parse('2026-10-03 18:00:00', 'UTC');
     $this->travelTo($now);
 
     expect($this->service->autoCompleteCompletedShifts($now))->toBe(0);

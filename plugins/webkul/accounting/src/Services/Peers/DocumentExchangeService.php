@@ -101,7 +101,7 @@ class DocumentExchangeService
      * plus an expiring claim link. Only the token hash is stored, so the
      * plaintext returned here is the only copy that will ever exist.
      *
-     * @return array{transmission: OutboundTransmission, claim_token: string}
+     * @return array{transmission: OutboundTransmission, claim_token: string, emailed: bool}
      */
     public function sendInvoiceToEmail(User $actor, Move $invoice, string $email, ?string $ipAddress = null): array
     {
@@ -140,13 +140,17 @@ class DocumentExchangeService
 
         // After the commit, never inside it: a dead SMTP server must not roll
         // back a link that has already been created and is already usable.
-        $this->mailer->sendInvoiceLink(
+        $emailed = $this->mailer->sendInvoiceLink(
             $transmission,
             $invoice,
             route('accounting.claim.show', ['token' => $token]),
         );
 
-        return ['transmission' => $transmission, 'claim_token' => $token];
+        if (! $emailed) {
+            $this->recordClaimEmailFailure($transmission, $actor, $ipAddress);
+        }
+
+        return ['transmission' => $transmission, 'claim_token' => $token, 'emailed' => $emailed];
     }
 
     /**
@@ -201,7 +205,7 @@ class DocumentExchangeService
     /**
      * Send a file to someone with no AureusERP: an expiring claim link.
      *
-     * @return array{transmission: OutboundTransmission, claim_token: string}
+     * @return array{transmission: OutboundTransmission, claim_token: string, emailed: bool}
      */
     public function sendDocumentToEmail(User $actor, Document $document, string $email, ?string $ipAddress = null): array
     {
@@ -238,13 +242,35 @@ class DocumentExchangeService
             return $transmission;
         });
 
-        $this->mailer->sendDocumentLink(
+        $emailed = $this->mailer->sendDocumentLink(
             $transmission,
             $document,
             route('accounting.claim.show', ['token' => $token]),
         );
 
-        return ['transmission' => $transmission, 'claim_token' => $token];
+        if (! $emailed) {
+            $this->recordClaimEmailFailure($transmission, $actor, $ipAddress, $document->id);
+        }
+
+        return ['transmission' => $transmission, 'claim_token' => $token, 'emailed' => $emailed];
+    }
+
+    /**
+     * The claim link exists and works, but its email did not go out: kept on
+     * the transmission (last_error) and in the audit trail, so the sender is
+     * told and can pass the link on themselves.
+     */
+    private function recordClaimEmailFailure(OutboundTransmission $transmission, User $actor, ?string $ipAddress, ?int $documentId = null): void
+    {
+        $error = $this->mailer->lastError() ?? 'The claim link email could not be sent.';
+
+        $transmission->forceFill(['last_error' => "Claim link email not sent: {$error}"])->save();
+
+        $this->audit($transmission->company_id, DocumentAuditAction::ClaimLinkEmailFailed, $actor, [
+            'transmission_id' => $transmission->id,
+            'recipient'       => $transmission->recipient_email,
+            'error'           => $error,
+        ], $ipAddress, $documentId);
     }
 
     // ------------------------------------------------------------- receive

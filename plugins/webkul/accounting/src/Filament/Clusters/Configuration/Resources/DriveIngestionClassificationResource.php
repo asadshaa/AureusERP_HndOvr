@@ -337,7 +337,8 @@ class DriveIngestionClassificationResource extends Resource
                     ->label('Post to GL')
                     ->icon('heroicon-o-check-badge')
                     ->color('success')
-                    ->authorize(AccountingPermissions::ManageDocuments)
+                    // Same Post Journal gate the service enforces server-side.
+                    ->authorize(AccountingPermissions::PostJournal)
                     ->visible(fn (DriveIngestionClassification $record) => $record->created_invoice_id === null
                         && $record->validation_status !== DriveClassificationStatus::Posted
                         && $record->resolved_partner_id

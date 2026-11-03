@@ -222,7 +222,7 @@ it('screens applications that arrive with answers through intake (import, later 
     $applicant = app(ApplicantIntakeService::class)->import('manual', [
         'external_application_id' => 'WEB-1', 'candidate_name' => 'Sara Khan', 'candidate_email' => 'sara@example.test',
         'job_id'                  => $f['job']->id, 'source_details' => 'Careers form', 'screening_answers' => [$question->id => 'no'],
-    ], jobOpeningUser($f['company']));
+    ], jobOpeningUser($f['company'], 'create_recruitment_applicant'));
 
     expect($applicant->screening_status)->toBe('flagged')
         ->and($applicant->answers()->sole()->source)->toBe('manual')

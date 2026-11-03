@@ -15,9 +15,8 @@ use Webkul\Accounting\Models\WebRtcSession;
  * exists so the status column means what it says, and so a session left
  * sitting in "waiting" because nobody ever connected stops looking live.
  *
- * Mirrors ExpireDocumentTransfersCommand, including its caveat: this
- * repository wires no application scheduler (bootstrap/app.php registers no
- * withSchedule), so run it from external cron.
+ * Mirrors ExpireDocumentTransfersCommand; scheduled hourly in
+ * routes/console.php.
  *
  * Deliberately flips status rather than deleting rows. The transfer's own
  * record of what happened lives in accounting_document_audits, so these

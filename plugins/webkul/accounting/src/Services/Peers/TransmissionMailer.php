@@ -18,17 +18,28 @@ use Webkul\Support\Traits\PDFHandler;
  *
  * Kept out of DocumentExchangeService on purpose: that service owns the
  * transmission record and must not fail because an SMTP server is down. A
- * failure here is logged and swallowed, because the link has already been
- * created and is still usable -- losing the email is an inconvenience,
- * losing the transmission would be a bug.
+ * failure here is logged and reported as false (reason in lastError()),
+ * never thrown, because the link has already been created and is still
+ * usable -- losing the email is an inconvenience, losing the transmission
+ * would be a bug. DocumentExchangeService records the failure and tells the
+ * sender, so they can pass the link on themselves.
  */
 class TransmissionMailer
 {
     use PDFHandler;
 
+    /** Why the last send returned false (null after a successful send). */
+    private ?string $lastError = null;
+
     public function __construct(
         private readonly DocumentService $documents,
     ) {}
+
+    /** The reason the most recent sendInvoiceLink() / sendDocumentLink() returned false. */
+    public function lastError(): ?string
+    {
+        return $this->lastError;
+    }
 
     /**
      * @return bool Whether the message was handed to the mailer.
@@ -72,7 +83,12 @@ class TransmissionMailer
         ?string $attachmentPath,
         ?string $attachmentName,
     ): bool {
+        $this->lastError = null;
+
         if (! $transmission->recipient_email) {
+            static::cleanupTemporaryAttachment($attachmentPath);
+            $this->lastError = 'The transmission has no recipient email address.';
+
             return false;
         }
 
@@ -91,11 +107,14 @@ class TransmissionMailer
         } catch (Throwable $e) {
             // Deliberately non-fatal: the claim link already exists and still
             // works, so a dead SMTP server must not undo the transmission.
+            // The caller surfaces the false return (and lastError()) to the
+            // sender and the audit trail.
             Log::warning('Could not email a transmission claim link.', [
                 'transmission_id' => $transmission->id,
                 'recipient'       => $transmission->recipient_email,
                 'error'           => $e->getMessage(),
             ]);
+            $this->lastError = $e->getMessage();
 
             return false;
         } finally {

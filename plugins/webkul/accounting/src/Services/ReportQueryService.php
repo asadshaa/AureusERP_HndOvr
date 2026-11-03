@@ -22,6 +22,7 @@ use Webkul\Accounting\Models\ReportTemplate;
  *   - derive the default value basis from the layout (per-line overrides win)
  *   - run the calculation engine
  *   - cache the (pure) result and invalidate it when the template changes
+ *     or the ledger of any company the run reads changes (LedgerVersion)
  *
  * The UI (Stage 4 designer preview) and the report/export pages (Stage 5) both
  * call this service, so no ledger or formula logic ever lives in a Filament
@@ -37,6 +38,7 @@ class ReportQueryService
     public function __construct(
         protected ReportCalculationEngine $engine,
         protected ReportColumnResolver $columns,
+        protected LedgerVersion $ledgerVersion,
     ) {}
 
     /**
@@ -53,7 +55,7 @@ class ReportQueryService
             return $this->engine->calculateForColumns($template, $columns, $context, $defaultBasis);
         }
 
-        $key = ReportCacheKey::forColumns($template, $columns, $context, $defaultBasis);
+        $key = ReportCacheKey::forColumns($template, $columns, $context, $defaultBasis, $this->ledgerStamp($template, $columns, $context));
 
         /** @var array<int, array<string, mixed>> $cached */
         $cached = Cache::remember($key, $this->cacheTtlSeconds, function () use ($template, $columns, $context, $defaultBasis) {
@@ -94,12 +96,49 @@ class ReportQueryService
      */
     public function forget(ReportTemplate $template, int $year, ReportContext $context): void
     {
+        $columns = $this->columnsFor($template, $year, $context);
+
         Cache::forget(ReportCacheKey::forColumns(
             $template,
-            $this->columnsFor($template, $year, $context),
+            $columns,
             $context,
             $this->defaultBasisFor($template),
+            $this->ledgerStamp($template, $columns, $context),
         ));
+    }
+
+    /**
+     * The ledger version of every company the run can read: the run scope
+     * plus the (authorised) entity overrides of its columns and lines. An
+     * unscoped, unrestricted run reads every company and stamps globally.
+     *
+     * @param  array<int, ReportColumnSpec>  $columns
+     */
+    protected function ledgerStamp(ReportTemplate $template, array $columns, ReportContext $context): string
+    {
+        if (! $context->hasCompanyScope()) {
+            return $this->ledgerVersion->stamp([], $context->postedOnly);
+        }
+
+        $companyIds = $context->companyIds;
+
+        foreach ($columns as $column) {
+            if (! $column->isSpacer()) {
+                $companyIds = [...$companyIds, ...($column->contextFor($context)?->companyIds ?? [])];
+            }
+        }
+
+        $lineCompanyIds = $template->lines()->whereNotNull('company_id')->distinct()->pluck('company_id');
+
+        foreach ($lineCompanyIds as $lineCompanyId) {
+            $companyIds = [...$companyIds, ...($context->narrowTo([(int) $lineCompanyId])?->companyIds ?? [])];
+        }
+
+        if ($companyIds === []) {
+            return 'none';
+        }
+
+        return $this->ledgerVersion->stamp($companyIds, $context->postedOnly);
     }
 
     /**
@@ -164,7 +203,7 @@ class ReportQueryService
                 isBold: (bool) $row['is_bold'],
                 indentLevel: (int) $row['indent_level'],
                 sort: (int) $row['sort'],
-                values: array_map('floatval', $row['values'] ?? []),
+                values: array_map(fn ($value): ?float => $value === null ? null : (float) $value, $row['values'] ?? []),
                 isCheck: (bool) ($row['is_check'] ?? false),
             );
         })->values();

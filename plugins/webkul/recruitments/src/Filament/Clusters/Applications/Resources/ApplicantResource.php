@@ -68,14 +68,17 @@ use Webkul\Recruitment\Filament\Schemas\JobOfferComponents;
 use Webkul\Recruitment\Models\Applicant;
 use Webkul\Recruitment\Models\ApplicantAnswer;
 use Webkul\Recruitment\Models\Candidate;
+use Webkul\Recruitment\Models\JobOffer;
 use Webkul\Recruitment\Models\JobPosition;
 use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Models\Stage as RecruitmentStage;
 use Webkul\Recruitment\Services\CandidateConversionService;
+use Webkul\Recruitment\Services\JobOfferService;
 use Webkul\Recruitment\Services\JobPostingLinks;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
 use Webkul\Security\Filament\Resources\UserResource;
+use Webkul\Security\Models\User;
 
 class ApplicantResource extends Resource
 {
@@ -250,21 +253,29 @@ class ApplicantResource extends Resource
                                                 if ($state) {
                                                     $candidate = Candidate::find($state);
 
-                                                    $set('candidate.email_from', $candidate?->email_from);
-                                                    $set('candidate.phone', $candidate?->phone);
-                                                    $set('candidate.linkedin_profile', $candidate?->linkedin_profile);
+                                                    $set('candidate_email_from', $candidate?->email_from);
+                                                    $set('candidate_phone', $candidate?->phone);
+                                                    $set('candidate_linkedin_profile', $candidate?->linkedin_profile);
                                                 }
                                             })
+                                            // Another candidate picked: show (and save to) that candidate's contact details.
+                                            ->afterStateUpdated(function (Set $set, $state): void {
+                                                $candidate = $state ? RecruitmentCompanyScope::ownCompany(Candidate::query())->find($state) : null;
+
+                                                $set('candidate_email_from', $candidate?->email_from);
+                                                $set('candidate_phone', $candidate?->phone);
+                                                $set('candidate_linkedin_profile', $candidate?->linkedin_profile);
+                                            })
                                             ->columnSpan(1),
-                                        TextInput::make('candidate.email_from')
+                                        TextInput::make('candidate_email_from')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.email'))
                                             ->email()
                                             ->columnSpan(1),
-                                        TextInput::make('candidate.phone')
+                                        TextInput::make('candidate_phone')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.phone'))
                                             ->tel()
                                             ->columnSpan(1),
-                                        TextInput::make('candidate.linkedin_profile')
+                                        TextInput::make('candidate_linkedin_profile')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.linkedin-profile'))
                                             ->url()
                                             ->columnSpan(1),
@@ -276,7 +287,7 @@ class ApplicantResource extends Resource
                                             ->reactive()
                                             ->afterStateHydrated(function (Set $set, Get $get, $state) {
                                                 if (! $get('stage_id') && $state) {
-                                                    $set('stage_id', RecruitmentStage::where('is_default', 1)->first()->id ?? null);
+                                                    $set('stage_id', RecruitmentStage::defaultFor(RecruitmentCompanyScope::companyId())?->id);
                                                 }
                                             })
                                             ->afterStateUpdated(function (Set $set, Get $get, ?string $state, ?string $old) {
@@ -292,7 +303,7 @@ class ApplicantResource extends Resource
                                                 }
 
                                                 if (is_null($old) && $state) {
-                                                    $set('stage_id', RecruitmentStage::where('is_default', 1)->first()->id ?? null);
+                                                    $set('stage_id', RecruitmentStage::defaultFor(RecruitmentCompanyScope::companyId())?->id);
                                                 }
 
                                                 if (! is_null($old) && ! is_null($state)) {
@@ -385,6 +396,7 @@ class ApplicantResource extends Resource
                                     ->preload(),
                             ])->columnSpanFull(),
                         Section::make(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.title'))
+                            ->visible(fn (?Applicant $record): bool => static::canSeeSalary($record))
                             ->schema([
                                 Group::make()
                                     ->schema([
@@ -395,7 +407,7 @@ class ApplicantResource extends Resource
                                             ->maxValue(99999999999)
                                             ->step(0.01),
                                         TextInput::make('salary_expected_extra')
-                                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.salary-proposed-extra'))
+                                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.salary-expected-extra'))
                                             ->numeric()
                                             ->minValue(0)
                                             ->maxValue(99999999999)
@@ -410,7 +422,7 @@ class ApplicantResource extends Resource
                                             ->maxValue(99999999999)
                                             ->step(0.01),
                                         TextInput::make('salary_proposed_extra')
-                                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.salary-expected-extra'))
+                                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.salary-proposed-extra'))
                                             ->numeric()
                                             ->minValue(0)
                                             ->maxValue(99999999999)
@@ -452,11 +464,21 @@ class ApplicantResource extends Resource
                                 TextInput::make('screening_score')->label('CV score')->helperText('Set by the CV analyser; you can adjust it. Re-analysing the CV replaces it.')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('interview_score')->helperText('Set from interview feedback (average rating x 20); you can adjust it. New feedback recalculates it.')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('assessment_score')->numeric()->minValue(0)->maxValue(100),
-                                Select::make('offer_status')->options([
-                                    'draft'    => 'Draft', 'sent' => 'Sent', 'accepted' => 'Accepted',
-                                    'declined' => 'Declined', 'withdrawn' => 'Withdrawn',
-                                ]),
-                                DatePicker::make('offer_date')->native(false),
+                                // Read-only: the latest job offer's status and date (offers are managed on the Offers tab).
+                                TextInput::make('offer_status')
+                                    ->label(__('Offer status'))
+                                    ->disabled()
+                                    ->dehydrated(false)
+                                    ->formatStateUsing(fn (?Applicant $record, $state): ?string => static::latestOffer($record)?->status->getLabel() ?? $state)
+                                    ->placeholder(__('No offer yet')),
+                                DatePicker::make('offer_date')
+                                    ->label(__('Offer date'))
+                                    ->native(false)
+                                    ->disabled()
+                                    ->dehydrated(false)
+                                    ->formatStateUsing(fn (?Applicant $record, $state): ?string => ($offer = static::latestOffer($record))
+                                        ? ($offer->sent_at ?? $offer->created_at)?->toDateString()
+                                        : $state),
                             ])->columnSpanFull(),
                     ])
                     ->columnSpan(['lg' => 1]),
@@ -606,6 +628,7 @@ class ApplicantResource extends Resource
                     ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.columns.source'))
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('salary_expected')
+                    ->visible(fn (): bool => static::canSeeSalary(null))
                     ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.columns.salary-expected'))
                     ->searchable()
                     ->sortable()
@@ -713,12 +736,15 @@ class ApplicantResource extends Resource
                         TextConstraint::make('priority')
                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.priority'))
                             ->icon('heroicon-o-exclamation-circle'),
-                        TextConstraint::make('salary_proposed_extra')
-                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.salary-proposed-extra'))
-                            ->icon('heroicon-o-currency-dollar'),
-                        TextConstraint::make('salary_expected_extra')
-                            ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.salary-expected-extra'))
-                            ->icon('heroicon-o-currency-dollar'),
+                        // Filtering by salary would reveal it: only for those who may see salaries.
+                        ...(static::canSeeSalary(null) ? [
+                            TextConstraint::make('salary_proposed_extra')
+                                ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.salary-proposed-extra'))
+                                ->icon('heroicon-o-currency-dollar'),
+                            TextConstraint::make('salary_expected_extra')
+                                ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.salary-expected-extra'))
+                                ->icon('heroicon-o-currency-dollar'),
+                        ] : []),
                         TextConstraint::make('applicant_notes')
                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.table.filters.applicant-notes'))
                             ->icon('heroicon-o-document-text'),
@@ -793,7 +819,12 @@ class ApplicantResource extends Resource
                         ),
                 ]),
             ])
-            ->modifyQueryUsing(function (Builder $query) {
+            ->modifyQueryUsing(function (Builder $query, $livewire) {
+                // Blocked applications are hidden from every list except the "Blocked" view, which shows exactly them.
+                if (method_exists($livewire, 'getActiveTableView') && $livewire->getActiveTableView() === 'blocked') {
+                    return;
+                }
+
                 $query->where(function ($sub) {
                     $sub->where('state', '!=', RecruitmentStateEnum::BLOCKED->value)
                         ->orWhereNull('state');
@@ -946,6 +977,7 @@ class ApplicantResource extends Resource
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.infolist.sections.education-and-availability.entries.availability-date')),
                                     ]),
                                 Section::make(__('recruitments::filament/clusters/applications/resources/applicant.infolist.sections.salary.title'))
+                                    ->visible(fn (?Applicant $record): bool => static::canSeeSalary($record))
                                     ->schema([
                                         Group::make()
                                             ->schema([
@@ -1035,6 +1067,23 @@ class ApplicantResource extends Resource
                             ])->columnSpan(1),
                     ])->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * The legacy expected / proposed salary of an application: only for those
+     * who may see offer salaries in its company (HR, hiring managers).
+     */
+    public static function canSeeSalary(?Applicant $record): bool
+    {
+        $user = Auth::user();
+        $companyId = $record?->company_id ?? RecruitmentCompanyScope::companyId();
+
+        return $user instanceof User && $companyId !== null && app(JobOfferService::class)->canSeeSalaryFor($user, (int) $companyId);
+    }
+
+    public static function latestOffer(?Applicant $record): ?JobOffer
+    {
+        return $record?->exists ? $record->offers()->latest('id')->first() : null;
     }
 
     public static function getRecordSubNavigation(Page $page): array

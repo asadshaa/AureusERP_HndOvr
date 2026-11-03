@@ -38,7 +38,7 @@ it('records a verified check-in with server time, evidence and a two-way link', 
     $result = $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
 
     expect($result->accepted)->toBeTrue()->and($result->result)->toBe(Result::Verified)
-        ->and($result->message)->toContain('Checked in at 05:00 AM');
+        ->and($result->message)->toContain('Checked in at 10:00 AM'); // Asia/Karachi: the profile has no timezone
 
     $record = geoRecords($f['employee'])->sole();
     expect($record->source)->toBe('gps')->and($record->status)->toBe('present')
@@ -163,7 +163,7 @@ it('records a verified check-out and computes worked hours through the existing 
     $this->travelTo(CarbonImmutable::parse('2026-10-05 13:30:00', 'UTC'));
     $result = $this->service->checkOut($f['user'], geoEvidence(), geoRequest());
 
-    expect($result->accepted)->toBeTrue()->and($result->message)->toContain('Checked out at 01:30 PM');
+    expect($result->accepted)->toBeTrue()->and($result->message)->toContain('Checked out at 06:30 PM'); // Asia/Karachi
     $record = geoRecords($f['employee'])->sole();
     expect((float) $record->worked_hours)->toBe(8.5)
         ->and($record->check_out_verification_id)->not->toBeNull()
@@ -214,7 +214,8 @@ it('refuses a check-out when the employee is not checked in', function () {
 });
 
 it('keeps a check-out that arrives after midnight on the record of the day the shift started', function () {
-    $f = geoFixture();
+    // Local time = UTC here, so 22:00 -> 06:00 is a night shift.
+    $f = geoFixture(['time_zone' => 'UTC']);
     $this->travelTo(CarbonImmutable::parse('2026-10-05 22:00:00', 'UTC'));
     $this->service->checkIn($f['user'], geoEvidence(), geoRequest());
 

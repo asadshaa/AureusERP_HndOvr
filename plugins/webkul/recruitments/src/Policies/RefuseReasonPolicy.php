@@ -4,7 +4,9 @@ namespace Webkul\Recruitment\Policies;
 
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Webkul\Recruitment\Models\RefuseReason;
+use Webkul\Recruitment\Models\Stage;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 
 class RefuseReasonPolicy
 {
@@ -39,7 +41,7 @@ class RefuseReasonPolicy
      */
     public function update(User $user, RefuseReason $refuseReason): bool
     {
-        return $user->can('update_recruitment_refuse::reason');
+        return $user->can('update_recruitment_refuse::reason') && $this->managesReason($user, $refuseReason);
     }
 
     /**
@@ -47,7 +49,18 @@ class RefuseReasonPolicy
      */
     public function delete(User $user, RefuseReason $refuseReason): bool
     {
-        return $user->can('delete_recruitment_refuse::reason');
+        return $user->can('delete_recruitment_refuse::reason') && $this->managesReason($user, $refuseReason);
+    }
+
+    /**
+     * A company's own reason is changed in that (active) company; a shared
+     * reason (no company) is used by every company, so only by an administrator.
+     */
+    protected function managesReason(User $user, RefuseReason $refuseReason): bool
+    {
+        return $refuseReason->company_id === null
+            ? Stage::userManagesSharedStages($user)
+            : (int) $refuseReason->company_id === CurrentCompany::id($user);
     }
 
     /**

@@ -4,13 +4,24 @@ namespace Webkul\Account\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Webkul\Account\Enums\TypeTaxUse;
+use Webkul\Account\Http\Requests\Concerns\ValidatesCompanyReferences;
+use Webkul\Account\Models\Move;
 use Webkul\Account\Models\Product;
+use Webkul\Security\Services\CompanyScopedRules;
 
+/**
+ * Invoices, bills, credit notes and refunds. The journal, fiscal position,
+ * payment term, payment method line and line taxes must belong to the move's
+ * company (the active company on create, the move's own company on update;
+ * shared payment terms allowed); the partner, bank account and products to one
+ * of the token user's companies (shared products allowed).
+ */
 class InvoiceRequest extends FormRequest
 {
+    use ValidatesCompanyReferences;
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -26,29 +37,30 @@ class InvoiceRequest extends FormRequest
      */
     public function rules(): array
     {
-        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+        $isUpdate = $this->isUpdateRequest();
         $requiredRule = $isUpdate ? ['sometimes', 'required'] : ['required'];
+        $moveCompany = [(int) $this->moveCompanyId()];
 
         $rules = [
-            'partner_id'                       => [...$requiredRule, 'integer', 'exists:partners_partners,id'],
+            'partner_id'                       => [...$requiredRule, 'integer', CompanyScopedRules::exists('partners_partners', user: $this->apiUser())],
             'currency_id'                      => [...$requiredRule, 'integer', 'exists:currencies,id'],
-            'journal_id'                       => [...$requiredRule, 'integer', 'exists:accounts_journals,id'],
+            'journal_id'                       => [...$requiredRule, 'integer', CompanyScopedRules::exists('accounts_journals', $moveCompany)],
             'invoice_date'                     => [...$requiredRule, 'date'],
             'invoice_date_due'                 => ['nullable', 'date', 'prohibited_if:invoice_payment_term_id,*'],
-            'invoice_payment_term_id'          => ['nullable', 'integer', 'exists:accounts_payment_terms,id', 'prohibited_if:invoice_date_due,*'],
-            'fiscal_position_id'               => ['nullable', 'integer', 'exists:accounts_fiscal_positions,id'],
+            'invoice_payment_term_id'          => ['nullable', 'integer', CompanyScopedRules::exists('accounts_payment_terms', $moveCompany, allowShared: true), 'prohibited_if:invoice_date_due,*'],
+            'fiscal_position_id'               => ['nullable', 'integer', CompanyScopedRules::exists('accounts_fiscal_positions', $moveCompany)],
             'invoice_user_id'                  => ['nullable', 'integer', 'exists:users,id'],
-            'partner_bank_id'                  => ['nullable', 'integer', 'exists:partners_bank_accounts,id'],
+            'partner_bank_id'                  => ['nullable', 'integer', CompanyScopedRules::existsThrough('partners_bank_accounts', 'partner_id', 'partners_partners', user: $this->apiUser())],
             'invoice_incoterm_id'              => ['nullable', 'integer', 'exists:accounts_incoterms,id'],
             'invoice_cash_rounding_id'         => ['nullable', 'integer', 'exists:accounts_cash_roundings,id'],
-            'preferred_payment_method_line_id' => ['nullable', 'integer', 'exists:accounts_payment_method_lines,id'],
+            'preferred_payment_method_line_id' => ['nullable', 'integer', CompanyScopedRules::existsThrough('accounts_payment_method_lines', 'journal_id', 'accounts_journals', $moveCompany)],
             'reference'                        => ['nullable', 'string', 'max:255'],
             'payment_reference'                => ['nullable', 'string', 'max:255'],
             'narration'                        => ['nullable', 'string'],
             'incoterm_location'                => ['nullable', 'string', 'max:255'],
             'delivery_date'                    => ['nullable', 'date'],
             'invoice_lines'                    => [...$requiredRule, 'array', 'min:1'],
-            'invoice_lines.*.product_id'       => ['required', 'integer', 'exists:products_products,id'],
+            'invoice_lines.*.product_id'       => ['required', 'integer', CompanyScopedRules::exists('products_products', allowShared: true, user: $this->apiUser())],
             'invoice_lines.*.quantity'         => ['required', 'numeric', 'min:0.0001'],
             'invoice_lines.*.uom_id'           => ['required', 'integer', 'exists:unit_of_measures,id'],
             'invoice_lines.*.price_unit'       => ['required', 'numeric'],
@@ -56,8 +68,9 @@ class InvoiceRequest extends FormRequest
             'invoice_lines.*.taxes'            => ['nullable', 'array'],
             'invoice_lines.*.taxes.*'          => [
                 'integer',
+                // The move's company, never a company_id sent in the payload (it is not saved).
                 Rule::exists('accounts_taxes', 'id')
-                    ->where('company_id', $this->input('company_id') ?? Auth::user()?->default_company_id)
+                    ->where('company_id', $moveCompany[0])
                     ->where('is_active', true)
                     ->where('type_tax_use', $this->expectedTaxUsage()->value),
             ],
@@ -65,6 +78,14 @@ class InvoiceRequest extends FormRequest
         ];
 
         return $rules;
+    }
+
+    /** The company of the move: the active company on create, the move's own company on update. */
+    protected function moveCompanyId(): ?int
+    {
+        return $this->isUpdateRequest()
+            ? $this->routeRecordCompanyId(Move::class)
+            : $this->activeCompanyId();
     }
 
     protected function expectedTaxUsage(): TypeTaxUse

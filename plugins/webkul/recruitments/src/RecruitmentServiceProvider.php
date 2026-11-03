@@ -77,6 +77,8 @@ class RecruitmentServiceProvider extends PackageServiceProvider
                 '2026_10_31_000001_create_recruitments_job_board_registrations_table',
                 '2026_10_31_400001_create_recruitments_job_offers_tables',
                 '2026_10_31_400002_provision_recruitments_job_offer_defaults',
+                '2026_11_02_600001_add_response_channel_to_recruitments_job_offers_table',
+                '2026_11_02_600002_add_company_id_to_recruitments_refuse_reasons_table',
             ])
             ->runsMigrations()
             ->hasCommands([

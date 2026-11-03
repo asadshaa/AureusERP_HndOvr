@@ -24,7 +24,7 @@ use Webkul\Support\Models\ApprovalWorkflow;
  * (current_step_started_at, reset when the step advances or the request is
  * resubmitted) in calendar hours:
  *
- *  - reminder 1 after "after_hours", then one every "every_hours" (counted
+ *  - reminder 1 after "after_hours" (the step's sla_hours when set), then one every "every_hours" (counted
  *    from the previous reminder actually sent), up to "max_reminders", to the
  *    approvers who can still act on the step;
  *  - one interval after the last reminder (after "after_hours" when the
@@ -47,20 +47,23 @@ use Webkul\Support\Models\ApprovalWorkflow;
  */
 final class ApprovalReminderService
 {
-    /** Hierarchy steps whose approver is a manager with a line manager of their own. */
-    private const MANAGER_ROUTES = ['requester_manager', 'department_manager', 'team_manager', 'record_manager'];
-
     public function __construct(
         private ApprovalEngine $engine,
         private HierarchicalNotificationService $notifications,
     ) {}
 
-    /** @return array{enabled: bool, after_hours: int, every_hours: int, max_reminders: int} */
-    public function settingsFor(?ApprovalWorkflow $workflow): array
+    /**
+     * A step's "SLA hours", when set, overrides the workflow's "remind after"
+     * for that step: its first reminder (and the queue's overdue colour) is
+     * due once the step has waited that long.
+     *
+     * @return array{enabled: bool, after_hours: int, every_hours: int, max_reminders: int}
+     */
+    public function settingsFor(?ApprovalWorkflow $workflow, ?ApprovalStep $step = null): array
     {
         return [
             'enabled'       => (bool) config('approvals.reminders.enabled', true) && (bool) ($workflow?->reminders_enabled ?? true),
-            'after_hours'   => max(1, (int) ($workflow?->remind_after_hours ?: config('approvals.reminders.after_hours', 24))),
+            'after_hours'   => max(1, (int) ($step?->sla_hours ?: $workflow?->remind_after_hours ?: config('approvals.reminders.after_hours', 24))),
             'every_hours'   => max(1, (int) ($workflow?->remind_every_hours ?: config('approvals.reminders.every_hours', 24))),
             'max_reminders' => max(0, (int) ($workflow?->max_reminders ?? config('approvals.reminders.max_reminders', 3))),
         ];
@@ -136,7 +139,7 @@ final class ApprovalReminderService
 
         $request->loadMissing(['workflow.steps', 'reminders']);
         $step = $request->currentStep();
-        $settings = $this->settingsFor($request->workflow);
+        $settings = $this->settingsFor($request->workflow, $step);
 
         if (! $step || ! $settings['enabled']) {
             return null;
@@ -254,7 +257,7 @@ final class ApprovalReminderService
         $subjectUserId = $this->engine->subjectEmployeeUserId($request);
         $recipients = $this->engine->resolveHrApproversForCompany($companyId, $subjectUserId);
 
-        if (in_array($step->hierarchy_route, self::MANAGER_ROUTES, true)) {
+        if (in_array($step->hierarchy_route, ApprovalEngine::MANAGER_ROUTES, true)) {
             $manager = $this->engine->hierarchyManagerFor($request, $step);
             $manager?->loadMissing('employee.parent.user');
             $managersManager = $manager?->employee?->parent?->user;
@@ -320,7 +323,7 @@ final class ApprovalReminderService
                     'sent_at'          => $now,
                 ]);
 
-                $settings = $this->settingsFor($locked->workflow);
+                $settings = $this->settingsFor($locked->workflow, $step);
                 $sent = 0;
 
                 foreach ($recipients as $recipient) {

@@ -75,6 +75,17 @@ final class AccountingPermissions
     public const DeleteDocuments = 'accounting_delete_documents';
 
     /**
+     * Sending a document to another user's device is a distinct act from
+     * downloading it yourself: it moves a copy to a machine the sender
+     * does not control. Granted with ManageDocuments (the roles that work
+     * with supporting documents); read-only oversight roles (auditors, VP
+     * Finance / CFO, FP&A, reconciliation) deliberately do NOT get it --
+     * their bundles are explicit allowlists, so they are excluded by
+     * omission. Used by DocumentTransferService::send().
+     */
+    public const TransferDocuments = 'accounting_transfer_documents';
+
+    /**
      * Distinguishes "a payment was prepared/recorded" (the generic
      * create/update Shield permission on the Payment resource) from "a
      * payment was authorized to actually leave the bank" -- the codebase
@@ -157,6 +168,7 @@ final class AccountingPermissions
             self::ManageDocuments,
             self::DownloadDocuments,
             self::DeleteDocuments,
+            self::TransferDocuments,
             self::ReleasePayment,
             self::ViewManualAdjustments,
             self::ViewExchangeRates,
@@ -340,6 +352,7 @@ final class AccountingPermissions
             self::RunConfiguredImports,
             self::ViewDocuments,
             self::ManageDocuments,
+            self::TransferDocuments,
             self::DownloadDocuments,
             'page_accounting_overview',
             'view_any_accounting_bank_statement',
@@ -388,6 +401,7 @@ final class AccountingPermissions
             'page_accounting_aged_payable',
             self::ViewDocuments,
             self::ManageDocuments,
+            self::TransferDocuments,
             self::DownloadDocuments,
             // An inbound peer invoice becomes a vendor BILL, which is this
             // role's core work -- so reviewing that queue belongs here, not
@@ -433,6 +447,7 @@ final class AccountingPermissions
             'page_accounting_aged_receivable',
             self::ViewDocuments,
             self::ManageDocuments,
+            self::TransferDocuments,
             self::DownloadDocuments,
             // Deliberately no approval-queue visibility here: the raw
             // ApprovalRequest resource is not scoped to "requests I
@@ -469,6 +484,7 @@ final class AccountingPermissions
             'page_accounting_direct_cash_flow',
             self::ViewDocuments,
             self::ManageDocuments,
+            self::TransferDocuments,
             self::DownloadDocuments,
             // Deliberately no approval-queue visibility here: the raw
             // ApprovalRequest resource is not scoped to "requests I
@@ -548,6 +564,7 @@ final class AccountingPermissions
             self::ViewMultiCurrencyReports,
             self::ViewDocuments,
             self::ManageDocuments,
+            self::TransferDocuments,
             self::DownloadDocuments,
             // Deliberately no approval-queue visibility here: the raw
             // ApprovalRequest resource is not scoped to "requests I

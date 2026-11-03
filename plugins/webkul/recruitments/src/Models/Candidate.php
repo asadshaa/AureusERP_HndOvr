@@ -2,6 +2,7 @@
 
 namespace Webkul\Recruitment\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -20,6 +21,21 @@ class Candidate extends Model
     use HasChatter, HasLogActivity, SoftDeletes;
 
     public const ACTIVITY_PLAN_PLUGIN = 'recruitments';
+
+    /**
+     * Other candidates of the company with the same email (case and spaces
+     * ignored): the candidate form's soft duplicate warning.
+     */
+    public static function sameEmailInCompany(?string $email, ?int $companyId, ?int $exceptId = null): Builder
+    {
+        $email = mb_strtolower(trim((string) $email));
+
+        return static::query()
+            ->when($email === '' || $companyId === null, fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
+            ->where('company_id', $companyId)
+            ->whereRaw('LOWER(TRIM(email_from)) = ?', [$email])
+            ->when($exceptId, fn (Builder $query): Builder => $query->whereKeyNot($exceptId));
+    }
 
     protected $table = 'recruitments_candidates';
 

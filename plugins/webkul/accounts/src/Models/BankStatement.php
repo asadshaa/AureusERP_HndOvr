@@ -50,6 +50,10 @@ class BankStatement extends Model
         'parser',
         'import_status',
         'validation_errors',
+        'reconciliation_override_by_id',
+        'reconciliation_override_at',
+        'reconciliation_override_reason',
+        'reconciliation_override_errors',
         'raw_header',
         'balance_start',
         'balance_end',
@@ -60,24 +64,26 @@ class BankStatement extends Model
     protected function casts(): array
     {
         return [
-            'date'                    => 'date',
-            'statement_start_date'    => 'date',
-            'statement_end_date'      => 'date',
-            'opening_balance'         => 'decimal:4',
-            'total_debits'            => 'decimal:4',
-            'total_credits'           => 'decimal:4',
-            'closing_balance'         => 'decimal:4',
-            'currency_was_overridden' => 'boolean',
-            'company_opening_balance' => 'decimal:4',
-            'company_total_debits'    => 'decimal:4',
-            'company_total_credits'   => 'decimal:4',
-            'company_closing_balance' => 'decimal:4',
-            'balance_start'           => 'decimal:4',
-            'balance_end'             => 'decimal:4',
-            'balance_end_real'        => 'decimal:4',
-            'is_completed'            => 'boolean',
-            'validation_errors'       => 'array',
-            'raw_header'              => 'array',
+            'date'                           => 'date',
+            'statement_start_date'           => 'date',
+            'statement_end_date'             => 'date',
+            'opening_balance'                => 'decimal:4',
+            'total_debits'                   => 'decimal:4',
+            'total_credits'                  => 'decimal:4',
+            'closing_balance'                => 'decimal:4',
+            'currency_was_overridden'        => 'boolean',
+            'company_opening_balance'        => 'decimal:4',
+            'company_total_debits'           => 'decimal:4',
+            'company_total_credits'          => 'decimal:4',
+            'company_closing_balance'        => 'decimal:4',
+            'balance_start'                  => 'decimal:4',
+            'balance_end'                    => 'decimal:4',
+            'balance_end_real'               => 'decimal:4',
+            'is_completed'                   => 'boolean',
+            'validation_errors'              => 'array',
+            'reconciliation_override_at'     => 'datetime',
+            'reconciliation_override_errors' => 'array',
+            'raw_header'                     => 'array',
         ];
     }
 
@@ -109,6 +115,15 @@ class BankStatement extends Model
     public function bankGlAccount(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'bank_gl_account_id');
+    }
+
+    /**
+     * The reviewer who accepted this statement's reported reconciliation
+     * differences (BankStatementImportService::acceptReconciliationDifferences()).
+     */
+    public function reconciliationOverrideBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reconciliation_override_by_id');
     }
 
     public function lines(): HasMany

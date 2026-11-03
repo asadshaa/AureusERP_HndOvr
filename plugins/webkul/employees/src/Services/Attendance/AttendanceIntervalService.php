@@ -26,7 +26,8 @@ use Webkul\Employee\Models\AttendanceRecord;
  * the day's last one is closed; check-out closes the open one) and the
  * AttendanceRecord model hook (any direct edit of check_in / check_out --
  * Filament edit, HR correction, approved time-change request, import --
- * replaces the day's intervals with that one pair, voiding the old ones).
+ * moves only the first interval's start / the last interval's end, so the
+ * breaks between pairs stay breaks; see applyDirectEdit()).
  */
 class AttendanceIntervalService
 {
@@ -155,11 +156,22 @@ class AttendanceIntervalService
     }
 
     /**
-     * After a direct edit of the day's check_in / check_out: when only the
-     * check-out was set and the last interval is open, that interval is
-     * closed (a forgotten check-out on a multi-pair day keeps its earlier
-     * pairs). Otherwise the day's intervals are voided and replaced by the
-     * one edited pair. Returns the intervals as they were before.
+     * After a direct edit of the day's check_in / check_out (HR edit, HR
+     * correction, approved correction request, import), only the interval the
+     * edit targets changes, so the breaks between pairs stay breaks:
+     *
+     *  - a new check-in moves the first interval's start (pairs that ended
+     *    before it are voided);
+     *  - a new check-out moves the last interval's end, closing it when it was
+     *    open (pairs that start after it are voided); clearing the check-out
+     *    re-opens the last interval.
+     *
+     * The day's intervals are voided and replaced by the one edited pair only
+     * when the day is created, has no intervals yet, the edit leaves no valid
+     * interval, or the writer explicitly replaces the whole day
+     * (AttendanceRecord::$replaceIntervalsOnEdit, e.g. an approved missed-day
+     * request on a day that already has a record). Voided intervals are kept
+     * for audit. Returns the intervals as they were before.
      *
      * @return array<int, array{check_in: ?string, check_out: ?string}>
      */
@@ -177,16 +189,19 @@ class AttendanceIntervalService
             ->get();
         $before = self::describeRows($intervals);
 
-        $onlyCheckOut = ! $created && $record->wasChanged('check_out') && ! $record->wasChanged('check_in');
-        $last = $intervals->last();
+        // Runs inside the record's created / updated event, before Eloquent syncs its
+        // originals: mark the just-written values as stored, so syncSummary() saves the
+        // interval sum even when it equals the value from before the edit.
+        $record->syncOriginalAttributes(array_values(array_intersect(['check_in', 'check_out', 'worked_hours'], array_keys($record->getAttributes()))));
 
-        if ($onlyCheckOut && $last && $last->isOpen() && $record->check_out && $record->check_out->greaterThan($last->check_in)) {
-            $last->update(['check_out' => $record->check_out]);
+        if (! $created && ! AttendanceRecord::$replaceIntervalsOnEdit && $intervals->isNotEmpty() && $record->check_in !== null
+            && $this->editTargetedIntervals($record, $intervals, $reason)) {
             $this->syncSummary($record);
 
             return $before;
         }
 
+        $last = $intervals->last();
         $sameSingle = $intervals->count() === 1
             && $record->check_in !== null
             && $last->check_in->equalTo($record->check_in)
@@ -220,6 +235,80 @@ class AttendanceIntervalService
         $this->syncSummary($record);
 
         return $before;
+    }
+
+    /**
+     * The targeted part of applyDirectEdit(): moves the first interval's
+     * start to the day's new check-in and the last interval's end to its new
+     * check-out, voiding the pairs the new times leave outside the day. False
+     * (nothing written) when no valid interval would be left.
+     *
+     * @param  Collection<int, AttendanceInterval>  $intervals  the day's active intervals, in check-in order
+     */
+    private function editTargetedIntervals(AttendanceRecord $record, Collection $intervals, ?string $reason): bool
+    {
+        $checkIn = $record->check_in;
+        $checkOut = $record->check_out;
+        $checkInChanged = $record->wasChanged('check_in');
+        $checkOutChanged = $record->wasChanged('check_out');
+
+        $kept = $intervals->values();
+        $dropped = collect();
+
+        if ($checkInChanged) {
+            // Pairs that ended at or before the new check-in are no longer part of the day.
+            [$before, $kept] = $kept->partition(fn (AttendanceInterval $interval): bool => $interval->check_out !== null && $interval->check_out->lessThanOrEqualTo($checkIn));
+            $dropped = $dropped->merge($before);
+        }
+
+        if ($checkOutChanged && $checkOut !== null) {
+            // Pairs that start at or after the new check-out are no longer part of the day.
+            [$after, $kept] = $kept->partition(fn (AttendanceInterval $interval): bool => $interval->check_in->greaterThanOrEqualTo($checkOut));
+            $dropped = $dropped->merge($after);
+        }
+
+        $kept = $kept->values();
+        if ($kept->isEmpty() || $kept->slice(0, -1)->contains(fn (AttendanceInterval $interval): bool => $interval->isOpen())) {
+            return false;
+        }
+
+        $first = $kept->first();
+        $last = $kept->last();
+
+        // Validated before anything is changed: every kept pair must still end after it starts.
+        $firstStart = $checkInChanged ? $checkIn : $first->check_in;
+        $lastEnd = $checkOutChanged ? $checkOut : $last->check_out;
+        $firstEnd = $first->is($last) ? $lastEnd : $first->check_out;
+        $lastStart = $first->is($last) ? $firstStart : $last->check_in;
+        if (($firstEnd !== null && $firstEnd->lessThanOrEqualTo($firstStart))
+            || ($lastEnd !== null && $lastEnd->lessThanOrEqualTo($lastStart))) {
+            return false;
+        }
+
+        if ($checkInChanged) {
+            $first->check_in = $checkIn;
+        }
+        if ($checkOutChanged) {
+            // A cleared check-out re-opens the last pair.
+            $last->check_out = $checkOut;
+        }
+
+        $now = now();
+        foreach ($dropped as $interval) {
+            $interval->update([
+                'voided_at'   => $now,
+                'voided_by'   => Auth::id(),
+                'void_reason' => mb_substr($reason ?: 'Outside the day after an edit of its check-in / check-out', 0, 255),
+            ]);
+        }
+
+        foreach ([$first, $last] as $interval) {
+            if ($interval->isDirty()) {
+                $interval->save();
+            }
+        }
+
+        return true;
     }
 
     /**

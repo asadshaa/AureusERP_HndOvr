@@ -469,11 +469,69 @@ class Move extends Model implements Sortable
     }
 
     /**
+     * Nesting depth of withoutPostedGuard() calls. Shared by every Move
+     * subclass (Invoice, Bill, JournalEntry, ...) on purpose: self::, not static::.
+     */
+    private static int $postedGuardBypassDepth = 0;
+
+    /**
+     * Runs $callback with the posted-entry deletion guard switched off.
+     *
+     * Posted accounting history is corrected by reversal, never deleted, and
+     * the `deleting` hooks on Move and MoveLine enforce that for every
+     * Eloquent delete. The single legitimate exception is a maintenance
+     * command that wipes a whole throw-away dataset it created itself:
+     * `accounting:seed-demo --fresh` (App\Console\Commands\SeedAccountingDemo)
+     * hard-deletes the demo companies' posted moves before re-seeding them.
+     * Do not use this from any user-facing flow.
+     *
+     * @template TReturn
+     *
+     * @param  callable(): TReturn  $callback
+     * @return TReturn
+     */
+    public static function withoutPostedGuard(callable $callback): mixed
+    {
+        self::$postedGuardBypassDepth++;
+
+        try {
+            return $callback();
+        } finally {
+            self::$postedGuardBypassDepth--;
+        }
+    }
+
+    public static function postedGuardIsBypassed(): bool
+    {
+        return self::$postedGuardBypassDepth > 0;
+    }
+
+    /**
      * Bootstrap any application services.
      */
     protected static function boot()
     {
         parent::boot();
+
+        // Model-level backstop for the Filament/API delete checks: a posted
+        // entry is part of the ledger and must be reversed, not deleted.
+        // Reads the persisted state, not the in-memory one, so a stale or
+        // locally modified instance can't slip through. Query-builder mass
+        // deletes bypass model events and are not covered here.
+        static::deleting(function (Move $move): void {
+            if (self::postedGuardIsBypassed()) {
+                return;
+            }
+
+            $persistedState = DB::table('accounts_account_moves')->where('id', $move->getKey())->value('state')
+                ?? $move->getRawOriginal('state');
+
+            if ($persistedState === MoveState::POSTED->value) {
+                throw new \RuntimeException(
+                    'Posted journal entry '.($move->name ?: "#{$move->getKey()}").' cannot be deleted. Use Reverse to create a correcting entry instead.'
+                );
+            }
+        });
 
         static::creating(function ($move) {
             $move->computeCreatorId();

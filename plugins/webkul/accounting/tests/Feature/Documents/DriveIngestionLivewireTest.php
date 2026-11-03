@@ -44,6 +44,8 @@ it('renders ViewDriveIngestionClassification page with auto-detected values and 
     $user->allowedCompanies()->syncWithoutDetaching([$company->id]);
     $user->givePermissionTo(AccountingPermissions::ManageDocuments);
     $user->givePermissionTo(AccountingPermissions::ViewDocuments);
+    // "Confirm & Post to Ledger" and the direct post are Post Journal acts.
+    $user->givePermissionTo(AccountingPermissions::PostJournal);
 
     $glAccount = Account::factory()->create([
         'code'         => 'REV'.uniqid(),

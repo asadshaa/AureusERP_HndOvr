@@ -81,12 +81,19 @@ class SeedAccountingDemo extends Command
             }
             BusinessRule::query()->whereIn('company_id', $coIds)->delete();
 
-            // 5. Invoices, bills, moves & move lines
-            $moves = Move::query()->whereIn('company_id', $coIds)->get();
-            foreach ($moves as $move) {
-                $move->lines()->delete();
-                $move->delete();
-            }
+            // 5. Invoices, bills, moves & move lines. The demo companies'
+            // moves include posted ones, which the Move/MoveLine `deleting`
+            // guards normally refuse; this wipe of a throw-away demo dataset
+            // is the one explicit, narrow exception (see
+            // Move::withoutPostedGuard()). Scoped to the demo company ids
+            // resolved above.
+            Move::withoutPostedGuard(function () use ($coIds): void {
+                $moves = Move::query()->whereIn('company_id', $coIds)->get();
+                foreach ($moves as $move) {
+                    $move->lines()->delete();
+                    $move->delete();
+                }
+            });
 
             // 6. FS Tags & Exchange rates
             FsTag::query()->whereIn('company_id', $coIds)->delete();

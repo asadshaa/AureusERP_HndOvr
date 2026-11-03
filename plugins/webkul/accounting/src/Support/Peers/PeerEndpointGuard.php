@@ -12,6 +12,11 @@ use InvalidArgumentException;
  * an internal-network probe (169.254.169.254 metadata, 10.x admin panels,
  * localhost services). Loopback is allowed ONLY behind an explicit config
  * flag so two instances can be paired on one machine for testing.
+ *
+ * Checked when a peer is paired AND again before every send
+ * (SendTransmissionJob), because DNS can change in between; the HTTP
+ * clients that call a peer never follow redirects, so a public endpoint
+ * cannot bounce the request to an internal one.
  */
 final class PeerEndpointGuard
 {
@@ -75,7 +80,7 @@ final class PeerEndpointGuard
         if ($ips === []) {
             // Unresolvable now does not make it safe later; refuse rather
             // than fall through to an unchecked request.
-            throw new InvalidArgumentException("Could not resolve peer host '{$host}'.");
+            throw new UnresolvablePeerHostException("Could not resolve peer host '{$host}'.");
         }
 
         return $ips;

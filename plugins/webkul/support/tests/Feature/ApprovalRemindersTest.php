@@ -229,6 +229,29 @@ it('escalates once to HR and the line manager\'s own manager after the maximum r
         ->and($escalation->data['body'])->toContain('after 2 reminder(s)');
 });
 
+it('uses a step\'s sla_hours as its own "remind after" instead of the workflow setting', function (): void {
+    $f = remindersFixture(['remind_after_hours' => 24]);
+    $f['workflow']->steps()->where('sequence', 1)->update(['sla_hours' => 3]);
+    remindersAt('2026-10-27 10:00'); // Tuesday
+    $request = remindersSubmit($f);
+
+    $service = app(ApprovalReminderService::class);
+    $fresh = $request->fresh(['workflow.steps']);
+    expect($service->settingsFor($fresh->workflow, $fresh->currentStep())['after_hours'])->toBe(3)
+        ->and($service->settingsFor($fresh->workflow)['after_hours'])->toBe(24)
+        ->and($service->nextFor($fresh)['due_at']->setTimezone('Asia/Karachi')->format('Y-m-d H:i'))->toBe('2026-10-27 13:00');
+
+    remindersAt('2026-10-27 12:59');
+    expect(remindersRun($f)['reminded'])->toBe(0);
+    remindersAt('2026-10-27 13:00');
+    expect(remindersRun($f)['reminded'])->toBe(1)
+        ->and(remindersKeys($f['managerUser'], 'approval_reminder_'))->toHaveCount(1);
+
+    // The HR step has no SLA of its own: it falls back to the workflow's 24 h.
+    app(ApprovalEngine::class)->approve($request->fresh(), $f['managerUser']);
+    expect($service->nextFor($request->fresh())['due_at']->setTimezone('Asia/Karachi')->format('Y-m-d H:i'))->toBe('2026-10-28 13:00');
+});
+
 it('restarts the clock when the step advances and skips workflows with reminders off', function (): void {
     $f = remindersFixture();
     $engine = app(ApprovalEngine::class);

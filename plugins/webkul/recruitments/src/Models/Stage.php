@@ -3,6 +3,7 @@
 namespace Webkul\Recruitment\Models;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -59,6 +60,30 @@ class Stage extends Model implements Sortable
     public function jobs()
     {
         return $this->belongsToMany(EmployeeJobPosition::class, 'recruitments_stages_jobs', 'stage_id', 'job_id');
+    }
+
+    /** Stages of a company's pipeline: the shared ones (no company) and the company's own. */
+    public function scopeAvailableTo(Builder $query, ?int $companyId): Builder
+    {
+        return $query->where(fn (Builder $inner): Builder => $inner
+            ->whereNull($inner->qualifyColumn('company_id'))
+            ->when($companyId, fn (Builder $own): Builder => $own->orWhere($own->qualifyColumn('company_id'), $companyId)));
+    }
+
+    /**
+     * Where a new (or reopened) application of the company starts: its
+     * default stage (the company's own before a shared one), else the first
+     * stage of its pipeline.
+     */
+    public static function defaultFor(?int $companyId): ?self
+    {
+        return static::query()
+            ->availableTo($companyId)
+            ->orderByDesc('is_default')
+            ->orderByRaw('CASE WHEN company_id IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('sort')
+            ->orderBy('id')
+            ->first();
     }
 
     /** A stage with no company is shared by every company's pipeline. */

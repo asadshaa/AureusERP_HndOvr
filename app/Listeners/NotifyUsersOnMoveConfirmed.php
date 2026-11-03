@@ -5,7 +5,9 @@ namespace App\Listeners;
 use Filament\Actions\Action;
 use Filament\Notifications\Events\DatabaseNotificationsSent;
 use Filament\Notifications\Notification;
+use Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit;
 use Illuminate\Support\Facades\Auth;
+use Throwable;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Events\MoveConfirmed;
 use Webkul\Invoice\Filament\Clusters\Customers\Resources\CreditNoteResource;
@@ -14,9 +16,29 @@ use Webkul\Invoice\Filament\Clusters\Vendors\Resources\BillResource;
 use Webkul\Invoice\Filament\Clusters\Vendors\Resources\RefundResource;
 use Webkul\Security\Models\User;
 
-class NotifyUsersOnMoveConfirmed
+/**
+ * Tells the company's other accounting users that a move was posted.
+ *
+ * Registered once, by event discovery (not also in AppServiceProvider --
+ * the double registration notified everyone twice, J5-03). Runs after the
+ * posting transaction commits (ShouldHandleEventsAfterCommit): outside
+ * AccountManager::confirmMove()'s row lock, and never for a posting that
+ * rolled back. Synchronous on purpose, because no queue worker is
+ * guaranteed; a notification failure is reported, never thrown, so it
+ * cannot make an already committed posting look failed.
+ */
+class NotifyUsersOnMoveConfirmed implements ShouldHandleEventsAfterCommit
 {
     public function handle(MoveConfirmed $event): void
+    {
+        try {
+            $this->notify($event);
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function notify(MoveConfirmed $event): void
     {
         $move = $event->move;
 
@@ -69,7 +91,7 @@ class NotifyUsersOnMoveConfirmed
                 MoveType::IN_REFUND   => class_exists(RefundResource::class) ? RefundResource::getUrl('view', ['record' => $move->id]) : null,
                 default               => null,
             };
-        } catch (\Throwable) {
+        } catch (Throwable) {
             $url = null;
         }
 

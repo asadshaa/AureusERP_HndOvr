@@ -2,12 +2,14 @@
 
 namespace Webkul\Accounting\Services\Coa;
 
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Models\Account;
 use Webkul\Account\Models\Journal;
+use Webkul\Account\Services\PeriodLockService;
 use Webkul\Accounting\Data\Coa\CoaRow;
 use Webkul\Accounting\Models\CoaImportBatch;
 use Webkul\Support\Models\Company;
@@ -23,18 +25,31 @@ use Webkul\Support\Models\Company;
  *    every column is set explicitly here.
  *  - Each journal must balance (Σdebit = Σcredit) or the whole import rolls
  *    back — no artificial balancing account is ever invented.
- *  - Idempotent: if a posted migration journal of a given kind already exists
- *    for the company, it is not created again (re-import adds no duplicates).
+ *  - Idempotent: if a migration journal of a given kind already exists for
+ *    the company -- from an earlier CoA import, or an opening-balance
+ *    configurable import (which also tags coa_migration_kind = 'opening') --
+ *    it is not created again. That skip is never silent: skippedJournals()
+ *    names the kind, the existing entry and why, and CoaImportService stores
+ *    it on the batch.
  *  - Only postable leaf accounts are used; group accounts are never posted to.
- *  - Deliberately NOT subject to PeriodLockService: this tool's entire job is
- *    writing historical opening/movement/adjustment balances, which by design
- *    predate "today". A period lock protects normal day-to-day posting from
- *    accidental backdating; it would only get in the way of a legitimate,
- *    admin-run, one-time historical data load.
+ *  - Subject to PeriodLockService like every other posting chokepoint: a
+ *    closed period is closed for migration journals too, because a balance
+ *    loaded into it after sign-off changes numbers that were already
+ *    reported. The initial historical migration -- which by design writes
+ *    balances that predate any lock -- passes overridePeriodLock explicitly
+ *    (CoaImportService reads it from the import options, which are stored on
+ *    the batch), rather than this service ignoring the lock for everyone.
+ *  - Records posted_by (the authenticated user, when there is one) and
+ *    posted_at, like every other posting path.
  */
 class MigrationJournalService
 {
     protected float $tolerance = 0.005;
+
+    /**
+     * @var array<int, array{kind: string, existing_move_id: int, existing_move_name: ?string, existing_source: string, reason: string}>
+     */
+    protected array $skippedJournals = [];
 
     /**
      * @param  array<int, CoaRow>  $rows
@@ -48,7 +63,10 @@ class MigrationJournalService
         ?string $openingDate,
         ?string $movementDate,
         ?string $adjustmentDate,
+        bool $overridePeriodLock = false,
     ): int {
+        $this->skippedJournals = [];
+
         if (! $openingDate || ! $movementDate || ! $adjustmentDate) {
             throw new RuntimeException('Migration journals require opening, movement and adjustment dates.');
         }
@@ -67,19 +85,33 @@ class MigrationJournalService
         $created += $this->createJournal(
             $batch, $company, $journalId, $currencyId, 'opening', $openingDate, 'Opening Balances (migration)',
             $this->lines($rows, $accountIdByCode, fn ($r) => [$r->openingDebit, $r->openingCredit]),
+            $overridePeriodLock,
         );
 
         $created += $this->createJournal(
             $batch, $company, $journalId, $currencyId, 'movement', $movementDate, 'Period Movement (migration)',
             $this->lines($rows, $accountIdByCode, fn ($r) => [$r->movementDebit, $r->movementCredit]),
+            $overridePeriodLock,
         );
 
         $created += $this->createJournal(
             $batch, $company, $journalId, $currencyId, 'adjustment', $adjustmentDate, 'Adjustments (migration)',
             $this->lines($rows, $accountIdByCode, fn ($r) => [$r->adjustmentDebit, $r->adjustmentCredit]),
+            $overridePeriodLock,
         );
 
         return $created;
+    }
+
+    /**
+     * The journals the last createForBatch() call did not create because one
+     * of that kind already existed for the company.
+     *
+     * @return array<int, array{kind: string, existing_move_id: int, existing_move_name: ?string, existing_source: string, reason: string}>
+     */
+    public function skippedJournals(): array
+    {
+        return $this->skippedJournals;
     }
 
     /**
@@ -94,20 +126,40 @@ class MigrationJournalService
         string $date,
         string $name,
         array $lines,
+        bool $overridePeriodLock = false,
     ): int {
         if ($lines === []) {
             return 0;
         }
 
         // Idempotency: never create a second migration journal of this kind for
-        // the company.
-        $exists = DB::table('accounts_account_moves')
+        // the company -- but report it, and which entry already holds the slot.
+        $existing = DB::table('accounts_account_moves')
             ->where('company_id', $company->id)
             ->where('coa_migration_kind', $kind)
-            ->exists();
+            ->orderBy('id')
+            ->first(['id', 'name', 'accounting_source_type', 'accounting_source_id', 'coa_import_batch_id']);
 
-        if ($exists) {
+        if ($existing) {
+            $source = match (true) {
+                $existing->coa_import_batch_id !== null    => "CoA import batch #{$existing->coa_import_batch_id}",
+                $existing->accounting_source_type !== null => class_basename((string) $existing->accounting_source_type)." #{$existing->accounting_source_id}",
+                default                                    => 'an earlier migration',
+            };
+
+            $this->skippedJournals[] = [
+                'kind'               => $kind,
+                'existing_move_id'   => (int) $existing->id,
+                'existing_move_name' => $existing->name,
+                'existing_source'    => $source,
+                'reason'             => "A {$kind} migration journal already exists for this company ({$existing->name}, from {$source}), so this import did not post its {$kind} balances. Reverse that entry first if these balances should replace it.",
+            ];
+
             return 0;
+        }
+
+        if (! $overridePeriodLock) {
+            app(PeriodLockService::class)->assertNotLocked((int) $company->id, $date);
         }
 
         $totalDebit = round(array_sum(array_column($lines, 'debit')), 2);
@@ -131,6 +183,9 @@ class MigrationJournalService
             'state'               => MoveState::POSTED->value,
             'coa_migration_kind'  => $kind,
             'coa_import_batch_id' => $batch->id,
+            'posted_by_id'        => Auth::id(),
+            'posted_at'           => $now,
+            'posted_before'       => true,
             'created_at'          => $now,
             'updated_at'          => $now,
         ]);

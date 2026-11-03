@@ -52,9 +52,12 @@ return [
     // Minimum duration before an employee is permitted to check out after checking in (in minutes).
     'min_checkout_interval_minutes' => (int) env('HR_ATTENDANCE_MIN_CHECKOUT_MINUTES', 60),
 
-    // Thresholds for auto-marking attendance status based on worked hours
-    'full_day_min_hours' => (float) env('HR_ATTENDANCE_FULL_DAY_MIN_HOURS', 7.5),
-    'half_day_min_hours' => (float) env('HR_ATTENDANCE_HALF_DAY_MIN_HOURS', 4.0),
+    // Attendance status of a closed day from its worked time (AttendanceStatusClassifier):
+    // nothing worked => absent; at least the day's required minutes (its resolved schedule)
+    // minus full_day_tolerance_minutes => present (remote on a remote day); anything less
+    // => half_day. full_day_min_hours applies only to a day without required minutes.
+    'full_day_tolerance_minutes' => (int) env('HR_ATTENDANCE_FULL_DAY_TOLERANCE_MINUTES', 30),
+    'full_day_min_hours'         => (float) env('HR_ATTENDANCE_FULL_DAY_MIN_HOURS', 7.5),
 
     // Precise evidence (coordinates, IP, user agent) is nulled after this many days.
     'evidence_retention_days' => 365,

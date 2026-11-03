@@ -130,6 +130,7 @@ class ExchangeRateApprovalService
         $fieldLabels = [
             'source_currency_id' => 'source currency',
             'target_currency_id' => 'target currency',
+            'effective_date'     => 'effective date',
             'rate_type'          => 'rate type',
             'rate'               => 'exchange rate value',
         ];
@@ -140,6 +141,12 @@ class ExchangeRateApprovalService
 
             if ($approvedValue === $currentValue) {
                 continue;
+            }
+
+            if ($key === 'effective_date' && $approvedValue === '') {
+                // Approved before the date was part of what an approver signs
+                // off on, so there is nothing to prove the date was approved.
+                $approvedValue = 'not recorded';
             }
 
             if (in_array($key, ['source_currency_id', 'target_currency_id'], true)) {
@@ -184,6 +191,9 @@ class ExchangeRateApprovalService
             'company_id'         => (int) $rate->company_id,
             'source_currency_id' => (int) $rate->source_currency_id,
             'target_currency_id' => (int) $rate->target_currency_id,
+            // Part of what the approver signs off on: re-dating an approved
+            // rate moves it onto documents of another period.
+            'effective_date'     => $rate->effective_date?->toDateString() ?? '',
             'rate_type'          => $rate->rate_type?->value ?? (string) $rate->rate_type,
             'rate'               => (string) $rate->rate,
         ];

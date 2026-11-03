@@ -257,10 +257,13 @@ class ImportChartOfAccounts extends Page implements HasForms
                 metadataRows: $source['metadata_rows'],
             );
 
+            $skippedJournals = collect($batch->options['skipped_journals'] ?? [])->pluck('reason')->filter();
+
             Notification::make()
-                ->success()
+                ->{$skippedJournals->isEmpty() ? 'success' : 'warning'}()
                 ->title('Import complete')
-                ->body("Created {$batch->accounts_created} accounts, {$batch->groups_created} groups, {$batch->journals_created} journals (updated {$batch->accounts_updated}).")
+                ->body("Created {$batch->accounts_created} accounts, {$batch->groups_created} groups, {$batch->journals_created} journals (updated {$batch->accounts_updated}).".
+                    ($skippedJournals->isEmpty() ? '' : ' Not posted: '.$skippedJournals->implode(' ')))
                 ->persistent()
                 ->send();
 

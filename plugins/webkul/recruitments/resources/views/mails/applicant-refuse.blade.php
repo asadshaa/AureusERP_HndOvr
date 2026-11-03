@@ -1,7 +1,7 @@
 <x-support::emails.layout>
     <div class="breadcrumb">
         {!! __('recruitments::mails/applicant-refuse.breadcrumb', [
-            'applicant' => $payload['applicant_name']
+            'applicant' => e($payload['applicant_name'])
         ]) !!}
     </div>
 
@@ -9,15 +9,15 @@
         <div class="message-content">
             <p>{!! __('recruitments::mails/applicant-refuse.greeting') !!}</p>
             <p>{!! __('recruitments::mails/applicant-refuse.thank-you-message', [
-                'company' => $payload['from']['company']['name']
+                'company' => e($payload['from']['company']['name'] ?? '')
             ]) !!}</p>
             <p>{!! __('recruitments::mails/applicant-refuse.future-endeavors') !!}</p>
             <div class="admin-details">
                 <p><strong>{!! __('recruitments::mails/applicant-refuse.admin-details.name', [
-                    'name' => $payload['from']['name']
+                    'name' => e($payload['from']['name'] ?? '')
                 ]) !!}</strong></p>
                 <p>{!! __('recruitments::mails/applicant-refuse.admin-details.email', [
-                    'email' => $payload['from']['address']
+                    'email' => e($payload['from']['address'] ?? '')
                 ]) !!}</p>
             </div>
         </div>

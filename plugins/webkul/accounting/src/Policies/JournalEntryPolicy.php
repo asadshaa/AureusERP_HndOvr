@@ -3,6 +3,7 @@
 namespace Webkul\Accounting\Policies;
 
 use Illuminate\Auth\Access\HandlesAuthorization;
+use Webkul\Account\Enums\MoveState;
 use Webkul\Accounting\Models\JournalEntry;
 use Webkul\Security\Models\User;
 
@@ -43,11 +44,14 @@ class JournalEntryPolicy
     }
 
     /**
-     * Determine whether the user can delete the model.
+     * Determine whether the user can delete the model. A posted entry is
+     * ledger history and is corrected by reversal, never deleted -- the
+     * Move model's `deleting` guard enforces the same rule below this.
      */
     public function delete(User $user, JournalEntry $journalEntry): bool
     {
-        return $user->can('delete_accounting_journal::entry');
+        return $user->can('delete_accounting_journal::entry')
+            && $journalEntry->state !== MoveState::POSTED;
     }
 
     /**
@@ -63,7 +67,8 @@ class JournalEntryPolicy
      */
     public function forceDelete(User $user, JournalEntry $journalEntry): bool
     {
-        return $user->can('force_delete_accounting_journal::entry');
+        return $user->can('force_delete_accounting_journal::entry')
+            && $journalEntry->state !== MoveState::POSTED;
     }
 
     /**

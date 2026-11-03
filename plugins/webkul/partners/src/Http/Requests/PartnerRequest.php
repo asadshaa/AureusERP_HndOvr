@@ -6,7 +6,13 @@ use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Webkul\Partner\Enums\AccountType;
+use Webkul\Security\Services\CompanyScopedRules;
 
+/**
+ * Partners belong to one of the token user's companies (none sent on create:
+ * the active company, set by the model); the parent partner must be one of
+ * those companies' partners too. No shared partners, as on the Contacts screen.
+ */
 class PartnerRequest extends FormRequest
 {
     /**
@@ -46,9 +52,9 @@ class PartnerRequest extends FormRequest
             'zip'              => ['nullable', 'string', 'max:20'],
             'state_id'         => ['nullable', 'integer', 'exists:states,id'],
             'country_id'       => ['nullable', 'integer', 'exists:countries,id'],
-            'parent_id'        => ['nullable', 'integer', 'exists:partners_partners,id'],
+            'parent_id'        => ['nullable', 'integer', CompanyScopedRules::exists('partners_partners', user: $this->user())],
             'title_id'         => ['nullable', 'integer', 'exists:partners_titles,id'],
-            'company_id'       => ['nullable', 'integer', 'exists:companies,id'],
+            'company_id'       => [...($isUpdate ? ['sometimes', 'required'] : ['nullable']), 'integer', CompanyScopedRules::company(user: $this->user())],
             'industry_id'      => ['nullable', 'integer', 'exists:partners_industries,id'],
             'user_id'          => ['nullable', 'integer', 'exists:users,id'],
         ];

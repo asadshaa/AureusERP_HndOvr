@@ -18,6 +18,7 @@ use Webkul\Employee\Filament\Clusters\Configurations\Resources\JobPositionResour
 use Webkul\Recruitment\Filament\Clusters\Applications;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\JobByPositionResource\Pages\ListJobByPositions;
 use Webkul\Recruitment\Models\JobByPosition;
+use Webkul\Recruitment\Models\Stage;
 
 class JobByPositionResource extends Resource
 {
@@ -49,7 +50,7 @@ class JobByPositionResource extends Resource
         return $table
             ->modifyQueryUsing(fn ($query) => $query
                 ->withCount([
-                    'applications as new_applicants_count' => fn ($query) => $query->where('stage_id', 1),
+                    'applications as new_applicants_count' => fn ($query) => $query->where('stage_id', static::newApplicationsStageId()),
                     'applications as total_applicants_count',
                 ])
             )
@@ -107,7 +108,7 @@ class JobByPositionResource extends Resource
                                             'data' => [
                                                 'operator' => 'isRelatedTo',
                                                 'settings' => [
-                                                    'values' => [1],
+                                                    'values' => [Stage::defaultFor($record->company_id ? (int) $record->company_id : null)?->id ?? 0],
                                                 ],
                                             ],
                                         ],
@@ -178,6 +179,14 @@ class JobByPositionResource extends Resource
         return [
             'index' => ListJobByPositions::route('/'),
         ];
+    }
+
+    /** "New applications" are those in the active company's default (first) stage; 0 matches none. */
+    public static function newApplicationsStageId(): int
+    {
+        $companyId = Auth::user()?->default_company_id;
+
+        return (int) (Stage::defaultFor($companyId ? (int) $companyId : null)?->id ?? 0);
     }
 
     public static function getEloquentQuery(): Builder

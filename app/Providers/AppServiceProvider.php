@@ -2,12 +2,10 @@
 
 namespace App\Providers;
 
-use App\Listeners\NotifyUsersOnMoveConfirmed;
 use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Native\Mobile\Edge\Components\Navigation\BottomNav;
@@ -20,7 +18,6 @@ use Native\Mobile\Edge\Components\Navigation\SideNavHeader;
 use Native\Mobile\Edge\Components\Navigation\SideNavItem;
 use Native\Mobile\Edge\Components\Navigation\TopBar;
 use Native\Mobile\Edge\Components\Navigation\TopBarAction;
-use Webkul\Account\Events\MoveConfirmed;
 use Webkul\Security\Models\User;
 
 class AppServiceProvider extends ServiceProvider
@@ -45,10 +42,10 @@ class AppServiceProvider extends ServiceProvider
         // tie-breaker; this makes that descending). Tables with their own defaultSort keep it.
         Table::configureUsing(fn (Table $table): Table => $table->defaultSort(null, 'desc'));
 
-        Event::listen(
-            MoveConfirmed::class,
-            NotifyUsersOnMoveConfirmed::class
-        );
+        // App\Listeners\NotifyUsersOnMoveConfirmed is registered by event
+        // discovery (bootstrap/cache/events.php once cached). It must not
+        // also be listed here: both registrations ran, so every posting
+        // notified each recipient twice (J5-03).
     }
 
     private function registerNativeMobileComponents(): void

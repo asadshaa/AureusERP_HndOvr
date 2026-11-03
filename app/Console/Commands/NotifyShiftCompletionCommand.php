@@ -8,15 +8,16 @@ use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Webkul\Employee\Models\AttendanceRecord;
+use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 
 class NotifyShiftCompletionCommand extends Command
 {
     protected $signature = 'hr:notify-shift-completion';
 
-    protected $description = 'Notify employees who have worked 8 hours (or their scheduled shift duration) to remind them to check out';
+    protected $description = 'Notify employees who have worked their schedule\'s required hours (or reached its end) to remind them to check out';
 
-    public function handle(AttendanceScheduleResolver $scheduleResolver): int
+    public function handle(AttendanceScheduleResolver $scheduleResolver, AttendanceIntervalService $intervals): int
     {
         $nowUtc = CarbonImmutable::now('UTC');
         $notified = 0;
@@ -25,7 +26,7 @@ class NotifyShiftCompletionCommand extends Command
             ->whereNotNull('check_in')
             ->whereNull('check_out')
             ->with(['employee.user', 'employee.calendar'])
-            ->chunkById(100, function ($records) use ($nowUtc, $scheduleResolver, &$notified): void {
+            ->chunkById(100, function ($records) use ($nowUtc, $scheduleResolver, $intervals, &$notified): void {
                 foreach ($records as $record) {
                     $employee = $record->employee;
                     if (! $employee || ! $employee->user) {
@@ -37,14 +38,18 @@ class NotifyShiftCompletionCommand extends Command
                         continue;
                     }
 
-                    $checkInUtc = CarbonImmutable::parse($record->check_in);
-                    $elapsedSeconds = max(0, $nowUtc->getTimestamp() - $checkInUtc->getTimestamp());
-                    $elapsedHours = $elapsedSeconds / 3600;
+                    // Worked = the day's closed pairs plus the running one (breaks between pairs are not work).
+                    $dayIntervals = $intervals->intervalsFor($record);
+                    $runningFrom = $dayIntervals->isEmpty() ? $record->check_in : $dayIntervals->first(fn ($interval): bool => $interval->isOpen())?->check_in;
+                    $elapsedSeconds = (int) $dayIntervals->sum(fn ($interval): int => $interval->durationMinutes() * 60)
+                        + ($runningFrom ? max(0, $nowUtc->getTimestamp() - CarbonImmutable::parse($runningFrom)->getTimestamp()) : 0);
 
                     $attendanceDate = $record->attendance_date?->toDateString() ?? $nowUtc->toDateString();
                     [$schedStartUtc, $schedEndUtc] = $scheduleResolver->scheduledWindowFor($employee, $attendanceDate);
+                    // The resolved schedule's required minutes (override > roster > work schedule > calendar > company default).
+                    $requiredSeconds = max(1, $scheduleResolver->scheduleFor($employee, $attendanceDate)->requiredMinutes) * 60;
 
-                    $isShiftComplete = $elapsedHours >= 8.0 || ($schedEndUtc && $nowUtc >= $schedEndUtc);
+                    $isShiftComplete = $elapsedSeconds >= $requiredSeconds || ($schedEndUtc && $nowUtc >= $schedEndUtc);
 
                     if ($isShiftComplete) {
                         $totalMinutes = (int) round($elapsedSeconds / 60);

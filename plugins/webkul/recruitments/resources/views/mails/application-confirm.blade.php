@@ -7,8 +7,8 @@
         <p>{{ __('recruitments::mails/application-confirm.hello') }}</p>
         <p>
             {!! __('recruitments::mails/application-confirm.application_received', [
-                'job_position' => "<strong class='highlighted-text'>{$payload['job_position']}</strong>",
-                'company' => isset($payload['from']['company']) ? "at <strong>{$payload['from']['company']['name']}</strong>" : ''
+                'job_position' => "<strong class='highlighted-text'>".e($payload['job_position'] ?? '').'</strong>',
+                'company' => isset($payload['from']['company']) ? __('at').' <strong>'.e($payload['from']['company']['name'] ?? '').'</strong>' : ''
             ]) !!}
         </p>
         <p>{{ __('recruitments::mails/application-confirm.response_soon') }}</p>

@@ -411,9 +411,10 @@ it('reverses a posted invoice into a linked draft credit note', function () {
 
     $this->postJson(invoiceRoute('confirm', $invoiceId))->assertOk();
 
+    // The reversal journal must be the invoice's company's.
     $this->postJson(invoiceRoute('reverse', $invoiceId), [
         'reason'     => 'Reversal reason',
-        'journal_id' => Journal::factory()->create()->id,
+        'journal_id' => Journal::factory()->create(['company_id' => Move::query()->whereKey($invoiceId)->value('company_id')])->id,
         'date'       => now()->format('Y-m-d'),
     ])->assertCreated()
         ->assertJsonPath('data.state', MoveState::DRAFT->value)

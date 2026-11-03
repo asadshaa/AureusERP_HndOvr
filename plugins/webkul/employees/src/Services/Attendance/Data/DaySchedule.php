@@ -8,13 +8,14 @@ use Carbon\CarbonImmutable;
  * The schedule that applies to one employee on one date, resolved by
  * AttendanceScheduleResolver in this order: a day override > the roster
  * (employee, then department) > the employee's effective-dated
- * WorkSchedule > the company default (config office hours).
+ * WorkSchedule > the employee's working-time Calendar (when one is set) >
+ * the company default (config office hours).
  *
  * Times are seconds after the local midnight of the attendance date (the
  * date the shift starts). An overnight shift ends after midnight, so its
  * endSeconds is above 86400 (22:00-06:00 = 79200-108000).
  *
- * source: default | schedule | roster | override. A roster or override day
+ * source: default | schedule | calendar | roster | override. A roster or override day
  * off has no working days (isWorkingDay() is false) and keeps the times of
  * the schedule underneath for off-day work.
  */
@@ -23,6 +24,8 @@ final readonly class DaySchedule
     public const SourceDefault = 'default';
 
     public const SourceSchedule = 'schedule';
+
+    public const SourceCalendar = 'calendar';
 
     public const SourceRoster = 'roster';
 
@@ -45,6 +48,7 @@ final readonly class DaySchedule
         public ?string $shiftCode = null,
         public ?string $color = null,
         public ?string $note = null,
+        public ?int $calendarId = null,
     ) {}
 
     /** The company default (no schedule, roster or override). */
@@ -115,6 +119,7 @@ final readonly class DaySchedule
         return match (true) {
             $this->shiftId !== null    => 'shift:'.$this->shiftId,
             $this->scheduleId !== null => (string) $this->scheduleId,
+            $this->calendarId !== null => 'calendar:'.$this->calendarId,
             default                    => 'default',
         };
     }

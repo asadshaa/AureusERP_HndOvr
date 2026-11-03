@@ -3,6 +3,7 @@
 use Webkul\Product\Models\Product;
 use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 
 require_once __DIR__.'/../../../../../support/tests/Helpers/SecurityHelper.php';
 require_once __DIR__.'/../../../../../support/tests/Helpers/TestBootstrapHelper.php';
@@ -27,7 +28,8 @@ afterEach(fn () => SecurityHelper::restoreUserEvents());
 
 function actingAsProductsProductVariantApiUser(array $permissions = []): User
 {
-    $user = SecurityHelper::authenticateWithPermissions($permissions);
+    // A group owner belongs to every company, so the company-scoped API finds the factory records.
+    $user = SecurityHelper::authenticateWithPermissions([...$permissions, CurrentCompany::MANAGE_MEMBERSHIPS]);
 
     $user->forceFill([
         'resource_permission' => PermissionType::GLOBAL,

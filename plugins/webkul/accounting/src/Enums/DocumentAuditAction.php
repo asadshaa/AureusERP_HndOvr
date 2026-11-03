@@ -69,6 +69,9 @@ enum DocumentAuditAction: string implements HasLabel
     /** A peer request that failed signature, token, skew or replay checks. */
     case PeerAuthFailed = 'peer_auth_failed';
 
+    /** The claim link was created but its email could not be sent (the link still works). */
+    case ClaimLinkEmailFailed = 'claim_link_email_failed';
+
     public function getLabel(): ?string
     {
         return match ($this) {
@@ -96,6 +99,7 @@ enum DocumentAuditAction: string implements HasLabel
             self::TransmissionAccepted  => __('accounting::enums/document-audit-action.transmission-accepted'),
             self::TransmissionRejected  => __('accounting::enums/document-audit-action.transmission-rejected'),
             self::PeerAuthFailed        => __('accounting::enums/document-audit-action.peer-auth-failed'),
+            self::ClaimLinkEmailFailed  => __('accounting::enums/document-audit-action.claim-link-email-failed'),
         };
     }
 }

@@ -10,12 +10,14 @@ use Webkul\Accounting\Models\ReportLine;
  * value in each period (keyed by ReportPeriod::$key).
  *
  * section_header and spacer lines carry no values (empty array); detail and
- * subtotal lines carry one value per period.
+ * subtotal lines carry one value per period. A null value means "not
+ * available": the column or line is scoped to a company outside the viewer's
+ * authorised companies, so no figure may be shown.
  */
 final class ReportLineValue
 {
     /**
-     * @param  array<string, float>  $values  period_key => value
+     * @param  array<string, float|null>  $values  period_key => value (null = not available)
      */
     public function __construct(
         public readonly int $lineId,
@@ -55,6 +57,11 @@ final class ReportLineValue
     public function valueFor(string $periodKey): ?float
     {
         return $this->values[$periodKey] ?? null;
+    }
+
+    public function isAvailable(string $periodKey): bool
+    {
+        return ! array_key_exists($periodKey, $this->values) || $this->values[$periodKey] !== null;
     }
 
     public function carriesValues(): bool

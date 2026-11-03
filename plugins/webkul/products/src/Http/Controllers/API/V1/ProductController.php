@@ -17,6 +17,7 @@ use Webkul\Product\Enums\ProductType;
 use Webkul\Product\Http\Requests\ProductRequest;
 use Webkul\Product\Http\Resources\V1\ProductResource;
 use Webkul\Product\Models\Product;
+use Webkul\Security\Services\CurrentCompany;
 
 #[Group('Product API Management')]
 #[Subgroup('Products', 'Manage products')]
@@ -39,7 +40,7 @@ class ProductController extends Controller
     {
         Gate::authorize('viewAny', Product::class);
 
-        $products = QueryBuilder::for(Product::class)
+        $products = QueryBuilder::for(CurrentCompany::scopeMemberships(Product::query(), includeShared: true))
             ->allowedFilters(
                 AllowedFilter::exact('id'),
                 AllowedFilter::exact('type'),
@@ -99,7 +100,7 @@ class ProductController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function show(string $id)
     {
-        $product = QueryBuilder::for(Product::where('id', $id))
+        $product = QueryBuilder::for(CurrentCompany::scopeMemberships(Product::where('id', $id), includeShared: true))
             ->allowedIncludes(
                 'parent',
                 'variants',
@@ -127,9 +128,10 @@ class ProductController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function update(ProductRequest $request, string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('update', $product);
+        abort_if($product->company_id === null && ! CurrentCompany::isGroupOwner(), 403, 'Shared products can only be changed by a group owner.');
 
         $validated = $request->validated();
 
@@ -153,9 +155,10 @@ class ProductController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function destroy(string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = CurrentCompany::scopeMemberships(Product::query(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('delete', $product);
+        abort_if($product->company_id === null && ! CurrentCompany::isGroupOwner(), 403, 'Shared products can only be changed by a group owner.');
 
         $product->delete();
 
@@ -171,9 +174,10 @@ class ProductController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function restore(string $id)
     {
-        $product = Product::withTrashed()->findOrFail($id);
+        $product = CurrentCompany::scopeMemberships(Product::withTrashed(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('restore', $product);
+        abort_if($product->company_id === null && ! CurrentCompany::isGroupOwner(), 403, 'Shared products can only be changed by a group owner.');
 
         $product->restore();
 
@@ -188,9 +192,10 @@ class ProductController extends Controller
     #[Response(status: 401, description: 'Unauthenticated', content: '{"message": "Unauthenticated."}')]
     public function forceDestroy(string $id)
     {
-        $product = Product::withTrashed()->findOrFail($id);
+        $product = CurrentCompany::scopeMemberships(Product::withTrashed(), includeShared: true)->findOrFail($id);
 
         Gate::authorize('forceDelete', $product);
+        abort_if($product->company_id === null && ! CurrentCompany::isGroupOwner(), 403, 'Shared products can only be changed by a group owner.');
 
         $product->forceDelete();
 

@@ -215,8 +215,12 @@ class CoaImportService
             $this->persistSourceRows($batch, $company, $rows);
 
             $journalsCreated = 0;
+            $skippedJournals = [];
 
             if ($mode === 'with_journals') {
+                // options['override_period_lock'] is the explicit opt-out for
+                // the initial historical migration (see MigrationJournalService);
+                // it is kept in the batch options as the audit of that choice.
                 $journalsCreated = $this->journals->createForBatch(
                     $batch,
                     $rows,
@@ -225,7 +229,9 @@ class CoaImportService
                     $openingDate,
                     $movementDate,
                     $adjustmentDate,
+                    (bool) ($options['override_period_lock'] ?? false),
                 );
+                $skippedJournals = $this->journals->skippedJournals();
             }
 
             $batch->update([
@@ -234,6 +240,7 @@ class CoaImportService
                 'accounts_created' => $accountsCreated,
                 'accounts_updated' => $accountsUpdated,
                 'journals_created' => $journalsCreated,
+                'options'          => array_merge((array) $batch->options, ['skipped_journals' => $skippedJournals]),
             ]);
 
             return $batch->fresh();

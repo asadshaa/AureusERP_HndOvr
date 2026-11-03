@@ -156,9 +156,16 @@ return [
     | the expiry date) are in "timezone". recruitments:expire-offers (daily)
     | expires offers past their expiry date.
     |
+    | "public_url" is the address candidates open the accept / decline link
+    | on (e.g. https://hr.example.com); it falls back to app.url. It must be
+    | reachable from the internet: while it is localhost or a private address
+    | the Send action warns, and HR records answers with "Record candidate
+    | response" instead.
+    |
     */
 
     'offers' => [
+        'public_url'             => env('RECRUITMENT_OFFER_PUBLIC_URL'),
         'ceo_approval_threshold' => (float) env('RECRUITMENT_OFFER_CEO_THRESHOLD', 300000),
         'ceo_approver_email'     => env('RECRUITMENT_OFFER_CEO_EMAIL'),
         'currency'               => 'PKR',

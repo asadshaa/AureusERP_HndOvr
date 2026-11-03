@@ -629,7 +629,7 @@ class ApprovalRequestResource extends Resource
                 TextColumn::make('waiting_for')
                     ->label('Waiting')
                     ->getStateUsing(fn (ApprovalRequest $record): ?string => static::waitingText($record))
-                    ->color(fn (ApprovalRequest $record): ?string => ($record->waitingHours() ?? 0) >= app(ApprovalReminderService::class)->settingsFor($record->workflow)['after_hours'] ? 'danger' : null)
+                    ->color(fn (ApprovalRequest $record): ?string => ($record->waitingHours() ?? 0) >= app(ApprovalReminderService::class)->settingsFor($record->workflow, $record->currentStep())['after_hours'] ? 'danger' : null)
                     ->placeholder('—'),
                 TextColumn::make('reminders_sent')
                     ->label('Reminders')

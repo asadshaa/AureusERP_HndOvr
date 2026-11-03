@@ -44,7 +44,10 @@ class ViewDriveIngestionClassification extends ViewRecord
                 ->label('Confirm & Post to Ledger')
                 ->icon('heroicon-o-check-badge')
                 ->color('success')
-                ->authorize(AccountingPermissions::ManageDocuments)
+                // Posting is a Post Journal act, like every other ledger post;
+                // DriveInvoicePostingService::postClassification() enforces
+                // the same permission server-side.
+                ->authorize(AccountingPermissions::PostJournal)
                 ->visible(fn () => $this->record->created_invoice_id === null
                     && $this->record->validation_status !== DriveClassificationStatus::Posted
                     && $this->record->resolved_partner_id
@@ -209,7 +212,8 @@ class ViewDriveIngestionClassification extends ViewRecord
                     Toggle::make('post_immediately')
                         ->label('Post directly to General Ledger upon submission')
                         ->helperText('When enabled, creates the formal accounting Move and balanced journal entries in the ledger immediately.')
-                        ->default(true),
+                        ->visible(fn (): bool => (bool) Auth::user()?->can(AccountingPermissions::PostJournal))
+                        ->default(fn (): bool => (bool) Auth::user()?->can(AccountingPermissions::PostJournal)),
                 ])
                 ->action(function (array $data): void {
                     $record = $this->record;

@@ -8,6 +8,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
+use Throwable;
 use Webkul\Account\Models\Move;
 use Webkul\Accounting\Contracts\InvoicePayloadFormatter;
 use Webkul\Accounting\Enums\DocumentAuditAction;
@@ -16,7 +18,9 @@ use Webkul\Accounting\Models\Document;
 use Webkul\Accounting\Models\DocumentAudit;
 use Webkul\Accounting\Models\OutboundTransmission;
 use Webkul\Accounting\Services\Peers\DocumentPayloadBuilder;
+use Webkul\Accounting\Support\Peers\PeerEndpointGuard;
 use Webkul\Accounting\Support\Peers\PeerSignature;
+use Webkul\Accounting\Support\Peers\UnresolvablePeerHostException;
 
 /**
  * Performs the signed POST to a peer.
@@ -27,7 +31,11 @@ use Webkul\Accounting\Support\Peers\PeerSignature;
  * A 4xx is treated as terminal: a rejected signature or a revoked peer will
  * be rejected identically on every retry, so retrying only burns the queue
  * and delays the operator seeing a real problem. Only 5xx and transport
- * failures are retried.
+ * failures are retried; once retries run out, failed() marks the
+ * transmission failed.
+ *
+ * SSRF: the endpoint goes through PeerEndpointGuard again right before
+ * every send, redirects are never followed, and a 3xx answer is terminal.
  */
 class SendTransmissionJob implements ShouldQueue
 {
@@ -63,6 +71,22 @@ class SendTransmissionJob implements ShouldQueue
             return;
         }
 
+        // SSRF: the endpoint was checked when the peer was paired, but its
+        // DNS may since point somewhere private. Re-checked before every
+        // send; a refused address is terminal, an unresolvable host is
+        // retried (DNS can be briefly down) and never contacted unchecked.
+        try {
+            PeerEndpointGuard::assertAllowed((string) $peer->endpoint_url);
+        } catch (UnresolvablePeerHostException $e) {
+            $transmission->forceFill(['last_error' => $e->getMessage()])->save();
+
+            throw $e;
+        } catch (InvalidArgumentException $e) {
+            $this->fail_($transmission, 'Peer endpoint refused: '.$e->getMessage());
+
+            return;
+        }
+
         // Two payload shapes travel this same pipe: an invoice (structured
         // accounting data) and a document (a file, bytes inline). Only the
         // encoding differs -- signing, retry and failure handling below are
@@ -78,7 +102,7 @@ class SendTransmissionJob implements ShouldQueue
 
             try {
                 $payload = app(DocumentPayloadBuilder::class)->build($document);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 // Unreadable or oversized is permanent, not transient.
                 $this->fail_($transmission, $e->getMessage());
 
@@ -113,13 +137,24 @@ class SendTransmissionJob implements ShouldQueue
             ])
                 ->connectTimeout((int) config('accounting_peers.connect_timeout', 10))
                 ->timeout((int) config('accounting_peers.request_timeout', 120))
+                // Never follow a redirect: a checked public endpoint could
+                // otherwise bounce the signed request to an internal host.
+                ->withoutRedirecting()
                 ->withBody($body, 'application/json')
                 ->post(rtrim($peer->endpoint_url, '/').'/api/v1/peer/transmissions');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Transport-level failure: let the queue retry with backoff.
             $transmission->forceFill(['last_error' => $e->getMessage()])->save();
 
             throw $e;
+        }
+
+        if ($response->redirect()) {
+            // Terminal: the peer would answer the same way on every retry.
+            $location = $response->header('Location');
+            $this->fail_($transmission, "Peer answered with a redirect ({$response->status()})".($location !== '' ? " to {$location}" : '').'; redirects are never followed.');
+
+            return;
         }
 
         if ($response->successful()) {
@@ -151,6 +186,23 @@ class SendTransmissionJob implements ShouldQueue
 
         // Server-side failure: retryable.
         throw new \RuntimeException("Peer returned {$response->status()}.");
+    }
+
+    /**
+     * Retries exhausted (or the job otherwise failed for good): the
+     * transmission is closed as failed instead of staying "queued" forever.
+     */
+    public function failed(?Throwable $exception = null): void
+    {
+        $transmission = OutboundTransmission::query()->find($this->transmissionId);
+
+        if (! $transmission || $transmission->status->isTerminal()) {
+            return;
+        }
+
+        $reason = $exception?->getMessage() ?: ($transmission->last_error ?: 'unknown error');
+
+        $this->fail_($transmission, "Delivery gave up after {$transmission->attempts} attempt(s): {$reason}");
     }
 
     /**

@@ -412,6 +412,12 @@ it('normalizes idempotent manual and API applicant intake without crossing compa
     $company = Company::factory()->create(['currency_id' => $currency->id, 'is_active' => true]);
     $otherCompany = Company::factory()->create(['currency_id' => $currency->id, 'is_active' => true]);
     $user = hrPlatformUser($company);
+    // Intake needs the right to create (and, on re-import, update) applications.
+    foreach (['create_recruitment_applicant', 'update_recruitment_applicant'] as $permission) {
+        $user->givePermissionTo(Permission::query()->firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+    }
+    $user->forceFill(['resource_permission' => PermissionType::GLOBAL])->save();
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
     $this->actingAs($user);
     $job = EmployeeJobPosition::query()->create([
         'company_id' => $company->id,

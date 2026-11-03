@@ -41,6 +41,11 @@ use Webkul\Accounting\Services\Resolvers\LedgerMeasureResolver;
  * it is read from the template tables. Consolidated columns default to the
  * multi-entity ledger scope — arithmetically the simple sum across entities —
  * and only deviate where a consolidation formula is defined.
+ *
+ * Entity overrides (a column's or a line's company) are only honoured within
+ * the viewer's authorised companies (ReportContext::narrowTo()). A column or
+ * line outside them is "not available": its value is null — never a figure —
+ * and so is every formula line that depends on it.
  */
 class ReportCalculationEngine
 {
@@ -126,10 +131,17 @@ class ReportCalculationEngine
 
         $computedOrder = $this->topologicalOrder($formulaLines, $lines);
 
-        // Per-column value maps: line_id => value.
+        // Per-column value maps: line_id => value (null = not available).
+        // A column outside the viewer's companies maps to null as a whole.
         $valuesByColumnLine = [];
 
         foreach ($dataColumns as $column) {
+            if ($column->contextFor($context) === null) {
+                $valuesByColumnLine[$column->key] = null;
+
+                continue;
+            }
+
             $lineValues = [];
 
             foreach ($ledgerLines as $line) {
@@ -142,7 +154,7 @@ class ReportCalculationEngine
             foreach ($manualLines as $line) {
                 $lineValues[(int) $line->id] = $this->applyLineSign(
                     $line,
-                    (float) ($manualValues[(int) $line->id][$column->key] ?? 0.0),
+                    $manualValues[(int) $line->id][$column->key] ?? 0.0,
                 );
             }
 
@@ -156,10 +168,9 @@ class ReportCalculationEngine
             foreach ($computedOrder as $line) {
                 $purpose = $this->formulaPurposeFor($line, $column);
 
-                $lineValues[(int) $line->id] = $this->applyLineSign(
-                    $line,
-                    $this->evaluator->evaluate($line, $lineValues, $purpose),
-                );
+                $lineValues[(int) $line->id] = $this->referencesUnavailableLine($line, $lineValues, $purpose)
+                    ? null
+                    : $this->applyLineSign($line, $this->evaluator->evaluate($line, $lineValues, $purpose));
             }
 
             $valuesByColumnLine[$column->key] = $lineValues;
@@ -172,7 +183,15 @@ class ReportCalculationEngine
             $values = [];
             if ($carries) {
                 foreach ($dataColumns as $column) {
-                    $values[$column->key] = (float) ($valuesByColumnLine[$column->key][(int) $line->id] ?? 0.0);
+                    $columnValues = $valuesByColumnLine[$column->key];
+                    $lineId = (int) $line->id;
+
+                    $values[$column->key] = match (true) {
+                        $columnValues === null                     => null,
+                        ! array_key_exists($lineId, $columnValues) => 0.0,
+                        $columnValues[$lineId] === null            => null,
+                        default                                    => (float) $columnValues[$lineId],
+                    };
                 }
             }
 
@@ -220,8 +239,17 @@ class ReportCalculationEngine
         $groups = [];
 
         foreach ($dataColumns as $column) {
+            if ($column->contextFor($context) === null) {
+                continue;
+            }
+
             foreach ($ledgerLines as $line) {
                 $lineContext = $this->lineContext($line, $column, $context);
+
+                if ($lineContext === null) {
+                    continue;
+                }
+
                 $basis = $line->effectiveValueBasis($defaultBasis);
                 $groupKey = $this->groupKey($lineContext, $basis);
 
@@ -260,9 +288,14 @@ class ReportCalculationEngine
         return $balances;
     }
 
-    protected function ledgerLineValue(ReportLine $line, ReportColumnSpec $column, ReportContext $context, ValueBasis $defaultBasis, array $signedAccountsByLine, array $balances): float
+    protected function ledgerLineValue(ReportLine $line, ReportColumnSpec $column, ReportContext $context, ValueBasis $defaultBasis, array $signedAccountsByLine, array $balances): ?float
     {
         $lineContext = $this->lineContext($line, $column, $context);
+
+        if ($lineContext === null) {
+            return null;
+        }
+
         $basis = $line->effectiveValueBasis($defaultBasis);
         $groupKey = $this->groupKey($lineContext, $basis);
 
@@ -286,7 +319,7 @@ class ReportCalculationEngine
      *
      * @param  Collection<int, ReportLine>  $manualLines
      * @param  array<int, ReportColumnSpec>  $dataColumns
-     * @return array<int, array<string, float>> [line_id][column_key] => value
+     * @return array<int, array<string, float|null>> [line_id][column_key] => value (null = not available)
      */
     protected function manualValues(Collection $manualLines, array $dataColumns, ReportContext $context): array
     {
@@ -309,7 +342,15 @@ class ReportCalculationEngine
             $lineInputs = $inputs->get((int) $line->id, collect());
 
             foreach ($dataColumns as $column) {
-                $scope = $this->lineContext($line, $column, $context)->companyIds;
+                $lineContext = $this->lineContext($line, $column, $context);
+
+                if ($lineContext === null) {
+                    $values[(int) $line->id][$column->key] = null;
+
+                    continue;
+                }
+
+                $scope = $lineContext->companyIds;
 
                 $sum = 0.0;
 
@@ -320,7 +361,7 @@ class ReportCalculationEngine
                         continue;
                     }
 
-                    if ($input->company_id !== null && $scope !== [] && ! in_array((int) $input->company_id, $scope, true)) {
+                    if ($input->company_id !== null && $lineContext->hasCompanyScope() && ! in_array((int) $input->company_id, $scope, true)) {
                         continue;
                     }
 
@@ -334,29 +375,61 @@ class ReportCalculationEngine
         return $values;
     }
 
-    protected function externalLineValue(ReportLine $line, ReportColumnSpec $column, ReportContext $context): float
+    protected function externalLineValue(ReportLine $line, ReportColumnSpec $column, ReportContext $context): ?float
     {
+        $lineContext = $this->lineContext($line, $column, $context);
+
+        if ($lineContext === null) {
+            return null;
+        }
+
         $registry = $this->providers ?? app(ReportValueProviderRegistry::class);
 
         return $registry->value(
             (string) $line->external_provider,
             $line,
             $column->period,
-            $this->lineContext($line, $column, $context),
+            $lineContext,
         );
     }
 
     /**
      * The context a line is computed under for a column: a line-level company
      * override wins over the column's scope, which wins over the run context.
+     * Either override is intersected with the viewer's authorised companies;
+     * null means the line is not available in this column.
      */
-    protected function lineContext(ReportLine $line, ReportColumnSpec $column, ReportContext $context): ReportContext
+    protected function lineContext(ReportLine $line, ReportColumnSpec $column, ReportContext $context): ?ReportContext
     {
         if ($line->company_id !== null) {
-            return ReportContext::forCompanies([(int) $line->company_id], $context->postedOnly, $context->originalCurrencyId);
+            return $context->narrowTo([(int) $line->company_id]);
         }
 
         return $column->contextFor($context);
+    }
+
+    /**
+     * Whether a formula line depends (for the given purpose) on a line whose
+     * value is not available — in which case its own result is unavailable
+     * too, rather than a total silently missing an entity.
+     *
+     * @param  array<int, float|null>  $lineValues
+     */
+    protected function referencesUnavailableLine(ReportLine $line, array $lineValues, FormulaPurpose $purpose): bool
+    {
+        foreach ($line->formulas as $formula) {
+            if ($this->purposeOf($formula) !== $purpose || $formula->operand_line_id === null) {
+                continue;
+            }
+
+            $operandLineId = (int) $formula->operand_line_id;
+
+            if (array_key_exists($operandLineId, $lineValues) && $lineValues[$operandLineId] === null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -369,25 +442,35 @@ class ReportCalculationEngine
             return FormulaPurpose::VALUE;
         }
 
-        $hasConsolidationFormulas = $line->formulas->contains(function ($formula) {
-            $purpose = $formula->purpose;
-
-            if ($purpose === null) {
-                return false;
-            }
-
-            $purpose = $purpose instanceof FormulaPurpose
-                ? $purpose
-                : FormulaPurpose::from((string) $purpose);
-
-            return $purpose === FormulaPurpose::CONSOLIDATION;
-        });
+        $hasConsolidationFormulas = $line->formulas->contains(
+            fn ($formula): bool => $this->purposeOf($formula) === FormulaPurpose::CONSOLIDATION,
+        );
 
         return $hasConsolidationFormulas ? FormulaPurpose::CONSOLIDATION : FormulaPurpose::VALUE;
     }
 
-    protected function applyLineSign(ReportLine $line, float $value): float
+    /**
+     * A formula operand's purpose; operands without one count as `value`.
+     */
+    protected function purposeOf($formula): FormulaPurpose
     {
+        $purpose = $formula->purpose;
+
+        if ($purpose === null) {
+            return FormulaPurpose::VALUE;
+        }
+
+        return $purpose instanceof FormulaPurpose
+            ? $purpose
+            : FormulaPurpose::from((string) $purpose);
+    }
+
+    protected function applyLineSign(ReportLine $line, ?float $value): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
         return $value * ((int) $line->sign === -1 ? -1.0 : 1.0);
     }
 

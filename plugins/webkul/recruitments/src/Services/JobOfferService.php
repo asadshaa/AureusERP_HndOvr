@@ -3,6 +3,7 @@
 namespace Webkul\Recruitment\Services;
 
 use Brick\Math\BigDecimal;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +53,9 @@ use Webkul\Support\Services\ApprovalEngine;
  */
 class JobOfferService
 {
+    /** The candidate answered on the signed offer page. */
+    public const RESPONSE_CHANNEL_LINK = 'link';
+
     /**
      * isApprover() answers per offer instance, user and approval state: list
      * rows ask it for the salary column and several buttons.
@@ -675,10 +679,54 @@ class JobOfferService
     /** The candidate's signed accept / decline link; valid until the end of the expiry date. */
     public function respondUrl(JobOffer $offer): string
     {
-        return URL::temporarySignedRoute('recruitments.offers.respond', $this->linkExpiresAt($offer), [
+        return $this->candidateLink('recruitments.offers.respond', $offer);
+    }
+
+    /** The candidate's signed link to the letter PDF (same token and validity as the answer link). */
+    public function candidateLetterUrl(JobOffer $offer): string
+    {
+        return $this->candidateLink('recruitments.offers.letter', $offer);
+    }
+
+    /**
+     * Candidate links are signed over the path only (not the host) and put on
+     * the address candidates can reach (publicBaseUrl()), so they keep working
+     * whatever host name the request reaches Aureus through (tunnel, proxy).
+     */
+    protected function candidateLink(string $route, JobOffer $offer): string
+    {
+        $path = URL::temporarySignedRoute($route, $this->linkExpiresAt($offer), [
             'offer' => $offer->id,
             'token' => (string) $offer->response_token,
-        ]);
+        ], absolute: false);
+
+        return static::publicBaseUrl().$path;
+    }
+
+    /** Public address of the candidate offer pages: recruitment.offers.public_url, else app.url. */
+    public static function publicBaseUrl(): string
+    {
+        return rtrim((string) (config('recruitment.offers.public_url') ?: config('app.url')), '/');
+    }
+
+    /**
+     * Whether candidates outside this computer or office network cannot open
+     * the offer links: localhost, a loopback, private or reserved IP address,
+     * or a local-only host name.
+     */
+    public static function publicUrlIsLocal(): bool
+    {
+        $host = strtolower(trim((string) parse_url(static::publicBaseUrl(), PHP_URL_HOST), '[]'));
+
+        if ($host === '' || $host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.local') || str_ends_with($host, '.test')) {
+            return true;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+        }
+
+        return false;
     }
 
     public function linkExpiresAt(JobOffer $offer): Carbon
@@ -705,13 +753,83 @@ class JobOfferService
      */
     public function respond(JobOffer $offer, string $token, bool $accept, ?string $reason = null, array $meta = []): JobOffer
     {
-        $reason = filled($reason) ? Str::limit(trim((string) $reason), 2000, '') : null;
-
-        $offer = DB::transaction(function () use ($offer, $token, $accept, $reason, $meta): JobOffer {
-            $locked = JobOffer::query()->whereKey($offer->id)->lockForUpdate()->firstOrFail();
-
+        return $this->applyResponse($offer, $accept, $reason, self::RESPONSE_CHANNEL_LINK, null, $meta, function (JobOffer $locked) use ($token): void {
             if (! $this->tokenMatches($locked, $token)) {
                 throw new AuthorizationException(__('This link is no longer valid.'));
+            }
+        });
+    }
+
+    /**
+     * How HR can have received an answer it records for the candidate.
+     *
+     * @return array<string, string>
+     */
+    public static function recordedResponseChannels(): array
+    {
+        return [
+            'email'     => __('By email'),
+            'phone'     => __('By phone'),
+            'in_person' => __('In person'),
+        ];
+    }
+
+    public static function responseChannelLabel(?string $channel): string
+    {
+        return match ($channel) {
+            self::RESPONSE_CHANNEL_LINK => __('Through the offer link'),
+            null, ''                    => '—',
+            default                     => static::recordedResponseChannels()[$channel] ?? str($channel)->headline()->toString(),
+        };
+    }
+
+    /** Recruiters and HR of the company record the answer of a sent, still valid offer. */
+    public function canRecordResponse(?User $user, JobOffer $offer): bool
+    {
+        return $offer->status === JobOfferStatus::SENT
+            && ! $this->isPastExpiry($offer)
+            && $this->canManage($user, $offer);
+    }
+
+    /**
+     * HR records the candidate's answer when it came by email, phone or in
+     * person (for example the candidate could not open the link). Same rules
+     * and effects as the candidate's own answer on the offer page (sent and
+     * not expired; accepting moves the application to the hired stage,
+     * recruiters are told); the history names who recorded it and how.
+     */
+    public function recordResponse(JobOffer $offer, User $actor, bool $accept, string $channel, ?string $reason): JobOffer
+    {
+        if (! $this->canManage($actor, $offer)) {
+            throw new AuthorizationException(__('Only recruiters and HR of this company (in their active company) can record the candidate\'s answer.'));
+        }
+
+        $data = Validator::make(['channel' => $channel, 'reason' => $reason], [
+            'channel' => ['required', Rule::in(array_keys(static::recordedResponseChannels()))],
+            'reason'  => ['required', 'string', 'max:2000'],
+        ], [
+            'reason.required' => __('Note what the candidate said (and when), for the offer history.'),
+        ])->validate();
+
+        return $this->applyResponse($offer, $accept, $data['reason'], $data['channel'], $actor);
+    }
+
+    /**
+     * The one place an answer is applied, from the candidate's link or
+     * recorded by HR.
+     *
+     * @param  array{ip?: ?string, user_agent?: ?string}  $meta
+     * @param  (Closure(JobOffer): void)|null  $guard  extra check on the locked offer
+     */
+    protected function applyResponse(JobOffer $offer, bool $accept, ?string $reason, string $channel, ?User $recordedBy, array $meta = [], ?Closure $guard = null): JobOffer
+    {
+        $reason = filled($reason) ? Str::limit(trim((string) $reason), 2000, '') : null;
+
+        $offer = DB::transaction(function () use ($offer, $accept, $reason, $channel, $recordedBy, $meta, $guard): JobOffer {
+            $locked = JobOffer::query()->whereKey($offer->id)->lockForUpdate()->firstOrFail();
+
+            if ($guard) {
+                $guard($locked);
             }
 
             if ($locked->status !== JobOfferStatus::SENT) {
@@ -724,22 +842,31 @@ class JobOfferService
 
             $to = $accept ? JobOfferStatus::ACCEPTED : JobOfferStatus::DECLINED;
             $locked->forceFill([
-                'status'              => $to,
-                'responded_at'        => now(),
-                'response_reason'     => $reason,
-                'response_ip'         => Str::limit((string) ($meta['ip'] ?? ''), 45, '') ?: null,
-                'response_user_agent' => Str::limit((string) ($meta['user_agent'] ?? ''), 500, '') ?: null,
+                'status'               => $to,
+                'responded_at'         => now(),
+                'response_reason'      => $reason,
+                'response_channel'     => $channel,
+                'response_recorded_by' => $recordedBy?->id,
+                'response_ip'          => Str::limit((string) ($meta['ip'] ?? ''), 45, '') ?: null,
+                'response_user_agent'  => Str::limit((string) ($meta['user_agent'] ?? ''), 500, '') ?: null,
             ])->save();
 
-            $this->record($locked, $accept ? 'accepted' : 'declined', JobOfferStatus::SENT, $to, null, $reason);
+            $this->record($locked, $accept ? 'accepted' : 'declined', JobOfferStatus::SENT, $to, $recordedBy, $reason, array_filter([
+                'channel'     => $channel,
+                'recorded_by' => $recordedBy?->id,
+            ]));
 
             if ($accept) {
                 $this->moveApplicantToHiredStage($locked);
             }
 
-            $this->logToApplicant($locked, null, $accept
+            $recorded = $recordedBy
+                ? ' '.__('(Recorded by :name, :channel.)', ['name' => $recordedBy->name, 'channel' => mb_strtolower(static::responseChannelLabel($channel))])
+                : '';
+
+            $this->logToApplicant($locked, $recordedBy, ($accept
                 ? __('The candidate accepted offer :reference.', ['reference' => $locked->reference])
-                : __('The candidate declined offer :reference.', ['reference' => $locked->reference]).($reason ? ' '.__('Reason: :reason', ['reason' => $reason]) : ''));
+                : __('The candidate declined offer :reference.', ['reference' => $locked->reference]).($reason ? ' '.__('Reason: :reason', ['reason' => $reason]) : '')).$recorded);
 
             return $locked;
         });

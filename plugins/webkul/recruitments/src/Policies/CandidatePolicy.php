@@ -5,6 +5,7 @@ namespace Webkul\Recruitment\Policies;
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Webkul\Recruitment\Models\Candidate;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Security\Traits\HasScopedPermissions;
 
 class CandidatePolicy
@@ -24,7 +25,8 @@ class CandidatePolicy
      */
     public function view(User $user, Candidate $candidate): bool
     {
-        return $user->can('view_recruitment_candidate');
+        return $user->can('view_recruitment_candidate')
+            && $this->inMemberCompany($user, $candidate);
     }
 
     /**
@@ -44,7 +46,8 @@ class CandidatePolicy
             return false;
         }
 
-        return $this->hasAccess($user, $candidate, 'manager');
+        return $this->inActiveCompany($user, $candidate)
+            && $this->hasAccess($user, $candidate, 'manager');
     }
 
     /**
@@ -56,7 +59,8 @@ class CandidatePolicy
             return false;
         }
 
-        return $this->hasAccess($user, $candidate, 'manager');
+        return $this->inActiveCompany($user, $candidate)
+            && $this->hasAccess($user, $candidate, 'manager');
     }
 
     /**
@@ -65,5 +69,17 @@ class CandidatePolicy
     public function deleteAny(User $user): bool
     {
         return $user->can('delete_any_recruitment_candidate');
+    }
+
+    /** Viewing: the record belongs to one of the user's companies. */
+    protected function inMemberCompany(User $user, Candidate $candidate): bool
+    {
+        return $candidate->company_id !== null && CurrentCompany::canAccess((int) $candidate->company_id, $user);
+    }
+
+    /** Changing: the record belongs to the user's active company. */
+    protected function inActiveCompany(User $user, Candidate $candidate): bool
+    {
+        return $candidate->company_id !== null && (int) $candidate->company_id === CurrentCompany::id($user);
     }
 }

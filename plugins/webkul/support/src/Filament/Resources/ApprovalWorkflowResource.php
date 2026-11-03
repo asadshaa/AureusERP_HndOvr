@@ -137,7 +137,11 @@ class ApprovalWorkflowResource extends Resource
                             'record_manager'     => 'Manager named on the record (e.g. hiring manager)',
                             'hr'                 => 'HR of the company',
                         ]),
-                        TextInput::make('sla_hours')->numeric()->minValue(1),
+                        TextInput::make('sla_hours')
+                            ->label('SLA hours')
+                            ->helperText('First reminder for this step after this many hours. Empty uses the workflow\'s "remind after".')
+                            ->numeric()
+                            ->minValue(1),
                         Repeater::make('conditions')->columns(3)->columnSpanFull()->schema([
                             TextInput::make('field')->required(),
                             Select::make('operator')->options([

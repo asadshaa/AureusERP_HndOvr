@@ -12,6 +12,7 @@ use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Maatwebsite\Excel\Facades\Excel;
@@ -21,6 +22,7 @@ use Webkul\Account\Models\Journal;
 use Webkul\Account\Models\MoveLine;
 use Webkul\Accounting\Filament\Clusters\Reporting;
 use Webkul\Accounting\Filament\Clusters\Reporting\Pages\Exports\AgedReceivableExport;
+use Webkul\Accounting\Services\AgedPartnerBalanceService;
 use Webkul\Partner\Models\Partner;
 
 class AgedReceivable extends Page implements HasForms
@@ -266,50 +268,18 @@ class AgedReceivable extends Page implements HasForms
     {
         $state = $this->form->getState();
         $asOfDate = Carbon::parse($state['as_of_date'] ?? now());
-        $basis = $state['basis'] ?? 'due_date';
-        $period = $state['period'] ?? 30;
-        $companyId = Auth::user()->default_company_id;
-        $postedOnly = ($state['posted_entries'] ?? 'posted') === 'posted';
+        $period = (int) ($state['period'] ?? 30);
 
-        $query = MoveLine::select(
-            'accounts_account_moves.name as move_name',
-            'accounts_account_moves.invoice_date',
-            'accounts_account_moves.invoice_date_due',
-            'accounts_account_moves.reference',
-            'accounts_journals.name as journal_name',
-            'accounts_account_move_lines.amount_residual'
-        )
-            ->join('accounts_account_moves', 'accounts_account_move_lines.move_id', '=', 'accounts_account_moves.id')
-            ->join('accounts_accounts', 'accounts_account_move_lines.account_id', '=', 'accounts_accounts.id')
-            ->leftJoin('accounts_journals', 'accounts_account_moves.journal_id', '=', 'accounts_journals.id')
-            ->where('accounts_accounts.account_type', AccountType::ASSET_RECEIVABLE)
-            ->where('accounts_account_moves.company_id', $companyId)
-            ->where('accounts_account_move_lines.amount_residual', '!=', 0)
-            ->where('accounts_account_move_lines.partner_id', $partnerId)
-            ->orderBy('accounts_account_moves.invoice_date');
-
-        if ($postedOnly) {
-            $query->where('accounts_account_moves.state', MoveState::POSTED);
-        }
-
-        $moveLines = $query->get();
         $lines = [];
 
-        foreach ($moveLines as $line) {
-            $referenceDate = $basis === 'due_date'
-                ? Carbon::parse($line->invoice_date_due)
-                : Carbon::parse($line->invoice_date);
-
-            $daysOverdue = $referenceDate->diffInDays($asOfDate, false);
-            $amount = (float) $line->amount_residual;
-
+        foreach ($this->openItems($state, $asOfDate, [(int) $partnerId]) as $item) {
             $lineData = [
-                'move_name'        => $line->move_name,
-                'invoice_date'     => $line->invoice_date,
-                'invoice_date_due' => $line->invoice_date_due,
-                'reference'        => $line->reference,
-                'journal_name'     => $line->journal_name,
-                'days_overdue'     => $daysOverdue,
+                'move_name'        => $item['move_name'],
+                'invoice_date'     => $item['invoice_date'],
+                'invoice_date_due' => $item['invoice_date_due'],
+                'reference'        => $item['reference'],
+                'journal_name'     => $item['journal_name'],
+                'days_overdue'     => $item['days_overdue'],
                 'at_date'          => 0,
                 'period_1'         => 0,
                 'period_2'         => 0,
@@ -318,19 +288,7 @@ class AgedReceivable extends Page implements HasForms
                 'older'            => 0,
             ];
 
-            if ($daysOverdue < 0) {
-                $lineData['at_date'] = $amount;
-            } elseif ($daysOverdue <= $period) {
-                $lineData['period_1'] = $amount;
-            } elseif ($daysOverdue <= $period * 2) {
-                $lineData['period_2'] = $amount;
-            } elseif ($daysOverdue <= $period * 3) {
-                $lineData['period_3'] = $amount;
-            } elseif ($daysOverdue <= $period * 4) {
-                $lineData['period_4'] = $amount;
-            } else {
-                $lineData['older'] = $amount;
-            }
+            $lineData[AgedPartnerBalanceService::bucketFor($item['days_overdue'], $period)] = $item['amount'];
 
             $lines[] = $lineData;
         }
@@ -338,63 +296,46 @@ class AgedReceivable extends Page implements HasForms
         return $lines;
     }
 
+    /**
+     * Open items as they stood at the end of the as-of date: moves dated
+     * after it are excluded, later reconciliations are added back, and
+     * ageing is measured to the as-of date (AgedPartnerBalanceService).
+     *
+     * @param  array<string, mixed>  $state
+     * @param  array<int, int>  $partnerIds
+     */
+    protected function openItems(array $state, Carbon $asOfDate, array $partnerIds = []): Collection
+    {
+        return app(AgedPartnerBalanceService::class)->openItems(
+            (int) Auth::user()->default_company_id,
+            AgedPartnerBalanceService::RECEIVABLE,
+            $asOfDate,
+            [
+                'basis'       => $state['basis'] ?? AgedPartnerBalanceService::BASIS_DUE_DATE,
+                'journal_ids' => $state['journals'] ?? [],
+                'partner_ids' => $partnerIds,
+                'posted_only' => ($state['posted_entries'] ?? 'posted') === 'posted',
+            ],
+        );
+    }
+
     #[Computed]
     public function agedReceivableData(): array
     {
         $state = $this->form->getState();
         $asOfDate = Carbon::parse($state['as_of_date'] ?? now());
-        $basis = $state['basis'] ?? 'due_date';
-        $period = $state['period'] ?? 30;
-        $journalIds = $state['journals'] ?? [];
-        $partnerIds = $state['partners'] ?? [];
-        $postedOnly = ($state['posted_entries'] ?? 'posted') === 'posted';
+        $period = (int) ($state['period'] ?? 30);
         $companyId = Auth::user()->default_company_id;
-
-        $query = MoveLine::select(
-            'accounts_account_move_lines.*',
-            'accounts_account_moves.name as move_name',
-            'accounts_account_moves.invoice_date',
-            'accounts_account_moves.invoice_date_due',
-            'accounts_account_moves.reference',
-            'accounts_account_moves.state',
-            'accounts_journals.name as journal_name',
-            'partners_partners.name as partner_name',
-            'partners_partners.id as partner_id'
-        )
-            ->join('accounts_account_moves', 'accounts_account_move_lines.move_id', '=', 'accounts_account_moves.id')
-            ->join('accounts_accounts', 'accounts_account_move_lines.account_id', '=', 'accounts_accounts.id')
-            ->leftJoin('accounts_journals', 'accounts_account_moves.journal_id', '=', 'accounts_journals.id')
-            ->leftJoin('partners_partners', 'accounts_account_move_lines.partner_id', '=', 'partners_partners.id')
-            ->where('accounts_accounts.account_type', AccountType::ASSET_RECEIVABLE)
-            ->where('accounts_account_moves.company_id', $companyId)
-            ->where('accounts_account_move_lines.amount_residual', '!=', 0)
-            ->whereNotNull('accounts_account_move_lines.partner_id');
-
-        if ($postedOnly) {
-            $query->where('accounts_account_moves.state', MoveState::POSTED);
-        }
-
-        if (! empty($journalIds)) {
-            $query->whereIn('accounts_account_moves.journal_id', $journalIds);
-        }
-
-        if (! empty($partnerIds)) {
-            $query->whereIn('accounts_account_move_lines.partner_id', $partnerIds);
-        }
-
-        $moveLines = $query->orderBy('partners_partners.name')
-            ->orderBy('accounts_account_moves.invoice_date')
-            ->get();
 
         $partnerData = [];
 
-        foreach ($moveLines as $line) {
-            $partnerId = $line->partner_id;
+        foreach ($this->openItems($state, $asOfDate, $state['partners'] ?? []) as $item) {
+            $partnerId = $item['partner_id'];
 
             if (! isset($partnerData[$partnerId])) {
                 $partnerData[$partnerId] = [
                     'id'           => $partnerId,
-                    'partner_name' => $line->partner_name,
+                    'partner_name' => $item['partner_name'],
                     'at_date'      => 0,
                     'period_1'     => 0,
                     'period_2'     => 0,
@@ -405,28 +346,8 @@ class AgedReceivable extends Page implements HasForms
                 ];
             }
 
-            $referenceDate = $basis === 'due_date'
-                ? Carbon::parse($line->invoice_date_due)
-                : Carbon::parse($line->invoice_date);
-
-            $daysOverdue = $referenceDate->diffInDays($asOfDate, false);
-            $amount = (float) $line->amount_residual;
-
-            if ($daysOverdue < 0) {
-                $partnerData[$partnerId]['at_date'] += $amount;
-            } elseif ($daysOverdue <= $period) {
-                $partnerData[$partnerId]['period_1'] += $amount;
-            } elseif ($daysOverdue <= $period * 2) {
-                $partnerData[$partnerId]['period_2'] += $amount;
-            } elseif ($daysOverdue <= $period * 3) {
-                $partnerData[$partnerId]['period_3'] += $amount;
-            } elseif ($daysOverdue <= $period * 4) {
-                $partnerData[$partnerId]['period_4'] += $amount;
-            } else {
-                $partnerData[$partnerId]['older'] += $amount;
-            }
-
-            $partnerData[$partnerId]['total'] += $amount;
+            $partnerData[$partnerId][AgedPartnerBalanceService::bucketFor($item['days_overdue'], $period)] += $item['amount'];
+            $partnerData[$partnerId]['total'] += $item['amount'];
         }
 
         $partnerData = array_filter($partnerData, fn ($partner) => abs($partner['total']) > 0.01);
@@ -435,6 +356,7 @@ class AgedReceivable extends Page implements HasForms
             ->join('accounts_accounts', 'accounts_account_move_lines.account_id', '=', 'accounts_accounts.id')
             ->where('accounts_accounts.account_type', AccountType::ASSET_RECEIVABLE)
             ->where('accounts_account_moves.company_id', $companyId)
+            ->where('accounts_account_moves.date', '<=', $asOfDate->toDateString())
             ->where('accounts_account_moves.state', '!=', MoveState::POSTED)
             ->exists();
 

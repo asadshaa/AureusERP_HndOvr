@@ -17,9 +17,11 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\QueryBuilder;
 use Filament\Tables\Filters\QueryBuilder\Constraints\TextConstraint;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Webkul\Recruitment\Filament\Clusters\Configurations;
 use Webkul\Recruitment\Filament\Clusters\Configurations\Resources\RefuseReasonResource\Pages\ListRefuseReasons;
 use Webkul\Recruitment\Models\RefuseReason;
+use Webkul\Security\Services\CurrentCompany;
 
 class RefuseReasonResource extends Resource
 {
@@ -148,6 +150,12 @@ class RefuseReasonResource extends Resource
                     ->icon('heroicon-o-briefcase')
                     ->label(__('recruitments::filament/clusters/configurations/resources/refuse-reason.infolist.template')),
             ]);
+    }
+
+    /** The active company's reasons and the shared ones. */
+    public static function getEloquentQuery(): Builder
+    {
+        return CurrentCompany::scope(parent::getEloquentQuery(), includeShared: true);
     }
 
     public static function getPages(): array

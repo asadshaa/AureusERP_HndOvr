@@ -57,8 +57,9 @@ it('checks in and out through the geofenced attendance service', function () {
         ->call('checkIn', checkInPayload())
         ->assertSet('outcome.ok', true)
         ->assertSet('outcome.result', 'verified')
-        ->assertSee('Checked in at 05:00 AM')
-        ->assertSee('Checked in since 05:00 AM')
+        // A profile without a timezone is shown in the attendance timezone (Asia/Karachi), not UTC.
+        ->assertSee('Checked in at 10:00 AM')
+        ->assertSee('Checked in since 10:00 AM')
         ->assertSee('Check out');
 
     $record = AttendanceRecord::query()->where('employee_id', $f['employee']->id)->sole();
@@ -68,7 +69,7 @@ it('checks in and out through the geofenced attendance service', function () {
     $this->travel(2)->hours();
     $page->call('checkOut', checkInPayload())
         ->assertSet('outcome.ok', true)
-        ->assertSee('Checked out at 07:00 AM')
+        ->assertSee('Checked out at 12:00 PM')
         ->assertSee('Check in again');
 
     expect($record->fresh()->check_out)->not->toBeNull();

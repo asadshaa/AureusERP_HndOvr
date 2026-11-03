@@ -37,6 +37,7 @@ use Webkul\Employee\Services\Attendance\Verifiers\RemoteExemptVerifier;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
+use Webkul\Support\Services\ApprovalEngine;
 use Webkul\Support\Services\HierarchicalNotificationService;
 
 /**
@@ -59,6 +60,7 @@ class GeofencedAttendanceService
         private readonly ?GpsGeofenceVerifier $gps = null,
         private readonly ?RemoteExemptVerifier $remote = null,
         private readonly ?AttendanceIntervalService $intervals = null,
+        private readonly ?AttendanceStatusClassifier $statuses = null,
     ) {
         if ($this->gps !== null) {
             $this->resolvedVerifiers[Method::Gps->value] = $this->gps;
@@ -355,12 +357,14 @@ class GeofencedAttendanceService
         $newStatus = $this->statusFor($mode, $decision)->value;
 
         if ($today?->check_in) {
-            $record = AttendanceIntervalService::quietly(function () use ($today, $nowUtc, $appTimezone, $mode, $verification, $newStatus): AttendanceRecord {
+            $dayStatus = $this->statusAfterAnotherCheckIn($today->verification_status, $newStatus);
+
+            $record = AttendanceIntervalService::quietly(function () use ($today, $nowUtc, $appTimezone, $mode, $verification, $newStatus, $dayStatus): AttendanceRecord {
                 $this->intervals()->open($today, $nowUtc->setTimezone($appTimezone), $mode === 'remote' ? AttendanceSource::SelfService->value : AttendanceSource::Gps->value, $verification->id, $newStatus);
 
                 return $this->intervals()->syncSummary($today, [
                     'check_out_verification_id' => null,
-                    'verification_status'       => $today->verification_status === Status::NeedsReview->value ? Status::NeedsReview->value : $newStatus,
+                    'verification_status'       => $dayStatus,
                 ]);
             });
 
@@ -476,20 +480,13 @@ class GeofencedAttendanceService
             ? Status::NeedsReview->value
             : ($current ?? $newStatus->value);
 
-        $fullDayHours = (float) config('hr_attendance_geofence.full_day_min_hours', 7.5);
-        $halfDayHours = (float) config('hr_attendance_geofence.half_day_min_hours', 4.0);
-        // Worked = the closed intervals plus the one being closed (never first-in to last-out).
-        $workedHours = max(0, ($this->intervals()->workedMinutes($open) + ($intervalStart ? $intervalStart->diffInMinutes($checkOutAt) : 0)) / 60);
+        // Worked = the closed intervals plus the one being closed (never first-in to last-out),
+        // against the day's required minutes (AttendanceStatusClassifier: short of them is a half day).
+        $workedMinutes = max(0, (int) ($this->intervals()->workedMinutes($open) + ($intervalStart ? $intervalStart->diffInMinutes($checkOutAt) : 0)));
 
         $attendanceStatus = $open->status;
         if (! in_array($attendanceStatus, ['leave', 'holiday', 'absent'], true)) {
-            if ($workedHours >= $fullDayHours) {
-                $attendanceStatus = $mode === 'remote' ? 'remote' : 'present';
-            } elseif ($workedHours >= $halfDayHours) {
-                $attendanceStatus = 'half_day';
-            } else {
-                $attendanceStatus = $mode === 'remote' ? 'remote' : 'present';
-            }
+            $attendanceStatus = $this->statuses()->classify($employee, $open->attendance_date->toDateString(), $workedMinutes, $mode === 'remote');
         }
 
         AttendanceIntervalService::quietly(function () use ($open, $openInterval, $checkOutAt, $verification, $finalStatus, $attendanceStatus): void {
@@ -876,14 +873,13 @@ class GeofencedAttendanceService
             $parentId = $record->employee?->parent_id;
             $manager = $parentId ? Employee::query()->with('user')->find($parentId)?->user : null;
             if (! $manager || (int) $manager->id === (int) $record->employee?->user_id) {
-                // If there is no line manager, forward notification to company HR reviewers.
-                $hrUsers = User::query()
-                    ->where('default_company_id', $record->company_id)
-                    ->where('is_active', true)
-                    ->get()
-                    ->filter(fn (User $u): bool => $u->hasRole(['Admin', 'Super Admin', 'hr_manager', 'hr manager', 'hr_ops_manager', 'hr', 'human resources'])
-                        || $u->can('hr_manage_attendance')
-                        || $u->can('hr_review_attendance_verifications'));
+                // No line manager: the company's HR approvers (the same people who decide
+                // its HR requests), never every holder of the attendance permissions --
+                // the line manager bundle carries those for their own team only.
+                $hrUsers = app(ApprovalEngine::class)->resolveHrApproversForCompany(
+                    (int) $record->company_id,
+                    $record->employee?->user_id ? (int) $record->employee->user_id : null,
+                );
 
                 if ($hrUsers->isEmpty()) {
                     return;
@@ -968,6 +964,8 @@ class GeofencedAttendanceService
         $schedStartLocal = $schedStartUtc ? $this->localTime($schedStartUtc, $timezone) : null;
         $schedEndLocal = $schedEndUtc ? $this->localTime($schedEndUtc, $timezone) : null;
         $schedDurationHours = ($schedStartUtc && $schedEndUtc) ? round($schedStartUtc->diffInMinutes($schedEndUtc) / 60, 1) : 8.0;
+        // The day is complete once the resolved schedule's required minutes are worked (not a fixed 8 h).
+        $requiredSeconds = max(1, $this->schedule->pick($schedules, $attendanceDate)->requiredMinutes) * 60;
 
         $elapsedSeconds = 0;
         $elapsedFormatted = null;
@@ -987,14 +985,13 @@ class GeofencedAttendanceService
             if ($currentStart) {
                 // Worked today = the closed pairs plus the running one.
                 $elapsedSeconds = $closedSeconds + max(0, $nowUtc->getTimestamp() - $currentStart->getTimestamp());
-                $elapsedHours = $elapsedSeconds / 3600;
                 $elapsedMinutes = intdiv($elapsedSeconds, 60);
                 $elapsedFormatted = intdiv($elapsedMinutes, 60).'h '.($elapsedMinutes % 60).'m';
 
                 $targetSeconds = ($schedDurationHours > 0 ? $schedDurationHours : 8.0) * 3600;
                 $progressPercent = min(100, (int) round(($elapsedSeconds / $targetSeconds) * 100));
 
-                $isShiftComplete = $elapsedHours >= 8.0 || ($schedEndUtc && $nowUtc >= $schedEndUtc);
+                $isShiftComplete = $elapsedSeconds >= $requiredSeconds || ($schedEndUtc && $nowUtc >= $schedEndUtc);
             }
         } elseif ($record?->check_in && $record->check_out) {
             $state = 'checked_out';
@@ -1157,6 +1154,28 @@ class GeofencedAttendanceService
     private function intervals(): AttendanceIntervalService
     {
         return $this->intervals ?? app(AttendanceIntervalService::class);
+    }
+
+    private function statuses(): AttendanceStatusClassifier
+    {
+        return $this->statuses ?? app(AttendanceStatusClassifier::class);
+    }
+
+    /**
+     * The day's verification status after a later check-in of the same day.
+     * A flagged check-in puts the day (back) in review. A clean one never
+     * turns a reviewed, rejected or HR-corrected day back into "verified":
+     * the existing review outcome is kept.
+     */
+    private function statusAfterAnotherCheckIn(?string $current, string $checkInStatus): string
+    {
+        if ($checkInStatus === Status::NeedsReview->value) {
+            return Status::NeedsReview->value;
+        }
+
+        $kept = [Status::NeedsReview->value, Status::Reviewed->value, Status::ReviewRejected->value, Status::Overridden->value];
+
+        return in_array($current, $kept, true) ? $current : $checkInStatus;
     }
 
     private function statusFor(string $mode, GeofenceDecision $decision): Status

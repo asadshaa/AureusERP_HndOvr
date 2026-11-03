@@ -3,6 +3,7 @@
 namespace Webkul\Accounting\Policies;
 
 use Illuminate\Auth\Access\HandlesAuthorization;
+use Webkul\Account\Enums\MoveState;
 use Webkul\Accounting\Models\JournalItem;
 use Webkul\Security\Models\User;
 
@@ -47,7 +48,8 @@ class JournalItemPolicy
      */
     public function delete(User $user, JournalItem $journalItem): bool
     {
-        return $user->can('delete_accounting_journal::item');
+        return $user->can('delete_accounting_journal::item')
+            && $journalItem->parent_state !== MoveState::POSTED;
     }
 
     /**
@@ -63,7 +65,8 @@ class JournalItemPolicy
      */
     public function forceDelete(User $user, JournalItem $journalItem): bool
     {
-        return $user->can('force_delete_accounting_journal::item');
+        return $user->can('force_delete_accounting_journal::item')
+            && $journalItem->parent_state !== MoveState::POSTED;
     }
 
     /**

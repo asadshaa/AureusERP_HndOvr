@@ -109,7 +109,11 @@ class AttendanceRecordResource extends Resource
             // silently with 0 worked hours).
             DateTimePicker::make('check_out')->seconds(false)->after('check_in')
                 ->validationMessages(['after' => 'The check-out must be after the check-in.']),
-            TextInput::make('overtime_hours')->numeric()->minValue(0)->default(0),
+            // Computed from the day's approved overtime requests (OvertimeService), never typed.
+            TextInput::make('overtime_hours')->numeric()
+                ->disabled()
+                ->dehydrated(false)
+                ->helperText('Filled from the approved overtime requests for this day.'),
             Select::make('status')->options([
                 'present' => 'Present', 'half_day' => 'Half Day', 'absent' => 'Absent', 'leave' => 'Leave',
                 'holiday' => 'Holiday', 'remote' => 'Remote',
@@ -162,6 +166,13 @@ class AttendanceRecordResource extends Resource
         }
 
         return app(AttendanceScheduleResolver::class)->attendanceDateFor($employee, $moment);
+    }
+
+    private static function employeeTimezone(AttendanceRecord $record): string
+    {
+        $resolver = app(AttendanceScheduleResolver::class);
+
+        return $record->employee ? $resolver->timezoneFor($record->employee) : $resolver->defaultTimezone();
     }
 
     private static function isEvidenceBacked(?AttendanceRecord $record): bool
@@ -290,7 +301,7 @@ class AttendanceRecordResource extends Resource
                 ->wrap()
                 ->state(fn (AttendanceRecord $record): string => AttendanceIntervalService::describe(
                     $record->intervals->whereNull('voided_at'),
-                    $record->employee ? app(AttendanceScheduleResolver::class)->timezoneFor($record->employee) : (string) config('app.timezone'),
+                    self::employeeTimezone($record),
                 )),
             TextColumn::make('worked_hours')->numeric(decimalPlaces: 2),
             TextColumn::make('late_minutes')->label('Late (minutes)')->sortable(),
@@ -362,10 +373,15 @@ class AttendanceRecordResource extends Resource
                 ->visible(fn (AttendanceRecord $record): bool => static::isActiveCompanyRecord($record)
                     && ((int) $record->employee?->user_id === (int) Auth::id()
                         || (bool) Auth::user()?->can(HrPermissions::ManageAttendance)))
+                ->modalDescription('A new check-in moves the start of the first check-in of the day; a new check-out moves the end of the last one. Breaks between check-ins stay breaks.')
                 ->schema([
+                    // Shown and typed in the employee's own timezone; Filament hands the service the app-timezone moment.
                     DateTimePicker::make('requested_check_in')->seconds(false)
+                        ->timezone(fn (AttendanceRecord $record): string => self::employeeTimezone($record))
+                        ->helperText(fn (AttendanceRecord $record): string => 'In the employee\'s local time ('.self::employeeTimezone($record).').')
                         ->default(fn (AttendanceRecord $record) => $record->check_in),
                     DateTimePicker::make('requested_check_out')->seconds(false)
+                        ->timezone(fn (AttendanceRecord $record): string => self::employeeTimezone($record))
                         ->default(fn (AttendanceRecord $record) => $record->check_out),
                     Textarea::make('reason')
                         ->label('Reason for the change (optional)')
@@ -539,7 +555,7 @@ class AttendanceRecordResource extends Resource
                             foreach ($records as $r) {
                                 $dt = $r->attendance_date ? Carbon::parse($r->attendance_date) : null;
                                 // Stored in UTC; shown in the employee's own time zone (as on screen).
-                                $timezone = $r->employee ? $scheduleResolver->timezoneFor($r->employee) : config('app.timezone');
+                                $timezone = $r->employee ? $scheduleResolver->timezoneFor($r->employee) : $scheduleResolver->defaultTimezone();
                                 $local = fn ($moment): string => $moment ? Carbon::parse($moment)->setTimezone($timezone)->format('Y-m-d H:i:s') : '';
                                 fputcsv($handle, [
                                     $dt ? $dt->format('Y-m-d') : '',

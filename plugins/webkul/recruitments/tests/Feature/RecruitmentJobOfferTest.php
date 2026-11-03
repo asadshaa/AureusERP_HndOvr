@@ -781,3 +781,126 @@ it('runs approval, sending and the hire from the offer page', function () {
 
     expect($offer->refresh()->employee_id)->not->toBeNull();
 });
+
+// ---------------------------------------------------------------------
+// Public link address and answers recorded by HR
+// ---------------------------------------------------------------------
+
+it('builds the candidate link on the public address and accepts it whatever host the request comes through', function () {
+    config(['recruitment.offers.public_url' => 'https://careers.example.com/']);
+    $f = offerFixture();
+    $offer = sentOffer($f);
+    $service = app(JobOfferService::class);
+    $url = $service->respondUrl($offer);
+
+    expect($url)->toStartWith('https://careers.example.com/careers/offers/'.$offer->id.'/'.$offer->response_token.'?')
+        ->and(offerMailJob()->payload['respond_url'])->toBe($url)
+        ->and(JobOfferService::publicUrlIsLocal())->toBeFalse();
+
+    // Signed over the path only: the request may arrive on another host (tunnel, proxy).
+    Auth::logout();
+    $local = str_replace('https://careers.example.com', 'http://127.0.0.1:8000', $url);
+    $this->get($local)->assertOk()->assertSee('Accept offer')->assertSee(e($url), false);
+    $this->get(str_replace($offer->response_token, Str::random(48), $local))->assertForbidden();
+
+    // Without the setting the link falls back to app.url, and a local address is flagged.
+    config(['recruitment.offers.public_url' => null, 'app.url' => 'http://127.0.0.1:8000']);
+    expect($service->respondUrl($offer))->toStartWith('http://127.0.0.1:8000/careers/offers/')
+        ->and(JobOfferService::publicUrlIsLocal())->toBeTrue();
+
+    foreach (['http://localhost', 'http://192.168.1.20:8000', 'http://aureus.test'] as $local) {
+        config(['recruitment.offers.public_url' => $local]);
+        expect(JobOfferService::publicUrlIsLocal())->toBeTrue();
+    }
+});
+
+it('warns on the Send action while the candidate link points to a local address', function () {
+    $f = offerFixture();
+    $offer = approvedOffer($f);
+    test()->actingAs($f['hr']);
+    CurrentCompany::flush();
+
+    config(['recruitment.offers.public_url' => 'http://127.0.0.1:8000']);
+    Livewire::test(ViewJobOffer::class, ['record' => $offer->getKey()])
+        ->mountAction('sendOffer')
+        ->assertMountedActionModalSee('RECRUITMENT_OFFER_PUBLIC_URL');
+
+    config(['recruitment.offers.public_url' => 'https://careers.example.com']);
+    Livewire::test(ViewJobOffer::class, ['record' => $offer->getKey()])
+        ->mountAction('sendOffer')
+        ->assertMountedActionModalDontSee('RECRUITMENT_OFFER_PUBLIC_URL');
+});
+
+it('lets a recruiter record a declined answer received by phone, audited in the offer history', function () {
+    $f = offerFixture();
+    $offer = sentOffer($f);
+    $service = app(JobOfferService::class);
+
+    expect($service->canRecordResponse($f['recruiter'], $offer))->toBeTrue()
+        ->and(fn () => $service->recordResponse($offer, $f['recruiter'], false, 'fax', 'Took another job'))->toThrow(ValidationException::class)
+        ->and(fn () => $service->recordResponse($offer, $f['recruiter'], false, 'phone', ''))->toThrow(ValidationException::class);
+
+    $offer = $service->recordResponse($offer, $f['recruiter'], false, 'phone', 'Accepted another offer, called on Monday');
+    $event = $offer->events()->where('event', 'declined')->sole();
+
+    expect($offer->status)->toBe(JobOfferStatus::DECLINED)
+        ->and($offer->response_reason)->toBe('Accepted another offer, called on Monday')
+        ->and($offer->response_channel)->toBe('phone')
+        ->and($offer->response_recorded_by)->toBe($f['recruiter']->id)
+        ->and($offer->response_ip)->toBeNull()
+        ->and($event->actor_id)->toBe($f['recruiter']->id)
+        ->and($event->meta)->toBe(['channel' => 'phone', 'recorded_by' => $f['recruiter']->id])
+        ->and($event->label())->toBe('Declined by the candidate (by phone)')
+        ->and(DB::table('notifications')->where('notifiable_id', $f['recruiter']->id)->where('data', 'like', '%job_offer_declined_'.$offer->id.'%')->count())->toBe(1);
+
+    // Closed now: neither HR nor the link can answer again.
+    expect($service->canRecordResponse($f['hr'], $offer))->toBeFalse()
+        ->and(fn () => $service->recordResponse($offer, $f['hr'], true, 'email', 'Changed mind'))->toThrow(RuntimeException::class, 'no longer open');
+});
+
+it('records an acceptance for the candidate from the offer page, moving the application to the hired stage', function () {
+    $f = offerFixture();
+    $offer = sentOffer($f);
+    test()->actingAs($f['hr']);
+    CurrentCompany::flush();
+
+    Livewire::test(ViewJobOffer::class, ['record' => $offer->getKey()])
+        ->assertActionVisible('recordOfferResponse')
+        ->callAction('recordOfferResponse', data: ['decision' => 'accept', 'channel' => 'email', 'reason' => 'Signed letter returned by email'])
+        ->assertHasNoActionErrors();
+
+    $offer->refresh();
+
+    expect($offer->status)->toBe(JobOfferStatus::ACCEPTED)
+        ->and($offer->response_channel)->toBe('email')
+        ->and($offer->responseRecorder?->id)->toBe($f['hr']->id)
+        ->and($f['applicant']->refresh()->load('stage')->stage?->hired_stage)->toBeTrue()
+        ->and($offer->events()->where('event', 'accepted')->sole()->actor_id)->toBe($f['hr']->id);
+
+    // The candidate's own link answer is still recorded as such.
+    $other = sentOffer(['applicant' => offerApplicant($f['job'], 'Bilal Ahmed', 'bilal.ahmed@example.com', $f['recruiter'])] + $f);
+    $other = app(JobOfferService::class)->respond($other, $other->response_token, true);
+    expect($other->response_channel)->toBe(JobOfferService::RESPONSE_CHANNEL_LINK)
+        ->and($other->response_recorded_by)->toBeNull();
+});
+
+it('refuses to record an answer for another company, for an unsent or an expired offer', function () {
+    $f = offerFixture();
+    $service = app(JobOfferService::class);
+    $approved = approvedOffer($f);
+    $other = offerFixture();
+
+    expect($service->canRecordResponse($f['hr'], $approved))->toBeFalse()
+        ->and(fn () => $service->recordResponse($approved, $f['hr'], true, 'phone', 'Yes'))->toThrow(RuntimeException::class, 'no longer open');
+
+    $sent = $service->send($approved, $f['hr']);
+
+    expect($service->canRecordResponse($other['hr'], $sent))->toBeFalse()
+        ->and(fn () => $service->recordResponse($sent, $other['hr'], true, 'phone', 'Yes'))->toThrow(AuthorizationException::class);
+
+    $this->travelTo(now(OfferLetterRenderer::timezone())->addDays(8));
+
+    expect($service->canRecordResponse($f['hr'], $sent->refresh()))->toBeFalse()
+        ->and(fn () => $service->recordResponse($sent, $f['hr'], true, 'phone', 'Yes'))->toThrow(RuntimeException::class, 'expired')
+        ->and($sent->refresh()->status)->toBe(JobOfferStatus::SENT);
+});

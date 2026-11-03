@@ -11,15 +11,33 @@ use Webkul\Account\Enums\RepartitionType;
 use Webkul\Account\Enums\TaxIncludeOverride;
 use Webkul\Account\Enums\TaxScope;
 use Webkul\Account\Enums\TypeTaxUse;
+use Webkul\Account\Http\Requests\Concerns\ValidatesCompanyReferences;
+use Webkul\Account\Models\Tax;
+use Webkul\Security\Services\CompanyScopedRules;
 
+/**
+ * A tax belongs to one of the token user's companies (the active company when
+ * none is sent, as on the Taxes screen); its tax group may also be a shared one
+ * and its accounts must be linked to the tax's company.
+ */
 class TaxRequest extends FormRequest
 {
+    use ValidatesCompanyReferences;
+
     /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
     {
         return true;
+    }
+
+    /** A new tax without a company goes to the active company (as on the Taxes screen). */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->isUpdateRequest() && blank($this->input('company_id')) && $this->activeCompanyId() !== null) {
+            $this->merge(['company_id' => $this->activeCompanyId()]);
+        }
     }
 
     /**
@@ -29,20 +47,22 @@ class TaxRequest extends FormRequest
      */
     public function rules(): array
     {
-        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+        $isUpdate = $this->isUpdateRequest();
         $requiredRule = $isUpdate ? ['sometimes', 'required'] : ['required'];
+        $companyAccount = $this->companyAccountRule($this->targetCompanyId(Tax::class));
+        $account = fn (): array => ['nullable', 'integer', $companyAccount];
 
         return [
             'name'                                           => [...$requiredRule, 'string', 'max:255'],
             'type_tax_use'                                   => [...$requiredRule, 'string', Rule::enum(TypeTaxUse::class)],
             'amount_type'                                    => [...$requiredRule, 'string', Rule::enum(AmountType::class)],
             'amount'                                         => [...$requiredRule, 'numeric', 'min:0'],
-            'tax_group_id'                                   => [...$requiredRule, 'integer', 'exists:accounts_tax_groups,id'],
-            'company_id'                                     => ['nullable', 'integer', 'exists:companies,id'],
+            'tax_group_id'                                   => [...$requiredRule, 'integer', CompanyScopedRules::exists('accounts_tax_groups', allowShared: true, user: $this->apiUser())],
+            'company_id'                                     => [...($isUpdate ? ['sometimes', 'required'] : ['nullable']), 'integer', CompanyScopedRules::company(user: $this->apiUser())],
             'country_id'                                     => ['nullable', 'integer', 'exists:countries,id'],
             'tax_scope'                                      => ['nullable', 'string', Rule::enum(TaxScope::class)],
             'price_include_override'                         => ['nullable', 'string', Rule::enum(TaxIncludeOverride::class)],
-            'cash_basis_transition_account_id'               => ['nullable', 'integer', 'exists:accounts_accounts,id'],
+            'cash_basis_transition_account_id'               => $account(),
             'description'                                    => ['nullable', 'string'],
             'invoice_label'                                  => ['nullable', 'string', 'max:255'],
             'invoice_legal_notes'                            => ['nullable', 'string'],
@@ -55,13 +75,13 @@ class TaxRequest extends FormRequest
             'invoice_repartition_lines.*.id'                 => ['sometimes', 'integer', 'exists:accounts_tax_partition_lines,id'],
             'invoice_repartition_lines.*.repartition_type'   => ['required', 'string', Rule::enum(RepartitionType::class)],
             'invoice_repartition_lines.*.factor_percent'     => ['nullable', 'numeric', 'min:-100', 'max:100'],
-            'invoice_repartition_lines.*.account_id'         => ['nullable', 'integer', 'exists:accounts_accounts,id'],
+            'invoice_repartition_lines.*.account_id'         => $account(),
             'invoice_repartition_lines.*.use_in_tax_closing' => ['sometimes', 'boolean'],
             'refund_repartition_lines'                       => [...$requiredRule, 'array', 'min:2'],
             'refund_repartition_lines.*.id'                  => ['sometimes', 'integer', 'exists:accounts_tax_partition_lines,id'],
             'refund_repartition_lines.*.repartition_type'    => ['required', 'string', Rule::enum(RepartitionType::class)],
             'refund_repartition_lines.*.factor_percent'      => ['nullable', 'numeric', 'min:-100', 'max:100'],
-            'refund_repartition_lines.*.account_id'          => ['nullable', 'integer', 'exists:accounts_accounts,id'],
+            'refund_repartition_lines.*.account_id'          => $account(),
             'refund_repartition_lines.*.use_in_tax_closing'  => ['sometimes', 'boolean'],
         ];
     }

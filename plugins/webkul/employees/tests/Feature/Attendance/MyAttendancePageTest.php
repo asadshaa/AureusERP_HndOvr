@@ -67,7 +67,8 @@ it('checks the signed-in employee in from a valid browser payload', function () 
         ->call('checkIn', geoPayload())
         ->assertSet('outcome.ok', true)
         ->assertSet('outcome.result', 'verified')
-        ->assertSee('Checked in at 05:00 AM');
+        // A profile without a timezone is shown in the attendance timezone (Asia/Karachi), not UTC.
+        ->assertSee('Checked in at 10:00 AM');
 
     expect(AttendanceRecord::query()->where('employee_id', $f['employee']->id)->count())->toBe(1);
 });

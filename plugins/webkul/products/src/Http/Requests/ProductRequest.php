@@ -6,6 +6,7 @@ use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Webkul\Product\Enums\ProductType;
+use Webkul\Security\Services\CompanyScopedRules;
 
 class ProductRequest extends FormRequest
 {
@@ -48,7 +49,8 @@ class ProductRequest extends FormRequest
             'uom_id'               => ['nullable', 'integer'],
             'uom_po_id'            => ['nullable', 'integer'],
             'category_id'          => [...$requiredRule, 'integer', 'exists:products_categories,id'],
-            'company_id'           => ['nullable', 'integer'],
+            // Shared (no company) or one of the token user's companies.
+            'company_id'           => ['nullable', 'integer', CompanyScopedRules::company(user: $this->user())],
             'tags'                 => ['nullable', 'array'],
             'tags.*'               => ['integer', 'exists:products_tags,id'],
         ];

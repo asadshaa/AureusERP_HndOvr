@@ -12,7 +12,17 @@ use Webkul\Account\Models\Move;
 
 final class PartnerAnalyticsService
 {
-    /** @return array<string, mixed> */
+    public function __construct(
+        private readonly AgedPartnerBalanceService $agedBalances,
+    ) {}
+
+    /**
+     * Document analytics for the period plus, from the aged ledger balance
+     * as of the period end, 0–30/31–60/61–90/90+ ageing buckets and DSO
+     * (customers) or DPO (vendors).
+     *
+     * @return array<string, mixed>
+     */
     public function summary(int $companyId, string $partyType, string $dateFrom, string $dateTo): array
     {
         if (! in_array($partyType, ['customer', 'vendor'], true)) {
@@ -89,6 +99,14 @@ final class PartnerAnalyticsService
         $overdue = (float) ($totals->overdue ?? 0);
         $topValue = (float) ($top[0]['document_value'] ?? 0);
 
+        $aging = $this->aging($companyId, $partyType, $to);
+        $periodDays = (int) $from->diffInDays($to->startOfDay()) + 1;
+        // Days outstanding = open balance at period end / period document
+        // value (credit sales or purchases) x days in the period.
+        $daysOutstanding = $documentValue > 0
+            ? round(($aging['total'] / $documentValue) * $periodDays, 1)
+            : null;
+
         return [
             'party_type'        => $partyType,
             'date_from'         => $from->toDateString(),
@@ -105,7 +123,44 @@ final class PartnerAnalyticsService
             'top_concentration' => $documentValue > 0 ? round(($topValue / $documentValue) * 100, 2) : 0.0,
             'top_parties'       => $top,
             'trends'            => $trends,
+            'aging'             => $aging,
+            'aging_as_of'       => $to->toDateString(),
+            'dso'               => $partyType === 'customer' ? $daysOutstanding : null,
+            'dpo'               => $partyType === 'vendor' ? $daysOutstanding : null,
         ];
+    }
+
+    /**
+     * Open receivable (customers) or payable (vendors) items as of the period
+     * end, bucketed by days past due. Same source and as-of rules as the
+     * Aged Receivable / Aged Payable reports, so the totals agree.
+     *
+     * @return array{current: float, '0_30': float, '31_60': float, '61_90': float, '90_plus': float, total: float}
+     */
+    private function aging(int $companyId, string $partyType, CarbonImmutable $asOf): array
+    {
+        $buckets = ['current' => 0.0, '0_30' => 0.0, '31_60' => 0.0, '61_90' => 0.0, '90_plus' => 0.0, 'total' => 0.0];
+
+        $items = $this->agedBalances->openItems(
+            $companyId,
+            $partyType === 'customer' ? AgedPartnerBalanceService::RECEIVABLE : AgedPartnerBalanceService::PAYABLE,
+            $asOf->startOfDay(),
+        );
+
+        foreach ($items as $item) {
+            $bucket = match (true) {
+                $item['days_overdue'] < 0   => 'current',
+                $item['days_overdue'] <= 30 => '0_30',
+                $item['days_overdue'] <= 60 => '31_60',
+                $item['days_overdue'] <= 90 => '61_90',
+                default                     => '90_plus',
+            };
+
+            $buckets[$bucket] += $item['amount'];
+            $buckets['total'] += $item['amount'];
+        }
+
+        return array_map(fn (float $amount): float => round($amount, 2) + 0.0, $buckets);
     }
 
     /** @param array<int, string> $moveTypes */

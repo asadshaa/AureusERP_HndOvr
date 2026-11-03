@@ -4,7 +4,12 @@ namespace Webkul\Account\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Webkul\Security\Services\CompanyScopedRules;
 
+/**
+ * A payment term is shared by every company (no company) or belongs to one of the
+ * token user's companies.
+ */
 class PaymentTermRequest extends FormRequest
 {
     /**
@@ -27,7 +32,7 @@ class PaymentTermRequest extends FormRequest
 
         return [
             'name'       => [...$requiredRule, 'string', 'max:255'],
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'company_id' => ['nullable', 'integer', CompanyScopedRules::company(user: $this->user())],
             'note'       => ['nullable', 'string'],
         ];
     }

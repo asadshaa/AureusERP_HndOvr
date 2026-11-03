@@ -21,6 +21,7 @@ use Webkul\Account\Models\MoveLine;
 use Webkul\Account\Models\Partner;
 use Webkul\Account\Models\PaymentTerm;
 use Webkul\Account\Models\Tax;
+use Webkul\Account\Services\PeriodLockService;
 use Webkul\Accounting\Data\Bank\NormalizedBankStatement;
 use Webkul\Accounting\Data\Bank\NormalizedBankTransaction;
 use Webkul\Accounting\Enums\ImportFailurePolicy;
@@ -194,6 +195,9 @@ final class ImportExecutionService
         }
 
         $this->assertBalanced($lines, 'Opening balance');
+        // This import writes a posted journal directly, so it is a posting
+        // chokepoint like confirmMove(): a closed period must not receive it.
+        app(PeriodLockService::class)->assertNotLocked((int) $company->id, $date);
         $now = now();
         $moveId = DB::table('accounts_account_moves')->insertGetId([
             'journal_id'             => $journal->id,
@@ -210,6 +214,10 @@ final class ImportExecutionService
             'accounting_source_type' => ImportRun::class,
             'accounting_source_id'   => $run->id,
             'review_status'          => 'posted',
+            // The user who confirmed the import is the one who posted it.
+            'posted_by_id'           => $run->imported_by_id,
+            'posted_at'              => $now,
+            'posted_before'          => true,
             'created_at'             => $now,
             'updated_at'             => $now,
         ]);

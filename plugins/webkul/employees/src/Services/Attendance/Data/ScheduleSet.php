@@ -20,11 +20,13 @@ final readonly class ScheduleSet
      * @param  array<int, ShiftRosterAssignment>  $assignments  the employee's own first, then the department's; newest start first
      * @param  array<string, ShiftOverride>  $overrides  keyed by date (Y-m-d)
      * @param  array<int, Shift>  $shifts  every shift the overrides and roster patterns use, keyed by id
+     * @param  CalendarHours|null  $calendar  the working-time calendar set on the employee, if any
      */
     public function __construct(
         public array $periods = [],
         public array $assignments = [],
         public array $overrides = [],
         public array $shifts = [],
+        public ?CalendarHours $calendar = null,
     ) {}
 }

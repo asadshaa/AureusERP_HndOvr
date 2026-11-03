@@ -584,7 +584,7 @@ it('attributes an imported application to its ad, keeps the first ad, and refuse
     jobPostingAdd($f, ['linkedin', 'rozee']);
     $linkedin = jobPostingFor($f['job'], 'linkedin');
     $intake = app(ApplicantIntakeService::class);
-    $importer = jobOpeningUser($f['company']);
+    $importer = jobOpeningUser($f['company'], 'create_recruitment_applicant', 'update_recruitment_applicant');
 
     $payload = [
         'external_application_id' => 'LI-1', 'candidate_name' => 'Ali Raza', 'candidate_email' => 'ali.raza@example.test',
@@ -919,7 +919,7 @@ it('keeps source and provenance consistent with the kept ad on re-import, and le
     jobPostingAdd($f, ['linkedin', 'rozee']);
     $linkedin = jobPostingFor($f['job'], 'linkedin');
     $intake = app(ApplicantIntakeService::class);
-    $importer = jobOpeningUser($f['company']);
+    $importer = jobOpeningUser($f['company'], 'create_recruitment_applicant', 'update_recruitment_applicant');
     $payload = ['external_application_id' => 'EXT-9', 'candidate_name' => 'Hina Ali', 'candidate_email' => 'hina@example.test', 'job_id' => $f['job']->id, 'source_details' => 'Export', 'job_posting_id' => $linkedin->id];
 
     $intake->import('manual', $payload, $importer);

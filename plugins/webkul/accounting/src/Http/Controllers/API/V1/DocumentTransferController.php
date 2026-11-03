@@ -2,11 +2,12 @@
 
 namespace Webkul\Accounting\Http\Controllers\API\V1;
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use PDOException;
 use RuntimeException;
-use Throwable;
 use Webkul\Accounting\Models\DocumentTransfer;
 use Webkul\Accounting\Services\DocumentTransferService;
 use Webkul\Security\Models\UserDevice;
@@ -48,10 +49,18 @@ class DocumentTransferController extends Controller
                 $data['note'] ?? null,
                 $request->ip(),
             );
-        } catch (RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        } catch (Throwable $e) {
+        } catch (ModelNotFoundException) {
+            // Missing, or in another company (DocumentService::find() audits
+            // that lookup): the same 404 either way, so nothing leaks. Any
+            // other error is not caught here: it is reported and answered
+            // with a 500 instead of being disguised as "not found".
             return response()->json(['message' => 'Document not found.'], 404);
+        } catch (PDOException $e) {
+            // Database errors are RuntimeExceptions too: report them, never show them as a refusal.
+            throw $e;
+        } catch (RuntimeException $e) {
+            // A refused send (permission, device, pending limit): the reason is safe to show.
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json(['data' => [

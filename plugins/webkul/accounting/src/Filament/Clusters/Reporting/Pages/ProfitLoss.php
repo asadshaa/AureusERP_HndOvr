@@ -331,38 +331,46 @@ class ProfitLoss extends Page implements HasForms
         );
     }
 
+    /**
+     * Revenue is credit-normal: each account shows -(debit - credit), so a
+     * debit balance (e.g. sales returns) reduces revenue instead of adding.
+     */
     protected function buildRevenueSection($accounts, $balances): array
     {
         $incomeAccounts = $this->getAccountsByTypes($accounts, $balances, [
             AccountType::INCOME->value,
             AccountType::INCOME_OTHER->value,
-        ]);
-
-        $totalRevenue = collect($incomeAccounts)->sum('balance');
+        ], -1);
 
         return [
             'accounts' => $incomeAccounts,
-            'total'    => abs($totalRevenue),
+            'total'    => (float) collect($incomeAccounts)->sum('balance'),
         ];
     }
 
+    /**
+     * Expenses are debit-normal: each account shows (debit - credit), so a
+     * credit balance (a contra-expense, reimbursement or reversal) reduces
+     * expenses. Net income = revenue - expenses = -(sum of P&L balances).
+     */
     protected function buildExpenseSection($accounts, $balances): array
     {
         $expenseAccounts = $this->getAccountsByTypes($accounts, $balances, [
             AccountType::EXPENSE->value,
             AccountType::EXPENSE_DIRECT_COST->value,
             AccountType::EXPENSE_DEPRECIATION->value,
-        ]);
-
-        $totalExpenses = collect($expenseAccounts)->sum('balance');
+        ], 1);
 
         return [
             'accounts' => $expenseAccounts,
-            'total'    => abs($totalExpenses),
+            'total'    => (float) collect($expenseAccounts)->sum('balance'),
         ];
     }
 
-    protected function getAccountsByTypes($accounts, $balances, array $types): array
+    /**
+     * @param  int  $normalSign  1 for debit-normal accounts, -1 for credit-normal
+     */
+    protected function getAccountsByTypes($accounts, $balances, array $types, int $normalSign = 1): array
     {
         return $accounts->filter(function ($account) use ($types, $balances) {
             $accountType = $account->account_type instanceof AccountType
@@ -374,14 +382,14 @@ class ProfitLoss extends Page implements HasForms
             }
 
             return isset($balances[$account->id]);
-        })->map(function ($account) use ($balances) {
-            $balance = $balances[$account->id]->balance ?? 0;
+        })->map(function ($account) use ($balances, $normalSign) {
+            $balance = (float) ($balances[$account->id]->balance ?? 0);
 
             return [
                 'id'      => $account->id,
                 'code'    => $account->code,
                 'name'    => $account->name,
-                'balance' => abs($balance),
+                'balance' => $normalSign === -1 ? 0.0 - $balance : $balance,
             ];
         })->sortBy('code')->values()->all();
     }

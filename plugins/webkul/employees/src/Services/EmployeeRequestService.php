@@ -4,6 +4,7 @@ namespace Webkul\Employee\Services;
 
 use Barryvdh\DomPDF\Facade\Pdf;
 use Brick\Math\BigDecimal;
+use Carbon\CarbonInterface;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,9 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
+use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
+use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
+use Webkul\Employee\Services\Attendance\AttendanceStatusClassifier;
 use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Employee\Support\EmployeeRequestKinds;
@@ -112,7 +116,11 @@ class EmployeeRequestService
      * approval history (who decided what, and when) is preserved via the
      * existing ApprovalRequest/ApprovalDecision chain, untouched here.
      *
-     * @param  array{check_in?: ?string, check_out?: ?string}  $requestedChanges
+     * Times are moments: a CarbonInterface, or a "Y-m-d H:i[:s]" string in the
+     * app timezone (how the request forms' pickers, set to the employee's
+     * timezone, hand a typed local time over). See storedTime().
+     *
+     * @param  array{check_in?: CarbonInterface|string|null, check_out?: CarbonInterface|string|null}  $requestedChanges
      */
     public function requestAttendanceTimeChange(
         AttendanceRecord $record,
@@ -157,11 +165,12 @@ class EmployeeRequestService
             'check_out' => $record->check_out?->toDateTimeString(),
         ];
         $requested = [
-            'check_in'  => array_key_exists('check_in', $requestedChanges) ? Carbon::parse($requestedChanges['check_in'])->toDateTimeString() : $original['check_in'],
-            'check_out' => array_key_exists('check_out', $requestedChanges) ? Carbon::parse($requestedChanges['check_out'])->toDateTimeString() : $original['check_out'],
+            'check_in'  => array_key_exists('check_in', $requestedChanges) ? $this->storedTime($requestedChanges['check_in']) : $original['check_in'],
+            'check_out' => array_key_exists('check_out', $requestedChanges) ? $this->storedTime($requestedChanges['check_out']) : $original['check_out'],
         ];
+        $timezone = app(AttendanceScheduleResolver::class)->timezoneFor($record->employee);
 
-        return DB::transaction(function () use ($record, $requester, $requestType, $original, $requested, $reason): EmployeeRequest {
+        return DB::transaction(function () use ($record, $requester, $requestType, $original, $requested, $reason, $timezone): EmployeeRequest {
             $request = EmployeeRequest::query()->create([
                 'company_id'      => $record->company_id,
                 'employee_id'     => $record->employee_id,
@@ -178,6 +187,8 @@ class EmployeeRequestService
                     'formatted_date'            => $record->attendance_date?->format('d M Y'),
                     'original'                  => $original,
                     'requested'                 => $requested,
+                    // original / requested are stored in the app timezone; the employee entered them in this one.
+                    'timezone'                  => $timezone,
                 ],
             ]);
 
@@ -192,9 +203,10 @@ class EmployeeRequestService
      * day (phone failure, geofence failure they cannot fix themselves).
      * Same request type and line-manager approval as a time change; the
      * record is created only when the request is APPROVED. Nothing is
-     * created on submission or rejection.
+     * created on submission or rejection. Times as for
+     * requestAttendanceTimeChange().
      *
-     * @param  array{check_in?: ?string, check_out?: ?string}  $times
+     * @param  array{check_in?: CarbonInterface|string|null, check_out?: CarbonInterface|string|null}  $times
      */
     public function requestMissingAttendance(
         Employee $employee,
@@ -237,12 +249,13 @@ class EmployeeRequestService
         }
 
         $requested = [
-            'check_in'  => Carbon::parse($times['check_in'])->toDateTimeString(),
-            'check_out' => isset($times['check_out']) ? Carbon::parse($times['check_out'])->toDateTimeString() : null,
+            'check_in'  => $this->storedTime($times['check_in']),
+            'check_out' => isset($times['check_out']) ? $this->storedTime($times['check_out']) : null,
         ];
         if ($requested['check_out'] !== null && $requested['check_out'] <= $requested['check_in']) {
             throw new RuntimeException('Check-out must be after check-in.');
         }
+        $timezone = app(AttendanceScheduleResolver::class)->timezoneFor($employee);
 
         $requestType = EmployeeRequestType::query()
             ->where('company_id', $employee->company_id)
@@ -253,7 +266,7 @@ class EmployeeRequestService
             throw new RuntimeException('No active "Attendance Time Change" request type is configured for this company.');
         }
 
-        return DB::transaction(function () use ($employee, $requester, $requestType, $date, $requested, $reason): EmployeeRequest {
+        return DB::transaction(function () use ($employee, $requester, $requestType, $date, $requested, $reason, $timezone): EmployeeRequest {
             $request = EmployeeRequest::query()->create([
                 'company_id'      => $employee->company_id,
                 'employee_id'     => $employee->id,
@@ -269,6 +282,8 @@ class EmployeeRequestService
                     'formatted_date'  => $date->format('d M Y'),
                     'original'        => ['check_in' => null, 'check_out' => null],
                     'requested'       => $requested,
+                    // requested is stored in the app timezone; the employee entered it in this one.
+                    'timezone'        => $timezone,
                 ],
             ]);
 
@@ -446,7 +461,8 @@ class EmployeeRequestService
 
         $updates['approved_by'] = $request->approvalRequest?->decisions?->last()?->actor_id;
 
-        // The approved pair replaces the day's check-in / check-out intervals (voided, kept for audit).
+        // A new check-in moves the first interval's start, a new check-out the last one's end:
+        // the breaks between the day's pairs stay breaks (AttendanceIntervalService::applyDirectEdit()).
         $previousReason = AttendanceRecord::$pendingIntervalReason;
         AttendanceRecord::$pendingIntervalReason = "Approved attendance correction request #{$request->id}";
         try {
@@ -454,12 +470,17 @@ class EmployeeRequestService
         } finally {
             AttendanceRecord::$pendingIntervalReason = $previousReason;
         }
+
+        $this->recalculateAttendanceStatus($record);
     }
 
     /**
-     * Creates the attendance record for an APPROVED missed-day request. If a
-     * record appeared in the meantime, the requested times are applied to it
-     * like a time change instead of creating a duplicate.
+     * Creates the attendance record for an APPROVED missed-day request, with
+     * the day's scheduled window (so late / early minutes are measured like
+     * any other day) and a status from the worked time. A missed-day request
+     * stands for the WHOLE day: if a record appeared in the meantime, its
+     * check-ins are replaced by the requested pair (voided, kept for audit)
+     * instead of creating a duplicate.
      *
      * @param  array<string, mixed>  $payload
      */
@@ -473,6 +494,7 @@ class EmployeeRequestService
             return;
         }
 
+        $request->loadMissing('employee');
         $record = AttendanceRecord::query()
             ->where('company_id', $request->company_id)
             ->where('employee_id', $request->employee_id)
@@ -485,12 +507,59 @@ class EmployeeRequestService
                 'source'          => 'manual',
             ]);
 
+        if ($request->employee && ($record->scheduled_start === null || $record->scheduled_end === null)) {
+            [$scheduledStart, $scheduledEnd] = app(AttendanceScheduleResolver::class)->scheduledWindowFor($request->employee, (string) $date);
+            $appTimezone = (string) config('app.timezone');
+            $record->scheduled_start ??= $scheduledStart?->setTimezone($appTimezone);
+            $record->scheduled_end ??= $scheduledEnd?->setTimezone($appTimezone);
+        }
+
         $record->fill(array_filter([
             'check_in'    => $requested['check_in'],
             'check_out'   => $requested['check_out'] ?? null,
             'approved_by' => $request->approvalRequest?->decisions?->last()?->actor_id,
         ], fn ($value): bool => $value !== null));
-        $record->save();
+
+        $previousReason = AttendanceRecord::$pendingIntervalReason;
+        $previousReplace = AttendanceRecord::$replaceIntervalsOnEdit;
+        AttendanceRecord::$pendingIntervalReason = "Approved missed-day request #{$request->id} (replaces the whole day)";
+        AttendanceRecord::$replaceIntervalsOnEdit = true;
+        try {
+            $record->save();
+        } finally {
+            AttendanceRecord::$pendingIntervalReason = $previousReason;
+            AttendanceRecord::$replaceIntervalsOnEdit = $previousReplace;
+        }
+
+        $this->recalculateAttendanceStatus($record);
+    }
+
+    /**
+     * D11: a corrected or newly approved day gets its status from the worked
+     * time (AttendanceStatusClassifier), instead of keeping a stale one.
+     */
+    private function recalculateAttendanceStatus(AttendanceRecord $record): void
+    {
+        $record->refresh();
+        $status = app(AttendanceStatusClassifier::class)->statusForRecord($record, app(AttendanceIntervalService::class));
+
+        if ($status !== $record->status) {
+            AttendanceIntervalService::quietly(fn () => $record->forceFill(['status' => $status])->save());
+        }
+    }
+
+    /**
+     * A requested time as stored: "Y-m-d H:i:s" in the app timezone. A
+     * CarbonInterface is an absolute moment; a string is read in the app
+     * timezone, which is what the request pickers (set to the employee's own
+     * timezone) hand over, so a 10:00 typed in Karachi is stored as 05:00 UTC.
+     */
+    private function storedTime(mixed $value): string
+    {
+        $appTimezone = (string) config('app.timezone');
+        $moment = $value instanceof CarbonInterface ? Carbon::instance($value) : Carbon::parse((string) $value, $appTimezone);
+
+        return $moment->setTimezone($appTimezone)->toDateTimeString();
     }
 
     /**

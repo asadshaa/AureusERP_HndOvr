@@ -16,6 +16,12 @@ use Webkul\Accounting\Models\ReportTemplate;
  * template's updated_at via the designer save flow) naturally yields a new key
  * and invalidates stale results. Period and company scope are included so
  * different views of the same template cache independently.
+ *
+ * The viewer's authorised companies are part of the key (they decide which
+ * entity columns/lines are available), so a run cached for one user can never
+ * be served to a user with fewer companies. A ledger stamp (LedgerVersion)
+ * rotates the key as soon as the ledger changes, so new postings and
+ * reversals show immediately instead of after the cache TTL.
  */
 class ReportCacheKey
 {
@@ -40,6 +46,7 @@ class ReportCacheKey
             'cum='.($cumulative ? '1' : '0'),
             'posted='.($context->postedOnly ? '1' : '0'),
             'companies='.$companyPart,
+            'authorized='.self::authorizedPart($context),
             'original_currency='.($context->originalCurrencyId ?? '-'),
             'periods='.$periodPart,
         ]);
@@ -56,7 +63,7 @@ class ReportCacheKey
      *
      * @param  array<int, ReportColumnSpec>  $columns
      */
-    public static function forColumns(ReportTemplate $template, array $columns, ReportContext $context, ValueBasis $defaultBasis): string
+    public static function forColumns(ReportTemplate $template, array $columns, ReportContext $context, ValueBasis $defaultBasis, string $ledgerStamp = ''): string
     {
         $columnPart = implode('|', array_map(
             function (ReportColumnSpec $column) {
@@ -84,10 +91,24 @@ class ReportCacheKey
             'basis='.$defaultBasis->value,
             'posted='.($context->postedOnly ? '1' : '0'),
             'companies='.$companyPart,
+            'authorized='.self::authorizedPart($context),
             'original_currency='.($context->originalCurrencyId ?? '-'),
             'columns='.$columnPart,
+            'ledger='.$ledgerStamp,
         ]);
 
         return 'accounting:report:'.md5($raw);
+    }
+
+    protected static function authorizedPart(ReportContext $context): string
+    {
+        if ($context->authorizedCompanyIds === null) {
+            return '*';
+        }
+
+        $authorized = $context->authorizedCompanyIds;
+        sort($authorized);
+
+        return implode(',', $authorized);
     }
 }

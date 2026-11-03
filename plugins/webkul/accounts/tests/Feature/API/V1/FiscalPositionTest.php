@@ -154,11 +154,14 @@ it('creates a fiscal position', function () {
 it('creates a fiscal position with tax mappings', function () {
     actingAsFiscalPositionApiUser(['create_account_fiscal::position']);
 
-    $taxSource = Tax::factory()->create();
-    $taxDestination = Tax::factory()->create();
+    $payload = fiscalPositionPayload();
+    // The mapped taxes must be the fiscal position's company's.
+    $taxSource = Tax::factory()->create(['company_id' => $payload['company_id']]);
+    $taxDestination = Tax::factory()->create(['company_id' => $payload['company_id']]);
 
     $payload = fiscalPositionPayload([
-        'taxes' => [
+        'company_id' => $payload['company_id'],
+        'taxes'      => [
             [
                 'tax_source_id'      => $taxSource->id,
                 'tax_destination_id' => $taxDestination->id,

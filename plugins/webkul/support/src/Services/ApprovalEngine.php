@@ -70,6 +70,14 @@ final class ApprovalEngine
     ];
 
     /**
+     * Hierarchy steps decided by one resolved manager, falling back to the
+     * company's HR approvers (hierarchyManagerFor()).
+     *
+     * @var array<int, string>
+     */
+    public const MANAGER_ROUTES = ['requester_manager', 'department_manager', 'team_manager', 'record_manager'];
+
+    /**
      * Per-object memos for the checks list screens repeat for every row and
      * action (canAct() for approve / reject / return, the HR approver and
      * company access checks of the same signed-in user). Keyed by the model
@@ -334,32 +342,63 @@ final class ApprovalEngine
     }
 
     /**
-     * The manager a hierarchy step routes to (line, department or team
-     * manager), or null when the step is not a hierarchy step or falls back
-     * to HR because there is no such manager.
+     * The manager a hierarchy step routes to (line, department, team or record
+     * manager), or null when the step is not a manager step or falls back to
+     * the company's HR approvers: no such manager, or one who is inactive, is
+     * not a member of the request's company, or is the employee the request
+     * is about. This one resolution decides both who is notified / reminded
+     * (resolveAuthorizedApprovers()) and who may decide (canAct()), and it is
+     * evaluated afresh at decision time: a manager deactivated after the step
+     * started hands the step to HR instead of leaving it stuck (X6).
      */
     public function hierarchyManagerFor(ApprovalRequest $request, ApprovalStep $step): ?User
     {
         $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
-        $techHeadUserId = $step->hierarchy_route === 'department_manager' && $request->request_type === 'claim_tech'
-            ? $this->resolveTechHeadUserId($request)
-            : null;
 
-        $manager = match ($step->hierarchy_route) {
-            'requester_manager'  => $subjectEmployee?->parent?->user,
-            'department_manager' => $techHeadUserId ? User::query()->find($techHeadUserId) : $subjectEmployee?->department?->manager?->user,
-            'team_manager'       => $subjectEmployee?->team?->manager?->user,
-            'record_manager'     => $this->recordManager($request),
-            default              => null,
-        };
-
-        if (! $manager instanceof User || ! $manager->is_active
-            || (int) $manager->id === (int) $subjectEmployee?->user_id
-            || ! $this->userCanAccessCompany($manager, (int) $request->company_id)) {
-            return null;
+        foreach ($this->hierarchyManagerCandidates($request, $step, $subjectEmployee) as $candidate) {
+            if ($this->isEligibleHierarchyManager($candidate, $request, $subjectEmployee)) {
+                return $candidate;
+            }
         }
 
-        return $manager;
+        return null;
+    }
+
+    /**
+     * The managers a manager step may route to, in order of preference: a
+     * "claim_tech" department step prefers the tech head over the employee's
+     * own department manager.
+     *
+     * @return array<int, mixed>
+     */
+    private function hierarchyManagerCandidates(ApprovalRequest $request, ApprovalStep $step, mixed $subjectEmployee): array
+    {
+        return match ($step->hierarchy_route) {
+            'requester_manager'  => [$subjectEmployee?->parent?->user],
+            'department_manager' => [
+                $request->request_type === 'claim_tech' ? $this->resolveTechHeadUser($request) : null,
+                $subjectEmployee?->department?->manager?->user,
+            ],
+            'team_manager'   => [$subjectEmployee?->team?->manager?->user],
+            'record_manager' => [$this->recordManager($request)],
+            default          => [],
+        };
+    }
+
+    /** Active, a member of the request's company, and not the employee the request is about. */
+    private function isEligibleHierarchyManager(mixed $manager, ApprovalRequest $request, mixed $subjectEmployee): bool
+    {
+        return $manager instanceof User
+            && $manager->is_active
+            && (int) $manager->id !== (int) $subjectEmployee?->user_id
+            && $this->userCanAccessCompany($manager, (int) $request->company_id);
+    }
+
+    private function resolveTechHeadUser(ApprovalRequest $request): ?User
+    {
+        $techHeadUserId = $this->resolveTechHeadUserId($request);
+
+        return $techHeadUserId ? User::query()->find($techHeadUserId) : null;
     }
 
     /** The manager a NamesApprovalManager subject names for a "record_manager" step. */
@@ -422,47 +461,11 @@ final class ApprovalEngine
             return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
         }
 
-        if ($step->hierarchy_route === 'requester_manager') {
-            $manager = $subjectEmployee?->parent?->user;
-            if ($manager && $manager->is_active && $this->userCanAccessCompany($manager, $companyId) && (int) $manager->id !== (int) $subjectEmployee?->user_id) {
-                return collect([$manager]);
-            }
+        if (in_array($step->hierarchy_route, self::MANAGER_ROUTES, true)) {
+            // Same resolution as canAct(): the eligible manager, else the company's HR.
+            $manager = $this->hierarchyManagerFor($request, $step);
 
-            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
-        }
-
-        if ($step->hierarchy_route === 'department_manager') {
-            if ($request->request_type === 'claim_tech') {
-                $techHeadUserId = $this->resolveTechHeadUserId($request);
-                if ($techHeadUserId) {
-                    $techHeadUser = User::query()->whereKey($techHeadUserId)->where('is_active', true)->first();
-                    if ($techHeadUser && $this->userCanAccessCompany($techHeadUser, $companyId)) {
-                        return collect([$techHeadUser]);
-                    }
-                }
-            }
-
-            $deptManager = $subjectEmployee?->department?->manager?->user;
-            if ($deptManager && $deptManager->is_active && $this->userCanAccessCompany($deptManager, $companyId) && (int) $deptManager->id !== (int) $subjectEmployee?->user_id) {
-                return collect([$deptManager]);
-            }
-
-            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
-        }
-
-        if ($step->hierarchy_route === 'team_manager') {
-            $teamManager = $subjectEmployee?->team?->manager?->user;
-            if ($teamManager && $teamManager->is_active && $this->userCanAccessCompany($teamManager, $companyId) && (int) $teamManager->id !== (int) $subjectEmployee?->user_id) {
-                return collect([$teamManager]);
-            }
-
-            return $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
-        }
-
-        if ($step->hierarchy_route === 'record_manager') {
-            $recordManager = $this->hierarchyManagerFor($request, $step);
-
-            return $recordManager ? collect([$recordManager]) : $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
+            return $manager ? collect([$manager]) : $this->resolveHrApproversForCompany($companyId, $subjectEmployee?->user_id);
         }
 
         return collect();
@@ -629,52 +632,27 @@ final class ApprovalEngine
         // the requester's own manager is the wrong person entirely.
         $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
 
-        return match ($step->hierarchy_route) {
-            'hr'                 => $this->canActAsHr($subjectEmployee, $actor, $request),
-            'requester_manager'  => $this->canActAsRequesterManager($subjectEmployee, $actor, $request),
-            'department_manager' => $this->canActAsDepartmentManager($subjectEmployee, $actor, $request),
-            'team_manager'       => $this->canActAsTeamManager($subjectEmployee, $actor, $request),
-            'record_manager'     => $this->canActAsRecordManager($subjectEmployee, $actor, $request, $step),
-            default              => false,
-        };
-    }
-
-    /** The manager the subject names (NamesApprovalManager), else HR as for the other manager routes. */
-    private function canActAsRecordManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request, ApprovalStep $step): bool
-    {
-        $manager = $this->hierarchyManagerFor($request, $step);
-
-        if ($manager) {
-            return (int) $manager->id === (int) $actor->id;
+        if ($step->hierarchy_route === 'hr') {
+            return $this->canActAsHr($subjectEmployee, $actor, $request);
         }
 
-        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
-            return false;
+        if (in_array($step->hierarchy_route, self::MANAGER_ROUTES, true)) {
+            // Same resolution as resolveAuthorizedApprovers(): only the eligible
+            // manager, or -- when there is none (missing, inactive, outside the
+            // company, or the employee themselves) -- the company's HR approvers.
+            $manager = $this->hierarchyManagerFor($request, $step);
+
+            return $manager
+                ? (int) $manager->id === (int) $actor->id
+                : $this->canActAsHr($subjectEmployee, $actor, $request);
         }
 
-        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
+        return false;
     }
 
     /** An "hr" step: any HR approver of the request's company except the employee the request is about. */
     private function canActAsHr(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
     {
-        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
-            return false;
-        }
-
-        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
-    }
-
-    private function canActAsRequesterManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
-    {
-        $managerUserId = $subjectEmployee?->parent?->user_id;
-
-        if ($managerUserId) {
-            return (int) $managerUserId === (int) $actor->id;
-        }
-
-        // If no line manager is assigned (or line manager has no user account),
-        // fallback to HR / Admin for review and approval.
         if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
             return false;
         }
@@ -693,44 +671,6 @@ final class ApprovalEngine
             })
             ->whereNotNull('employees_employees.user_id')
             ->value('employees_employees.user_id');
-    }
-
-    private function canActAsDepartmentManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
-    {
-        if ($request->request_type === 'claim_tech') {
-            $techHeadUserId = $this->resolveTechHeadUserId($request);
-
-            if ($techHeadUserId) {
-                return (int) $techHeadUserId === (int) $actor->id;
-            }
-        }
-
-        $deptManagerUserId = $subjectEmployee?->department?->manager?->user_id;
-
-        if ($deptManagerUserId) {
-            return (int) $deptManagerUserId === (int) $actor->id;
-        }
-
-        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
-            return false;
-        }
-
-        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
-    }
-
-    private function canActAsTeamManager(mixed $subjectEmployee, User $actor, ApprovalRequest $request): bool
-    {
-        $teamManagerUserId = $subjectEmployee?->team?->manager?->user_id;
-
-        if ($teamManagerUserId) {
-            return (int) $teamManagerUserId === (int) $actor->id;
-        }
-
-        if ($subjectEmployee?->user_id && (int) $subjectEmployee->user_id === (int) $actor->id) {
-            return false;
-        }
-
-        return $this->isCompanyHrApprover($actor, (int) $request->company_id);
     }
 
     /**
@@ -793,25 +733,18 @@ final class ApprovalEngine
                 : 'Forwarded for approval.';
         }
 
-        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
-        $techHeadUser = null;
-        if ($step->hierarchy_route === 'department_manager' && $request->request_type === 'claim_tech') {
-            $techHeadUserId = $this->resolveTechHeadUserId($request);
-            if ($techHeadUserId) {
-                $techHeadUser = User::find($techHeadUserId);
-            }
-        }
-
-        $manager = match ($step->hierarchy_route) {
-            'hr'                 => null,
-            'requester_manager'  => $subjectEmployee?->parent?->user,
-            'department_manager' => $techHeadUser ?? $subjectEmployee?->department?->manager?->user,
-            'team_manager'       => $subjectEmployee?->team?->manager?->user,
-            'record_manager'     => $this->hierarchyManagerFor($request, $step),
-            default              => null,
-        };
+        $manager = in_array($step->hierarchy_route, self::MANAGER_ROUTES, true)
+            ? $this->hierarchyManagerFor($request, $step)
+            : null;
         if ($manager?->name) {
             return "Forwarded to {$manager->name}.";
+        }
+
+        $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
+        $assignedManager = collect($this->hierarchyManagerCandidates($request, $step, $subjectEmployee))
+            ->first(fn (mixed $candidate): bool => $candidate instanceof User);
+        if ($assignedManager) {
+            return 'Forwarded to HR (the assigned manager is inactive, outside this company or the employee themselves).';
         }
 
         return match ($step->hierarchy_route) {

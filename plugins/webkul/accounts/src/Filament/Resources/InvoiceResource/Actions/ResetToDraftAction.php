@@ -53,10 +53,16 @@ class ResetToDraftAction extends Action
                     $this->halt(shouldRollBackDatabaseTransaction: true);
                 }
             })
+            // Hidden for entries owned by a source workflow (bank mapping,
+            // migration, manual adjustment, Drive, claims, FX revaluation):
+            // AccountManager::resetToDraftMove() refuses those outright and
+            // they are corrected by reversal. A locked period is not hidden
+            // here -- the action explains that refusal when clicked.
             ->visible(function (Move $record) {
-                return
+                return (
                     $record->state == MoveState::CANCEL
-                    || $record->state == MoveState::POSTED;
+                    || $record->state == MoveState::POSTED
+                ) && AccountFacade::resetToDraftBlockedReason($record) === null;
             });
     }
 

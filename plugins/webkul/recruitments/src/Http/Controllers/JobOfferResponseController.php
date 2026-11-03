@@ -34,7 +34,7 @@ class JobOfferResponseController extends Controller
     {
         [$record, $state] = $this->resolve($request, $offer, $token);
 
-        return $this->page($record, $state, $request->fullUrl());
+        return $this->page($record, $state);
     }
 
     public function respond(Request $request, int $offer, string $token): Response|RedirectResponse
@@ -42,7 +42,7 @@ class JobOfferResponseController extends Controller
         [$record, $state] = $this->resolve($request, $offer, $token);
 
         if ($state !== 'open') {
-            return $this->page($record, $state, $request->fullUrl());
+            return $this->page($record, $state);
         }
 
         $data = $request->validate([
@@ -56,12 +56,12 @@ class JobOfferResponseController extends Controller
                 'user_agent' => (string) $request->userAgent(),
             ]);
         } catch (AuthorizationException) {
-            return $this->page($record, 'invalid', null, 403);
+            return $this->page($record, 'invalid', 403);
         } catch (RuntimeException) {
-            return $this->page($record->refresh(), $this->stateOf($record), $request->fullUrl());
+            return $this->page($record->refresh(), $this->stateOf($record));
         }
 
-        return redirect()->to($request->fullUrl());
+        return redirect()->to($this->offers->respondUrl($record->refresh()));
     }
 
     /** The letter PDF for the candidate, through the same signed link. */
@@ -70,7 +70,7 @@ class JobOfferResponseController extends Controller
         [$record, $state] = $this->resolve($request, $offer, $token);
 
         if (in_array($state, ['invalid', 'expired', 'closed'], true) || blank($record?->letter_path) || ! Storage::disk(OfferLetterRenderer::disk())->exists($record->letter_path)) {
-            return $this->page($record, $state === 'expired' ? 'expired' : 'invalid', null, $state === 'expired' ? 410 : 403);
+            return $this->page($record, $state === 'expired' ? 'expired' : 'invalid', $state === 'expired' ? 410 : 403);
         }
 
         return Storage::disk(OfferLetterRenderer::disk())->download($record->letter_path, Str::slug('Offer letter '.$record->candidateName()).'.pdf');
@@ -81,7 +81,9 @@ class JobOfferResponseController extends Controller
      */
     protected function resolve(Request $request, int $offerId, string $token): array
     {
-        if (! URL::hasCorrectSignature($request)) {
+        // Links are signed over the path (JobOfferService::respondUrl); links
+        // emailed before that were signed over the full URL.
+        if (! URL::hasCorrectSignature($request, absolute: false) && ! URL::hasCorrectSignature($request)) {
             return [null, 'invalid'];
         }
 
@@ -110,7 +112,7 @@ class JobOfferResponseController extends Controller
         };
     }
 
-    protected function page(?JobOffer $offer, string $state, ?string $action, ?int $status = null): Response
+    protected function page(?JobOffer $offer, string $state, ?int $status = null): Response
     {
         $status ??= match ($state) {
             'invalid'           => 403,
@@ -123,10 +125,11 @@ class JobOfferResponseController extends Controller
         return response()->view('recruitments::offers.respond', [
             'offer'     => $offer,
             'state'     => $state,
-            'action'    => $action,
+            // On the public address, whatever host the request came through.
+            'action'    => $offer && $state === 'open' ? $this->offers->respondUrl($offer) : null,
             'currency'  => $offer?->currencyCode(),
             'letterUrl' => $offer && $state === 'open' && filled($offer->letter_path)
-                ? URL::temporarySignedRoute('recruitments.offers.letter', $this->offers->linkExpiresAt($offer), ['offer' => $offer->id, 'token' => (string) $offer->response_token])
+                ? $this->offers->candidateLetterUrl($offer)
                 : null,
         ], $status);
     }

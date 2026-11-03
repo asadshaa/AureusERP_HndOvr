@@ -215,6 +215,10 @@ it('adds a rounding line and rounds the total to the cash-rounding precision', f
 
 it('records the foreign amount and company balance separately on a foreign-currency invoice', function () {
     $currency = AccountHelper::otherCurrency();
+    // Posting a foreign-currency invoice requires a rate for its date
+    // (AccountManager refuses the silent 1:1 fallback); the saving hook
+    // recomputes invoice_currency_rate from it.
+    AccountHelper::setCurrencyRate($currency, 2.0);
 
     $invoice = AccountHelper::invoice(MoveType::OUT_INVOICE, $this->partner, null, [
         'currency_id'           => $currency->id,

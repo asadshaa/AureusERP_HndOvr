@@ -320,20 +320,27 @@ it('lets an employee check in again after checking out, keeping the day summary 
         ->and($service->todayState($f['user']))->toMatchArray(['state' => 'checked_out', 'worked' => '5h 30m', 'can_check_in_again' => true]);
 });
 
-it('replaces the day\'s intervals with one audited interval on a correction', function () {
+it('moves only the first start and the last end on a correction, keeping the break; pairs left outside are voided with a reason', function () {
     $employee = aitEmployee(aitCompany());
     $record = aitDay($employee, '2026-08-03', [['10:00', '12:00'], ['14:30', '18:00']]);
     expect((float) $record->worked_hours)->toBe(5.5);
 
+    // The break between the pairs is not turned into worked time (it used to collapse to 09:45-17:45 = 8 h).
     $record->update(['check_in' => aitUtc('2026-08-03', '09:45')->toDateTimeString(), 'check_out' => aitUtc('2026-08-03', '17:45')->toDateTimeString()]);
 
     $active = $this->intervals->intervalsFor($record->refresh());
-    $voided = AttendanceInterval::query()->where('attendance_record_id', $record->id)->whereNotNull('voided_at')->get();
+    expect($active)->toHaveCount(2)
+        ->and(AttendanceIntervalService::describe($active, 'Asia/Karachi'))->toBe('09:45–12:00, 14:30–17:45')
+        ->and((float) $record->worked_hours)->toBe(5.5)
+        ->and(AttendanceInterval::query()->where('attendance_record_id', $record->id)->whereNotNull('voided_at')->count())->toBe(0);
 
-    expect($active)->toHaveCount(1)
-        ->and(AttendanceIntervalService::describe($active, 'Asia/Karachi'))->toBe('09:45–17:45')
-        ->and((float) $record->worked_hours)->toBe(8.0)
-        ->and($voided)->toHaveCount(2)
+    // A check-out before the afternoon pair started leaves that pair outside the day.
+    $record->update(['check_out' => aitUtc('2026-08-03', '13:00')->toDateTimeString()]);
+
+    $voided = AttendanceInterval::query()->where('attendance_record_id', $record->id)->whereNotNull('voided_at')->get();
+    expect(AttendanceIntervalService::describe($this->intervals->intervalsFor($record->refresh()), 'Asia/Karachi'))->toBe('09:45–13:00')
+        ->and((float) $record->worked_hours)->toBe(3.25)
+        ->and($voided)->toHaveCount(1)
         ->and($voided->first()->void_reason)->not->toBeEmpty();
 });
 

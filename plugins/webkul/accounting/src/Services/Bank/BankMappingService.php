@@ -23,7 +23,7 @@ class BankMappingService
         return app(ApprovalEngine::class)->matchingWorkflow(
             (int) $mapping->company_id,
             'bank_transaction_mapping',
-            null,
+            $this->approvalAmount($mapping),
             ['amount' => (float) ($mapping->statementLine?->company_signed_amount ?? 0)],
         ) !== null;
     }
@@ -34,9 +34,26 @@ class BankMappingService
             $mapping,
             $requester,
             'bank_transaction_mapping',
-            null,
+            $this->approvalAmount($mapping),
             ['amount' => (float) ($mapping->statementLine?->company_signed_amount ?? 0)],
         );
+    }
+
+    /**
+     * The amount ApprovalEngine compares against a workflow's
+     * minimum_amount/maximum_amount: the absolute company-currency amount of
+     * the bank line, as a decimal string. The engine never reads the context
+     * 'amount' for those thresholds, so passing null there (as before) made
+     * every amount-gated bank-mapping workflow silently never apply. The
+     * signed context amount is kept unchanged for condition rules already
+     * written against it. Null when the company-currency conversion is still
+     * missing (no rate yet).
+     */
+    protected function approvalAmount(BankTransactionMapping $mapping): ?string
+    {
+        $signed = $mapping->statementLine?->company_signed_amount;
+
+        return $signed === null ? null : BigDecimal::of((string) $signed)->abs()->__toString();
     }
 
     public function suggestForStatement(BankStatement $statement, float $reviewThreshold = 0.85): int

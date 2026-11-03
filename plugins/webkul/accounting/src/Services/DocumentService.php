@@ -634,7 +634,10 @@ class DocumentService
 
     private function assertPermission(User $user, string $permission, int $companyId, ?Document $document): void
     {
-        if ($user->can($permission)) {
+        // Permissions are registered on the "web" guard only. Over the sanctum
+        // API (the document-transfer claim endpoint) the default guard is
+        // "sanctum", where can() finds no permission, so check "web" too.
+        if ($user->can($permission) || $user->checkPermissionTo($permission, 'web')) {
             return;
         }
 

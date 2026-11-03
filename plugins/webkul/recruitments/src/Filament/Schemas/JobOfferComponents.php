@@ -253,6 +253,7 @@ class JobOfferComponents
             static::generateLetterAction(),
             static::downloadLetterAction(),
             static::sendAction(),
+            static::recordResponseAction(),
             static::createEmployeeAction(),
             static::openEmployeeAction(),
             static::withdrawAction(),
@@ -395,11 +396,48 @@ class JobOfferComponents
                 : __('The candidate gets the letter (PDF) and a link to accept or decline until the end of :date.', ['date' => OfferLetterRenderer::date($record->expiry_date)]))
             ->fillForm(fn (JobOffer $record): array => ['email' => $record->sent_to ?? $record->candidate?->email_from ?? $record->applicant?->candidate?->email_from])
             ->schema([
+                TextEntry::make('public_url_warning')
+                    ->hiddenLabel()
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->color('danger')
+                    ->state(fn (): string => __('The accept / decline link points to :url, which candidates cannot open from outside this network. Set RECRUITMENT_OFFER_PUBLIC_URL to the public address, or record the candidate’s answer yourself with "Record candidate response".', ['url' => JobOfferService::publicBaseUrl()]))
+                    ->visible(fn (): bool => JobOfferService::publicUrlIsLocal()),
                 TextInput::make('email')->label(__('Candidate email'))->email()->required()->maxLength(255),
             ])
             ->modalSubmitActionLabel(__('Send'))
             ->action(function (JobOffer $record, array $data, Action $action): void {
                 static::run($action, fn () => static::service()->send($record, static::user(), $data['email'] ?? null), __('Offer sent to the candidate'));
+            });
+    }
+
+    /** HR records an answer that came by email, phone or in person (JobOfferService::recordResponse). */
+    public static function recordResponseAction(): Action
+    {
+        return Action::make('recordOfferResponse')
+            ->label(__('Record candidate response'))
+            ->icon('heroicon-o-chat-bubble-left-right')
+            ->color('gray')
+            ->visible(fn (JobOffer $record): bool => static::service()->canRecordResponse(static::user(), $record))
+            ->modalHeading(__('Record the candidate’s response'))
+            ->modalDescription(__('For an answer received outside the offer link. It has the same effect as the candidate answering on the link, and the offer history shows that you recorded it.'))
+            ->schema([
+                Select::make('decision')
+                    ->label(__('Answer'))
+                    ->options(['accept' => __('Accepted the offer'), 'decline' => __('Declined the offer')])
+                    ->required(),
+                Select::make('channel')
+                    ->label(__('Received'))
+                    ->options(JobOfferService::recordedResponseChannels())
+                    ->required(),
+                Textarea::make('reason')
+                    ->label(__('Reason / what the candidate said'))
+                    ->required()
+                    ->rows(3)
+                    ->maxLength(2000),
+            ])
+            ->modalSubmitActionLabel(__('Record'))
+            ->action(function (JobOffer $record, array $data, Action $action): void {
+                static::run($action, fn () => static::service()->recordResponse($record, static::user(), ($data['decision'] ?? null) === 'accept', (string) ($data['channel'] ?? ''), $data['reason'] ?? null), __('Candidate response recorded'));
             });
     }
 

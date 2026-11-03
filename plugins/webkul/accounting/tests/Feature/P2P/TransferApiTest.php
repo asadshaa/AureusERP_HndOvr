@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Storage;
 use Webkul\Accounting\Enums\DocumentType;
 use Webkul\Accounting\Services\DocumentService;
+use Webkul\Accounting\Services\DocumentTransferService;
 use Webkul\Accounting\Support\AccountingPermissions;
 use Webkul\Security\Models\UserDevice;
 use Webkul\Support\Models\Company;
@@ -145,4 +146,76 @@ it('returns 422 when sending without the transfer permission', function () {
             'device_id'   => $device->id,
         ])
         ->assertStatus(422);
+});
+
+/** A recipient device and an uploaded document of the sender's company. */
+function transferApiFixture(object $test, string $key): array
+{
+    $device = UserDevice::query()->create([
+        'user_id'                => $test->recipient->id,
+        'company_id'             => $test->company->id,
+        'label'                  => 'Recipient laptop',
+        'public_key'             => $key,
+        'public_key_fingerprint' => hash('sha256', $key),
+    ]);
+
+    $document = app(DocumentService::class)->upload(
+        $test->sender,
+        $test->company->id,
+        DocumentType::Invoice,
+        'Freight invoice',
+        null,
+        fakeUploadedFileWithRealContent('freight.pdf', 'application/pdf'),
+    );
+
+    return [$device, $document];
+}
+
+it('lets the recipient claim the transfer over the API with their web-guard permissions', function () {
+    [$device, $document] = transferApiFixture($this, 'KEY-4');
+
+    $created = $this->actingAs($this->sender, 'sanctum')
+        ->postJson('admin/api/v1/document-transfers', ['document_id' => $document->id, 'device_id' => $device->id])
+        ->assertCreated()
+        ->json('data.id');
+
+    $this->actingAs($this->recipient, 'sanctum')
+        ->post("admin/api/v1/document-transfers/{$created}/claim")
+        ->assertOk()
+        ->assertDownload('freight.pdf');
+});
+
+it('answers 404 for a missing or other-company document and does not disguise real errors as 404', function () {
+    [$device, $document] = transferApiFixture($this, 'KEY-5');
+    $otherCompany = Company::factory()->create(['is_active' => true]);
+    $outsider = documentTestUser($otherCompany, [
+        AccountingPermissions::ManageDocuments,
+        AccountingPermissions::TransferDocuments,
+        AccountingPermissions::ViewDocuments,
+    ]);
+
+    $this->actingAs($this->sender, 'sanctum')
+        ->postJson('admin/api/v1/document-transfers', ['document_id' => 999999999, 'device_id' => $device->id])
+        ->assertNotFound()
+        ->assertJsonPath('message', 'Document not found.');
+
+    $this->actingAs($outsider, 'sanctum')
+        ->postJson('admin/api/v1/document-transfers', ['document_id' => $document->id, 'device_id' => $device->id])
+        ->assertNotFound();
+});
+
+it('reports an unexpected send failure as a server error instead of "Document not found"', function () {
+    [$device, $document] = transferApiFixture($this, 'KEY-6');
+
+    $this->mock(DocumentTransferService::class)
+        ->shouldReceive('send')
+        ->andThrow(new LogicException('storage exploded'));
+
+    $this->actingAs($this->sender, 'sanctum')
+        ->postJson('admin/api/v1/document-transfers', ['document_id' => $document->id, 'device_id' => $device->id])
+        ->assertServerError();
+
+    $this->withoutExceptionHandling();
+    expect(fn () => $this->postJson('admin/api/v1/document-transfers', ['document_id' => $document->id, 'device_id' => $device->id]))
+        ->toThrow(LogicException::class, 'storage exploded');
 });

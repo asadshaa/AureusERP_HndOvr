@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Console\Scheduling\Schedule;
 use Webkul\Accounting\Enums\DocumentTransferStatus;
 use Webkul\Accounting\Models\Document;
 use Webkul\Accounting\Models\DocumentTransfer;
@@ -39,4 +40,17 @@ it('leaves already-delivered transfers untouched', function () {
     $this->artisan('accounting:transfers:expire')->assertExitCode(0);
 
     expect($delivered->fresh()->status)->toBe(DocumentTransferStatus::Delivered);
+});
+
+it('schedules the transfer and WebRTC expiry sweeps hourly, without overlapping, on one server', function () {
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    foreach (['accounting:transfers:expire', 'accounting:webrtc:expire'] as $command) {
+        $event = collect(app(Schedule::class)->events())->first(fn ($event): bool => str_contains((string) $event->command, $command));
+
+        expect($event)->not->toBeNull()
+            ->and($event->expression)->toBe('0 * * * *')
+            ->and($event->withoutOverlapping)->toBeTrue()
+            ->and($event->onOneServer)->toBeTrue();
+    }
 });
