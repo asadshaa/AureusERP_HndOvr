@@ -132,6 +132,15 @@ class BankMappingService
                 $mapping->offset_account_id = $mapping->fsTag->account_id;
                 $mapping->setRelation('offsetAccount', $mapping->fsTag->account);
                 $mapping->match_type ??= 'fs_tag';
+            } elseif ((int) $mapping->offset_account_id !== (int) $mapping->fsTag->account_id) {
+                // The FS Tag would otherwise be stamped on a GL account it is
+                // not configured for, splitting FS reporting from the ledger.
+                throw new \RuntimeException(sprintf(
+                    'The offset GL %s does not match FS Tag %s, which is configured for GL %s. Clear the offset GL or choose the FS Tag\'s account before approving.',
+                    $mapping->offsetAccount?->code ?? "#{$mapping->offset_account_id}",
+                    $mapping->fsTag->code,
+                    $mapping->fsTag->account->code ?? "#{$mapping->fsTag->account_id}",
+                ));
             }
             $mapping->cash_flow_category ??= $mapping->fsTag->cash_flow_category;
             $mapping->tax_treatment ??= $mapping->fsTag->tax_treatment;

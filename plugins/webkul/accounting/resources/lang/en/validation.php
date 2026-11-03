@@ -18,4 +18,6 @@ return [
     'dimension-not-applied'          => 'Line ":line" defines a dimension filter, which the engine does not apply yet; it will be ignored.',
     'check-line-carries-no-values'   => 'Line ":line" is flagged as a check row but carries no values.',
     'check-row-violation'            => 'Check row ":line" is :value in column :column; expected zero.',
+    'account-bound-twice'            => 'Account :account is bound to more than one line (:lines); its balance is counted in each of them.',
+    'unbound-account-with-balance'   => ':count account(s) with posted balances are bound to no line of this template, so their balances are left out: :accounts.',
 ];

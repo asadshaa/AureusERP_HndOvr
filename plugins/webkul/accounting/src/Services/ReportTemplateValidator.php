@@ -4,6 +4,10 @@ namespace Webkul\Accounting\Services;
 
 use Illuminate\Support\Collection;
 use RuntimeException;
+use Webkul\Account\Enums\AccountType;
+use Webkul\Account\Enums\MoveState;
+use Webkul\Account\Models\Account;
+use Webkul\Account\Models\MoveLine;
 use Webkul\Accounting\Data\ReportLineValue;
 use Webkul\Accounting\Data\ValidationIssue;
 use Webkul\Accounting\Enums\ColumnType;
@@ -31,9 +35,13 @@ class ReportTemplateValidator
     ) {}
 
     /**
+     * The account coverage checks (unbound accounts with balances) use the
+     * template's company, else the given company (e.g. the viewer's active
+     * company for a global template); without either they are skipped.
+     *
      * @return Collection<int, ValidationIssue>
      */
-    public function validate(ReportTemplate $template): Collection
+    public function validate(ReportTemplate $template, ?int $companyId = null): Collection
     {
         /** @var Collection<int, ReportLine> $lines */
         $lines = $template->lines()
@@ -51,6 +59,7 @@ class ReportTemplateValidator
         $this->validateDuplicateSorts($lines, $columns, $issues);
         $this->validateColumns($columns, $issues);
         $this->validateGlobalCodeUniqueness($template, $issues);
+        $this->validateAccountCoverage($lines, $template->company_id ?? $companyId, $issues);
 
         return $issues->values();
     }
@@ -359,6 +368,81 @@ class ReportTemplateValidator
                 __('accounting::validation.duplicate-global-code', [
                     'code'    => $template->code,
                     'version' => $template->version,
+                ]),
+            ));
+        }
+    }
+
+    /**
+     * Accounts bound to two lines are counted twice; accounts with a posted
+     * balance in the company that are bound to no line are silently left out.
+     * Only the statement kinds the template already covers are checked (a
+     * P&L template is not asked to bind balance-sheet accounts).
+     *
+     * @param  Collection<int, ReportLine>  $lines
+     * @param  Collection<int, ValidationIssue>  $issues
+     */
+    protected function validateAccountCoverage(Collection $lines, ?int $companyId, Collection $issues): void
+    {
+        $bindings = $lines->flatMap(fn (ReportLine $line) => $line->accountBindings
+            ->map(fn ($binding): array => ['account_id' => (int) $binding->account_id, 'line' => $line]));
+
+        if ($bindings->isEmpty()) {
+            return;
+        }
+
+        $boundIds = $bindings->pluck('account_id')->unique()->values();
+        $accounts = Account::query()->whereIn('id', $boundIds)->get(['id', 'code', 'name', 'account_type'])->keyBy('id');
+
+        foreach ($bindings->groupBy('account_id')->filter(fn (Collection $group) => $group->count() > 1) as $accountId => $group) {
+            $account = $accounts->get($accountId);
+
+            $issues->push(ValidationIssue::warning(
+                'account_bound_twice',
+                __('accounting::validation.account-bound-twice', [
+                    'account' => $account ? trim("{$account->code} {$account->name}") : "#{$accountId}",
+                    'lines'   => $group->map(fn (array $binding) => $this->lineLabel($binding['line']))->implode(', '),
+                ]),
+                (int) $group->first()['line']->id,
+            ));
+        }
+
+        if ($companyId === null) {
+            return;
+        }
+
+        $profitLoss = array_merge(array_keys(AccountType::income()), array_keys(AccountType::expenses()));
+        $balanceSheet = array_merge(array_keys(AccountType::assets()), array_keys(AccountType::liabilities()), array_keys(AccountType::equity()));
+        $boundTypes = $accounts->map(fn (Account $account) => $account->account_type instanceof AccountType ? $account->account_type->value : $account->account_type);
+
+        $coveredTypes = [
+            ...($boundTypes->intersect($profitLoss)->isNotEmpty() ? $profitLoss : []),
+            ...($boundTypes->intersect($balanceSheet)->isNotEmpty() ? $balanceSheet : []),
+        ];
+
+        if ($coveredTypes === []) {
+            return;
+        }
+
+        $unbound = MoveLine::query()
+            ->join('accounts_account_moves', 'accounts_account_moves.id', '=', 'accounts_account_move_lines.move_id')
+            ->join('accounts_accounts', 'accounts_accounts.id', '=', 'accounts_account_move_lines.account_id')
+            ->where('accounts_account_moves.company_id', $companyId)
+            ->where('accounts_account_moves.state', MoveState::POSTED)
+            ->whereIn('accounts_accounts.account_type', $coveredTypes)
+            ->whereNotIn('accounts_account_move_lines.account_id', $boundIds)
+            ->groupBy('accounts_accounts.id', 'accounts_accounts.code', 'accounts_accounts.name')
+            ->havingRaw('ABS(SUM(accounts_account_move_lines.debit - accounts_account_move_lines.credit)) >= 0.005')
+            ->orderBy('accounts_accounts.code')
+            ->get(['accounts_accounts.code', 'accounts_accounts.name']);
+
+        if ($unbound->isNotEmpty()) {
+            $issues->push(ValidationIssue::warning(
+                'unbound_account_with_balance',
+                __('accounting::validation.unbound-account-with-balance', [
+                    'count'    => $unbound->count(),
+                    'accounts' => $unbound->take(10)->map(fn ($row) => trim("{$row->code} {$row->name}"))->implode(', ')
+                        .($unbound->count() > 10 ? ', ...' : ''),
                 ]),
             ));
         }

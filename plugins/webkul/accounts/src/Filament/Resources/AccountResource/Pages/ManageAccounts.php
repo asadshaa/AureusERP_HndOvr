@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Url;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Filament\Resources\AccountResource;
-use Webkul\Account\Models\Account;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
@@ -44,10 +43,16 @@ class ManageAccounts extends ManageRecords
         $this->resetTable();
     }
 
-    /** @return array<string, array<int, string>> */
+    /**
+     * Code prefixes of the accounts the table shows (the resource's company
+     * scope), so another company's chart never appears in the tree.
+     *
+     * @return array<string, array<int, string>>
+     */
     public function getCodeTreeProperty(): array
     {
-        return Account::query()
+        return static::getResource()::getEloquentQuery()
+            ->setEagerLoads([])
             ->whereNotNull('code')
             ->where('code', '!=', '')
             ->select(DB::raw('SUBSTR(code, 1, 1) as d1'), DB::raw('SUBSTR(code, 1, 2) as d2'))

@@ -6,12 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Account;
+use Webkul\Accounting\Models\Concerns\AuditsConfiguration;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Models\Currency;
 
 class BankMappingRule extends Model
 {
+    use AuditsConfiguration;
+
     protected $table = 'accounting_bank_mapping_rules';
 
     protected $guarded = [];

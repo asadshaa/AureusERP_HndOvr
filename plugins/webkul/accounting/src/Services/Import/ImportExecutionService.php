@@ -103,9 +103,16 @@ final class ImportExecutionService
                                 ->whereHas('companies', fn ($query) => $query->where('companies.id', $lockedRun->company_id))
                                 ->firstOrFail();
 
+                        // A source offset GL that contradicts the FS Tag's GL is kept
+                        // as supplied but surfaced for review (approval refuses it).
+                        $tagConflict = $tag && $offsetAccount && (int) $tag->account_id !== (int) $offsetAccount->id
+                            ? "FS Tag {$tag->code} is configured for a different GL account than the source offset GL {$offsetAccount->code}."
+                            : null;
+
                         $line->mapping->update([
                             'offset_account_id'  => $offsetAccount?->id,
                             'fs_tag_id'          => $tag?->id,
+                            'fs_tag_issue'       => $tagConflict ?? $line->mapping->fs_tag_issue,
                             'transaction_type'   => filled($values['transaction_type'] ?? null) ? trim((string) $values['transaction_type']) : null,
                             'counterparty'       => filled($values['counterparty'] ?? null) ? trim((string) $values['counterparty']) : null,
                             'supporting_document'=> filled($values['supporting_document'] ?? null) ? trim((string) $values['supporting_document']) : null,
@@ -120,7 +127,7 @@ final class ImportExecutionService
                             'suggestion_explanation' => $offsetAccount || $tag
                                 ? 'Mapped from explicitly configured source columns; user approval is still required before posting.'
                                 : null,
-                            'review_status' => $tagCode !== '' && ! $tag
+                            'review_status' => ($tagCode !== '' && ! $tag) || $tagConflict !== null
                                 ? 'needs_review'
                                 : ($offsetAccount || $tag ? 'suggested' : $line->mapping->review_status),
                         ]);
@@ -329,6 +336,10 @@ final class ImportExecutionService
             $fsTag = $tagCode !== ''
                 ? ($fsTags->get($tagCode) ?? throw new RuntimeException("FS Tag [{$values['fs_tag']}] is no longer active or available for this company."))
                 : null;
+
+            if ($fsTag && (int) $fsTag->account_id !== (int) $account->id) {
+                throw new RuntimeException("FS Tag [{$values['fs_tag']}] is configured for a different GL account than GL [{$values['gl_code']}] on the same row; fix the source row or the FS Tag before importing.");
+            }
             $originalDebit = BigDecimal::of((string) ($values['debit'] ?? '0'))->toScale(4, RoundingMode::HalfUp)->__toString();
             $originalCredit = BigDecimal::of((string) ($values['credit'] ?? '0'))->toScale(4, RoundingMode::HalfUp)->__toString();
 

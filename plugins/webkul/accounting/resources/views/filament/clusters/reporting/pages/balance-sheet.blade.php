@@ -109,6 +109,22 @@
                                 {{ number_format($data['grand_total'], 2) }}
                             </td>
                         </tr>
+
+                        @isset($data['balance_check'])
+                            {{-- Balance check: Assets + Unclassified = Liabilities + Equity --}}
+                            <tr @class([
+                                'text-sm font-semibold',
+                                'text-success-600 dark:text-success-400' => $data['balance_check']['balanced'],
+                                'text-danger-600 dark:text-danger-400' => ! $data['balance_check']['balanced'],
+                            ])>
+                                <td class="px-4 py-2">
+                                    Balance check (Assets + Unclassified − Liabilities − Equity): {{ $data['balance_check']['balanced'] ? 'balanced' : 'NOT balanced' }}
+                                </td>
+                                <td class="px-4 py-2 text-right">
+                                    {{ number_format($data['balance_check']['difference'], 2) }}
+                                </td>
+                            </tr>
+                        @endisset
                     </tbody>
                 </table>
             </div>

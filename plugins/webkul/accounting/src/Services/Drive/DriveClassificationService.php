@@ -3,6 +3,7 @@
 namespace Webkul\Accounting\Services\Drive;
 
 use Illuminate\Support\Facades\Storage;
+use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Enums\MoveType;
 use Webkul\Account\Enums\TypeTaxUse;
 use Webkul\Account\Models\Account;
@@ -444,49 +445,34 @@ class DriveClassificationService
             return null;
         }
 
-        // Intelligently default FS Tag based on Document Type when not explicitly provided
-        $defaultTag = null;
-        if ($documentType === DriveDocumentType::CustomerInvoice) {
-            $defaultTag = FsTag::query()
-                ->where('company_id', $companyId)
-                ->where('is_active', true)
-                ->whereNotNull('account_id')
-                ->where(function ($q) {
-                    $q->where('code', 'like', '%REV%')
-                        ->orWhere('code', 'like', '%INC%')
-                        ->orWhereHas('account', fn ($acc) => $acc->whereIn('account_type', ['income', 'income_other']));
-                })
-                ->first();
-        } elseif ($documentType === DriveDocumentType::VendorBill) {
-            $defaultTag = FsTag::query()
-                ->where('company_id', $companyId)
-                ->where('is_active', true)
-                ->whereNotNull('account_id')
-                ->where(function ($q) {
-                    $q->where('code', 'like', '%EXP%')
-                        ->orWhere('code', 'like', '%EQUIP%')
-                        ->orWhere('code', 'like', '%MAINT%')
-                        ->orWhereHas('account', fn ($acc) => $acc->whereIn('account_type', ['expense', 'expense_direct_cost', 'expense_depreciation']));
-                })
-                ->first();
-        }
+        // No code in the document: default only to an active tag whose GL
+        // account is of the document's side (income for a customer invoice,
+        // expense for a vendor bill), preferring the conventional codes. A
+        // default is never silent: it is an issue that sends the document to
+        // review. No other tag is ever picked.
+        $accountTypes = match ($documentType) {
+            DriveDocumentType::CustomerInvoice => [AccountType::INCOME->value, AccountType::INCOME_OTHER->value],
+            DriveDocumentType::VendorBill      => [AccountType::EXPENSE->value, AccountType::EXPENSE_DIRECT_COST->value, AccountType::EXPENSE_DEPRECIATION->value],
+            default                            => [],
+        };
+        $preferredCodes = $documentType === DriveDocumentType::CustomerInvoice ? ['%REV%', '%INC%'] : ['%EXP%', '%EQUIP%', '%MAINT%'];
 
-        if ($defaultTag) {
-            return $defaultTag;
-        }
-
-        $fallbackTag = FsTag::query()
+        $defaultTag = $accountTypes === [] ? null : FsTag::query()
             ->where('company_id', $companyId)
             ->where('is_active', true)
             ->whereNotNull('account_id')
+            ->whereHas('account', fn ($account) => $account->whereIn('account_type', $accountTypes))
+            ->orderByRaw('CASE WHEN '.implode(' OR ', array_fill(0, count($preferredCodes), 'code LIKE ?')).' THEN 0 ELSE 1 END', $preferredCodes)
+            ->orderBy('id')
             ->first();
 
-        if ($fallbackTag) {
-            return $fallbackTag;
-        }
+        if ($defaultTag) {
+            $issues[] = "FS Tag defaulted to \"{$defaultTag->code}\" ({$defaultTag->name}) because the document carries no FS Tag code -- confirm it before approving.";
 
+            return $defaultTag;
+        }
         if ($required) {
-            $issues[] = 'No FS Tag code could be extracted from the document, and no active FS Tag with a valid GL account is configured.';
+            $issues[] = 'No FS Tag code could be extracted from the document, and no active FS Tag mapped to a GL account of the document\'s type (income for invoices, expense for bills) is configured.';
         }
 
         return null;

@@ -1,9 +1,12 @@
 <?php
 
+use Webkul\Account\Database\Factories\AccountFactory;
 use Webkul\Account\Enums\AccountType;
 use Webkul\Account\Models\Account;
 use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Models\Company;
 
 require_once __DIR__.'/../../../../../support/tests/Helpers/SecurityHelper.php';
 require_once __DIR__.'/../../../../../support/tests/Helpers/TestBootstrapHelper.php';
@@ -33,10 +36,22 @@ function actingAsAccountApiUser(array $permissions = []): User
     $user = SecurityHelper::authenticateWithPermissions($permissions);
 
     $user->forceFill([
+        'default_company_id'  => Company::factory()->create(['is_active' => true])->id,
         'resource_permission' => PermissionType::GLOBAL,
     ])->saveQuietly();
 
+    CurrentCompany::flush();
+
     return $user;
+}
+
+/** An account linked to the API user's active company (the API only sees its own companies' accounts). */
+function accountForApiUser(?AccountFactory $factory = null): Account
+{
+    $account = ($factory ?? Account::factory())->create();
+    $account->companies()->sync([auth()->user()->default_company_id]);
+
+    return $account;
 }
 
 function accountRoute(string $action, mixed $account = null): string
@@ -86,7 +101,7 @@ it('forbids creating an account without permission', function () {
 it('forbids updating an account without permission', function () {
     actingAsAccountApiUser();
 
-    $account = Account::factory()->create();
+    $account = accountForApiUser();
 
     $this->patchJson(accountRoute('update', $account), [])
         ->assertForbidden();
@@ -95,7 +110,7 @@ it('forbids updating an account without permission', function () {
 it('forbids deleting an account without permission', function () {
     actingAsAccountApiUser();
 
-    $account = Account::factory()->create();
+    $account = accountForApiUser();
 
     $this->deleteJson(accountRoute('destroy', $account))
         ->assertForbidden();
@@ -116,7 +131,7 @@ it('lists accounts for authorized users', function () {
 it('filters accounts by account type', function () {
     actingAsAccountApiUser(['view_any_account_account']);
 
-    $account = Account::factory()->receivable()->create();
+    $account = accountForApiUser(Account::factory()->receivable());
     Account::factory()->expense()->count(2)->create();
 
     $response = $this->getJson(accountRoute('index').'?filter[account_type]='.AccountType::ASSET_RECEIVABLE->value)
@@ -176,7 +191,7 @@ it('validates account_type must be a valid enum value', function () {
 it('shows an account for authorized users', function () {
     actingAsAccountApiUser(['view_account_account']);
 
-    $account = Account::factory()->create();
+    $account = accountForApiUser();
 
     $this->getJson(accountRoute('show', $account))
         ->assertOk()
@@ -196,7 +211,7 @@ it('returns 404 for a non-existent account', function () {
 it('updates an account', function () {
     actingAsAccountApiUser(['update_account_account']);
 
-    $account = Account::factory()->create();
+    $account = accountForApiUser();
 
     $this->patchJson(accountRoute('update', $account), ['name' => 'Updated Account Name'])
         ->assertOk()
@@ -214,7 +229,7 @@ it('updates an account', function () {
 it('deletes an account', function () {
     actingAsAccountApiUser(['delete_account_account']);
 
-    $account = Account::factory()->create();
+    $account = accountForApiUser();
 
     $this->deleteJson(accountRoute('destroy', $account))
         ->assertOk()

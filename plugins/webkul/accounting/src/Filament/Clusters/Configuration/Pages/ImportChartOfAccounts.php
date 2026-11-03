@@ -7,12 +7,14 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Webkul\Account\Enums\AccountType;
 use Webkul\Accounting\Data\Coa\CoaWarning;
 use Webkul\Accounting\Filament\Clusters\Configuration;
 use Webkul\Accounting\Services\Coa\CoaHeaderDetector;
@@ -47,6 +49,15 @@ class ImportChartOfAccounts extends Page implements HasForms
 
     /** @var array<string, mixed>|null */
     public ?array $previewData = null;
+
+    /**
+     * Per-row account type chosen in the preview, keyed by the row's index in
+     * previewData['types'] (codes such as "1011.0" are not safe wire:model
+     * keys). Empty means "use the suggested type".
+     *
+     * @var array<int|string, string|null>
+     */
+    public array $typeOverrides = [];
 
     /**
      * Absolute path of the importer-owned working copy of the uploaded file.
@@ -130,6 +141,10 @@ class ImportChartOfAccounts extends Page implements HasForms
                     DatePicker::make('adjustment_date')
                         ->label('Adjustment date')
                         ->visible(fn (Get $get) => $get('mode') === 'with_journals'),
+                    Toggle::make('allow_posted_type_change')
+                        ->label('Allow re-typing accounts that already have posted journal items')
+                        ->helperText('Off: a re-import that would change the type of such an account is refused. The choice is recorded on the import batch.')
+                        ->default(false),
                 ]),
         ];
     }
@@ -192,13 +207,41 @@ class ImportChartOfAccounts extends Page implements HasForms
         app(CoaUploadPathResolver::class)->cleanup($this->workingFilePath);
         $this->workingFilePath = null;
         $this->previewData = null;
+        $this->typeOverrides = [];
+    }
+
+    /**
+     * The overrides that differ from the suggestion, as account code => type.
+     *
+     * @return array<string, string>
+     */
+    public function chosenTypeOverrides(): array
+    {
+        $overrides = [];
+
+        foreach ($this->previewData['types'] ?? [] as $index => $choice) {
+            $type = $this->typeOverrides[$index] ?? null;
+
+            if (filled($type) && $type !== $choice['suggested']) {
+                $overrides[(string) $choice['code']] = (string) $type;
+            }
+        }
+
+        return $overrides;
+    }
+
+    /** @return array<string, string> AccountType value => label */
+    public function typeLabels(): array
+    {
+        return collect(AccountType::cases())->mapWithKeys(fn (AccountType $type) => [$type->value => $type->getLabel()])->all();
     }
 
     public function preview(): void
     {
         try {
             $rows = $this->resolveRows();
-            $result = app(CoaImportService::class)->preview($rows);
+            $overrides = $this->chosenTypeOverrides();
+            $result = app(CoaImportService::class)->preview($rows, $overrides);
 
             // Store ONLY Livewire-serializable primitives/arrays in the public
             // property. The raw preview also carries CoaWarning and CoaRow objects
@@ -211,7 +254,13 @@ class ImportChartOfAccounts extends Page implements HasForms
                 'has_errors'  => $result['has_errors'],
                 'provisional' => $result['provisional'],
                 'warnings'    => array_map(fn (CoaWarning $w) => $w->toArray(), $result['warnings']),
+                'types'       => $result['type_choices'],
             ];
+
+            // Keep the choices made before a re-preview, by account code.
+            $this->typeOverrides = collect($result['type_choices'])
+                ->map(fn (array $choice) => $overrides[(string) $choice['code']] ?? $choice['suggested'])
+                ->all();
 
             Notification::make()
                 ->title("Preview: {$this->previewData['leaves']} accounts, {$this->previewData['groups']} groups, "
@@ -244,6 +293,8 @@ class ImportChartOfAccounts extends Page implements HasForms
             $batch = app(CoaImportService::class)->import(
                 rows: $source['rows'],
                 company: $company,
+                typeOverrides: $this->chosenTypeOverrides(),
+                options: ['allow_posted_type_change' => (bool) ($this->data['allow_posted_type_change'] ?? false)],
                 mode: $this->data['mode'] ?? 'structure_only',
                 currencyId: $this->data['currency_id'] ? (int) $this->data['currency_id'] : null,
                 filename: $this->data['file_original_name'] ?? null,
@@ -258,11 +309,13 @@ class ImportChartOfAccounts extends Page implements HasForms
             );
 
             $skippedJournals = collect($batch->options['skipped_journals'] ?? [])->pluck('reason')->filter();
+            $collisions = (int) ($batch->options['code_collision_count'] ?? 0);
 
             Notification::make()
-                ->{$skippedJournals->isEmpty() ? 'success' : 'warning'}()
+                ->{$skippedJournals->isEmpty() && $collisions === 0 ? 'success' : 'warning'}()
                 ->title('Import complete')
                 ->body("Created {$batch->accounts_created} accounts, {$batch->groups_created} groups, {$batch->journals_created} journals (updated {$batch->accounts_updated}).".
+                    ($collisions === 0 ? '' : " {$collisions} row(s) were not imported: their code already belongs to an existing, manually created account (see the batch warnings).").
                     ($skippedJournals->isEmpty() ? '' : ' Not posted: '.$skippedJournals->implode(' ')))
                 ->persistent()
                 ->send();
@@ -271,6 +324,7 @@ class ImportChartOfAccounts extends Page implements HasForms
             app(CoaUploadPathResolver::class)->cleanup($this->workingFilePath);
             $this->workingFilePath = null;
             $this->previewData = null;
+            $this->typeOverrides = [];
         } catch (CoaUploadException $e) {
             Notification::make()->warning()->title('Check the uploaded file')->body($e->getMessage())->send();
         } catch (\Throwable $e) {

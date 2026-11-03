@@ -4,6 +4,7 @@ namespace Webkul\Accounting\Services\Coa;
 
 use Illuminate\Support\Facades\DB;
 use Webkul\Account\Enums\AccountType;
+use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Models\Account;
 use Webkul\Accounting\Data\Coa\CoaRow;
 use Webkul\Accounting\Data\Coa\CoaWarning;
@@ -37,12 +38,13 @@ class CoaImportService
      * Writes nothing.
      *
      * @param  array<int, CoaRow>  $rows
+     * @param  array<string, string>  $typeOverrides  account code => AccountType value
      * @return array<string, mixed>
      */
-    public function preview(array $rows): array
+    public function preview(array $rows, array $typeOverrides = []): array
     {
         $plan = $this->planner->plan($rows);
-        $warnings = $this->validator->validate($rows);
+        $warnings = $this->validator->validate($rows, $typeOverrides);
 
         return [
             'groups'       => count($plan['groups']),
@@ -54,6 +56,15 @@ class CoaImportService
             'type_preview' => collect($rows)->mapWithKeys(fn (CoaRow $r) => [
                 $r->code => $this->typeMapper->suggest($r)->value,
             ])->all(),
+            // Per row: the suggested type and the types its Nature allows
+            // (the choices offered as a per-row override).
+            'type_choices' => collect($rows)->map(fn (CoaRow $r) => [
+                'code'      => $r->code,
+                'title'     => $r->title,
+                'path'      => $r->classificationPathLabel(),
+                'suggested' => $this->typeMapper->suggest($r)->value,
+                'allowed'   => array_map(fn (AccountType $type) => $type->value, $this->typeMapper->allowedTypes($r)),
+            ])->values()->all(),
         ];
     }
 
@@ -82,7 +93,7 @@ class CoaImportService
         array $sourceHeaders = [],
         array $metadataRows = [],
     ): CoaImportBatch {
-        $warnings = $this->validator->validate($rows);
+        $warnings = $this->validator->validate($rows, $typeOverrides);
         $errors = collect($warnings)->filter(fn (CoaWarning $w) => $w->isError())->values();
 
         if ($errors->isNotEmpty()) {
@@ -162,6 +173,9 @@ class CoaImportService
 
             $accountsCreated = 0;
             $accountsUpdated = 0;
+            $codeCollisions = [];
+            $postedTypeChanges = [];
+            $allowPostedTypeChange = (bool) ($options['allow_posted_type_change'] ?? false);
 
             foreach ($plan['leaves'] as $leaf) {
                 /** @var CoaRow $row */
@@ -169,13 +183,29 @@ class CoaImportService
                 $type = AccountType::tryFrom($typeOverrides[$row->code] ?? '') ?? $this->typeMapper->suggest($row);
                 $parentId = $groupIdByLabel[$leaf['parent_group_label']] ?? null;
 
-                $existing = $linkedLeafByCode[$row->code] ?? null;
+                $existing = $linkedLeafByCode[CoaRow::normalizeCode($row->code)] ?? null;
 
                 if ($existing) {
                     // Never overwrite an unrelated, pre-existing account: only
-                    // update accounts this importer created.
+                    // update accounts this importer created. The row is not
+                    // imported; it is reported so the collision can be resolved.
                     if ($existing->import_batch_id === null) {
+                        $codeCollisions[] = ['code' => $row->code, 'title' => $row->title, 'existing_account_id' => $existing->id, 'existing_name' => $existing->name];
+
                         continue;
+                    }
+
+                    // Re-typing an account that already carries posted lines
+                    // silently moves history between report sections: refuse
+                    // unless the import explicitly allows it (recorded below).
+                    $existingType = $existing->account_type instanceof AccountType ? $existing->account_type : AccountType::tryFrom((string) $existing->account_type);
+
+                    if ($existingType !== $type && $this->hasPostedLines($existing)) {
+                        $postedTypeChanges[] = ['code' => $row->code, 'account_id' => $existing->id, 'from' => $existingType?->value, 'to' => $type->value];
+
+                        if (! $allowPostedTypeChange) {
+                            continue;
+                        }
                     }
 
                     $existing->update([
@@ -212,6 +242,14 @@ class CoaImportService
                 $accountsCreated++;
             }
 
+            if ($postedTypeChanges !== [] && ! $allowPostedTypeChange) {
+                throw new \RuntimeException(
+                    'CoA re-import would change the account type of '.count($postedTypeChanges).' account(s) with posted journal items: '
+                    .collect($postedTypeChanges)->take(10)->map(fn (array $change) => "{$change['code']} ({$change['from']} → {$change['to']})")->implode(', ')
+                    .'. Keep their current type with a type override, or confirm the change explicitly (allow_posted_type_change).'
+                );
+            }
+
             $this->persistSourceRows($batch, $company, $rows);
 
             $journalsCreated = 0;
@@ -240,7 +278,21 @@ class CoaImportService
                 'accounts_created' => $accountsCreated,
                 'accounts_updated' => $accountsUpdated,
                 'journals_created' => $journalsCreated,
-                'options'          => array_merge((array) $batch->options, ['skipped_journals' => $skippedJournals]),
+                'options'          => array_merge((array) $batch->options, [
+                    'skipped_journals'     => $skippedJournals,
+                    'code_collisions'      => $codeCollisions,
+                    'code_collision_count' => count($codeCollisions),
+                    'posted_type_changes'  => $postedTypeChanges,
+                    'warnings'             => [
+                        ...(((array) $batch->options)['warnings'] ?? []),
+                        ...array_map(fn (array $collision) => CoaWarning::warning(
+                            'code_collision',
+                            "Account code '{$collision['code']}' ('{$collision['title']}') already belongs to an existing account of this company ('{$collision['existing_name']}') that was not created by an import; the row was not imported.",
+                            null,
+                            $collision['code'],
+                        )->toArray(), $codeCollisions),
+                    ],
+                ]),
             ]);
 
             return $batch->fresh();
@@ -321,11 +373,16 @@ class CoaImportService
                     $groupByPath[$account->source_classification_path] = $account;
                 }
             } elseif ($account->code !== null) {
-                $leafByCode[$account->code] = $account;
+                $leafByCode[CoaRow::normalizeCode($account->code)] = $account;
             }
         }
 
         return [$leafByCode, $groupByPath];
+    }
+
+    protected function hasPostedLines(Account $account): bool
+    {
+        return $account->moveLines()->where('parent_state', MoveState::POSTED->value)->exists();
     }
 
     protected function groupType(array $group): AccountType

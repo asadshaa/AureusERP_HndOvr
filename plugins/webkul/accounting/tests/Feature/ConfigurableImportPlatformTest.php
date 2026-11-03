@@ -430,11 +430,20 @@ it('imports configured bank rows through the canonical currency and reconciliati
             ->and($line->mapping->tax_treatment)->toBe('Exempt')
             ->and($line->mapping->supporting_document)->toBe('FEE-DOC-1')
             ->and($line->mapping->match_type)->toBe('source_gl')
-            ->and($line->mapping->review_status->value)->toBe('suggested');
+            // The source offset GL contradicts the FS Tag's GL: kept as supplied, but surfaced for review...
+            ->and($line->mapping->review_status->value)->toBe('needs_review')
+            ->and($line->mapping->fs_tag_issue)->toContain("FS Tag {$tag->code} is configured for a different GL account than the source offset GL {$offset->code}");
 
-        $approved = app(BankMappingService::class)->approve($line->mapping, $fixture['user'], false);
-        expect($approved->offset_account_id)->toBe($offset->id)
-            ->and($approved->match_type)->toBe('source_gl');
+        // ...and approval refuses to stamp the tag on a GL account it is not configured for.
+        expect(fn () => app(BankMappingService::class)->approve($line->mapping, $fixture['user'], false))
+            ->toThrow(RuntimeException::class, "does not match FS Tag {$tag->code}");
+
+        // Choosing the tag's own GL resolves the conflict; the source columns are still used.
+        $line->mapping->update(['offset_account_id' => $tagOffset->id]);
+        $approved = app(BankMappingService::class)->approve($line->mapping->fresh(), $fixture['user'], false);
+        expect($approved->offset_account_id)->toBe($tagOffset->id)
+            ->and($approved->match_type)->toBe('source_gl')
+            ->and($approved->cash_flow_category)->toBe('Operating');
     } finally {
         @unlink($path);
     }

@@ -8,6 +8,7 @@
  * record with another company's ids (journal, partner, tax...) answers 422.
  */
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use Webkul\Account\Enums\MoveState;
 use Webkul\Account\Enums\MoveType;
@@ -15,6 +16,7 @@ use Webkul\Account\Models\Account;
 use Webkul\Account\Models\FiscalPosition;
 use Webkul\Account\Models\Journal;
 use Webkul\Account\Models\Move;
+use Webkul\Account\Models\MoveLine;
 use Webkul\Account\Models\Partner;
 use Webkul\Account\Models\PaymentTerm;
 use Webkul\Account\Models\Product;
@@ -342,4 +344,142 @@ it('gives a new journal or tax the active company, with that company\'s accounts
         ->json('data.id');
 
     expect(Tax::query()->findOrFail($taxId)->company_id)->toBe($this->ownCompany->id);
+});
+
+// ---------------------------------------------------------------------
+// Chart of accounts (accounts are shared through accounts_account_companies)
+// ---------------------------------------------------------------------
+
+/** An account linked to the given companies. */
+function companyApiAccount(array $companies, array $attributes = []): Account
+{
+    $account = Account::factory()->create($attributes);
+    $account->companies()->sync(collect($companies)->pluck('id')->all());
+
+    return $account;
+}
+
+it('refuses to delete an account with posted journal items and keeps the items', function () {
+    actingAsCompanyApiUser($this->ownCompany, [], companyApiPermissions('account_account'));
+
+    $account = companyApiAccount([$this->ownCompany]);
+    $move = Move::factory()->posted()->create(['company_id' => $this->ownCompany->id]);
+    $line = MoveLine::factory()->create([
+        'move_id'      => $move->id,
+        'company_id'   => $this->ownCompany->id,
+        'account_id'   => $account->id,
+        'parent_state' => MoveState::POSTED,
+    ]);
+
+    $this->deleteJson(route('admin.api.v1.accounts.accounts.destroy', $account))
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.account.0', 'it has journal items');
+
+    expect(Account::query()->whereKey($account->id)->exists())->toBeTrue()
+        ->and(MoveLine::query()->whereKey($line->id)->value('account_id'))->toBe($account->id);
+
+    // The database refuses it too: the journal items' foreign key restricts the delete.
+    expect(fn () => $account->delete())->toThrow(QueryException::class);
+});
+
+it('refuses to delete an account that a journal points at', function () {
+    actingAsCompanyApiUser($this->ownCompany, [], companyApiPermissions('account_account'));
+
+    $account = companyApiAccount([$this->ownCompany]);
+    Journal::factory()->create(['company_id' => $this->ownCompany->id, 'default_account_id' => $account->id]);
+
+    $this->deleteJson(route('admin.api.v1.accounts.accounts.destroy', $account))
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.account.0', 'it is used by journals');
+
+    expect(Account::query()->whereKey($account->id)->exists())->toBeTrue();
+});
+
+it('deletes an unused account of the user\'s company and answers 404 for another company\'s account', function () {
+    actingAsCompanyApiUser($this->ownCompany, [], companyApiPermissions('account_account'));
+
+    $unused = companyApiAccount([$this->ownCompany]);
+    $other = companyApiAccount([$this->otherCompany]);
+
+    $this->deleteJson(route('admin.api.v1.accounts.accounts.destroy', $other))->assertNotFound();
+    $this->deleteJson(route('admin.api.v1.accounts.accounts.destroy', $unused))->assertOk();
+
+    expect(Account::query()->whereKey($unused->id)->exists())->toBeFalse()
+        ->and(Account::query()->whereKey($other->id)->exists())->toBeTrue();
+});
+
+it('forbids changing or deleting an account shared with a company the API user is not in', function () {
+    actingAsCompanyApiUser($this->ownCompany, [], companyApiPermissions('account_account'));
+
+    $shared = companyApiAccount([$this->ownCompany, $this->otherCompany], ['name' => 'Shared chart account']);
+
+    $this->getJson(route('admin.api.v1.accounts.accounts.show', $shared))->assertOk();
+
+    $this->patchJson(route('admin.api.v1.accounts.accounts.update', $shared), ['name' => 'Renamed', 'deprecated' => true])
+        ->assertForbidden();
+    $this->deleteJson(route('admin.api.v1.accounts.accounts.destroy', $shared))->assertForbidden();
+
+    $shared->refresh();
+
+    expect($shared->name)->toBe('Shared chart account')
+        ->and($shared->deprecated)->toBeFalse()
+        ->and($shared->companies()->pluck('companies.id')->sort()->values()->all())
+        ->toBe(collect([$this->ownCompany->id, $this->otherCompany->id])->sort()->values()->all());
+});
+
+it('lists and shows only the accounts linked to the API user\'s companies, with only their ledger lines', function () {
+    actingAsCompanyApiUser($this->ownCompany, [$this->sisterCompany], companyApiPermissions('account_account'));
+
+    $own = companyApiAccount([$this->ownCompany]);
+    $sister = companyApiAccount([$this->sisterCompany]);
+    $shared = companyApiAccount([$this->ownCompany, $this->otherCompany]);
+    $other = companyApiAccount([$this->otherCompany]);
+    $unlinked = Account::factory()->create();
+
+    expect(companyApiListedIds('admin.api.v1.accounts.accounts.index', [$own->id, $sister->id, $shared->id, $other->id, $unlinked->id]))
+        ->toBe(collect([$own->id, $sister->id, $shared->id])->sort()->values()->all());
+
+    $this->getJson(route('admin.api.v1.accounts.accounts.show', $other))->assertNotFound();
+    $this->getJson(route('admin.api.v1.accounts.accounts.show', $unlinked))->assertNotFound();
+    $this->patchJson(route('admin.api.v1.accounts.accounts.update', $other), ['name' => 'Renamed'])->assertNotFound();
+
+    $ownLine = MoveLine::factory()->create(['move_id' => Move::factory()->create(['company_id' => $this->ownCompany->id])->id, 'account_id' => $shared->id]);
+    $otherLine = MoveLine::factory()->create(['move_id' => Move::factory()->create(['company_id' => $this->otherCompany->id])->id, 'account_id' => $shared->id]);
+
+    $lineIds = collect($this->getJson(route('admin.api.v1.accounts.accounts.show', ['account' => $shared->id, 'include' => 'moveLines']))
+        ->assertOk()
+        ->json('data.moveLines'))->pluck('id')->all();
+
+    expect($lineIds)->toBe([$ownLine->id])->not->toContain($otherLine->id);
+
+    $indexLineIds = collect($this->getJson(route('admin.api.v1.accounts.accounts.index', ['filter[id]' => $shared->id, 'include' => 'moveLines']))
+        ->assertOk()
+        ->json('data.0.moveLines'))->pluck('id')->all();
+
+    expect($indexLineIds)->toBe([$ownLine->id]);
+});
+
+it('creates an account in the active company and keeps codes unique per company', function () {
+    actingAsCompanyApiUser($this->ownCompany, [], ['create_account_account', 'update_account_account', 'view_account_account']);
+
+    companyApiAccount([$this->otherCompany], ['code' => 'ISO-CODE-1']);
+
+    $id = $this->postJson(route('admin.api.v1.accounts.accounts.store'), ['name' => 'Own cash', 'code' => 'ISO-CODE-1', 'account_type' => 'asset_cash'])
+        ->assertCreated()
+        ->json('data.id');
+
+    expect(Account::query()->findOrFail($id)->companies()->pluck('companies.id')->all())->toBe([$this->ownCompany->id]);
+
+    $this->postJson(route('admin.api.v1.accounts.accounts.store'), ['name' => 'Duplicate', 'code' => 'ISO-CODE-1', 'account_type' => 'asset_cash'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['code']);
+
+    $second = companyApiAccount([$this->ownCompany], ['code' => 'ISO-CODE-2']);
+
+    $this->patchJson(route('admin.api.v1.accounts.accounts.update', $second), ['code' => 'ISO-CODE-1'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['code']);
+
+    $this->patchJson(route('admin.api.v1.accounts.accounts.update', $second), ['code' => 'ISO-CODE-2', 'name' => 'Same code kept'])
+        ->assertOk();
 });

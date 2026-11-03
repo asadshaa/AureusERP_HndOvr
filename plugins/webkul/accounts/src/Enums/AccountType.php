@@ -58,6 +58,30 @@ enum AccountType: string implements HasLabel
      * calculation entirely for non-reconcilable accounts, so getting this
      * wrong makes an unpaid invoice report itself as fully paid.
      */
+    /**
+     * The statement section the type belongs to: asset, liability, equity,
+     * income, expense or off_balance.
+     */
+    public function section(): string
+    {
+        return match ($this) {
+            self::ASSET_RECEIVABLE, self::ASSET_CASH, self::ASSET_CURRENT,
+            self::ASSET_NON_CURRENT, self::ASSET_PREPAYMENTS, self::ASSET_FIXED => 'asset',
+            self::LIABILITY_PAYABLE, self::LIABILITY_CREDIT_CARD,
+            self::LIABILITY_CURRENT, self::LIABILITY_NON_CURRENT                 => 'liability',
+            self::EQUITY, self::EQUITY_UNAFFECTED                                => 'equity',
+            self::INCOME, self::INCOME_OTHER                                     => 'income',
+            self::EXPENSE, self::EXPENSE_DEPRECIATION, self::EXPENSE_DIRECT_COST => 'expense',
+            self::OFF_BALANCE                                                    => 'off_balance',
+        };
+    }
+
+    /** @return array<int, self> the types of the given section */
+    public static function inSection(string $section): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $type): bool => $type->section() === $section));
+    }
+
     public function isReconcilable(): bool
     {
         return in_array($this, [

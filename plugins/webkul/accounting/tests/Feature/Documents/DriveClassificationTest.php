@@ -328,8 +328,27 @@ it('resolves normalized partner matching and defaults to company revenue FS Tag 
 
     $classification = app(DriveClassificationService::class)->classify($ingestion);
 
-    expect($classification->validation_status)->toBe(DriveClassificationStatus::Valid)
+    // The default is resolved, but never silently: it sends the document to review.
+    expect($classification->validation_status)->toBe(DriveClassificationStatus::NeedsReview)
+        ->and($classification->validation_issues)->toBe(['FS Tag defaulted to "FS-MANUAL-REV" (Operating Revenue) because the document carries no FS Tag code -- confirm it before approving.'])
         ->and($classification->resolved_partner_id)->toBe($apexPartner->id)
         ->and($classification->resolved_fs_tag_id)->toBe($revTag->id)
         ->and($classification->resolved_account_id)->toBe($revenueAccount->id);
+});
+
+it('never defaults a customer invoice without an FS Tag code to a tag of another account type', function () {
+    $fx = driveClassificationFixture();
+
+    Partner::factory()->create(['company_id' => $fx['company']->id, 'name' => 'ApexLogistics']);
+
+    // Only the fixture's expense-account tag exists: the old any-active-tag
+    // fallback would have booked the invoice's revenue to that expense account.
+    $ingestion = makeRegisteredIngestion($fx['company'], 'INV-2026-98_Apex Global Logistics_1500.00PKR.pdf');
+
+    $classification = app(DriveClassificationService::class)->classify($ingestion);
+
+    expect($classification->validation_status)->toBe(DriveClassificationStatus::NeedsReview)
+        ->and($classification->resolved_fs_tag_id)->toBeNull()
+        ->and($classification->resolved_account_id)->toBeNull()
+        ->and(collect($classification->validation_issues)->contains(fn (string $issue) => str_contains($issue, 'No FS Tag code could be extracted')))->toBeTrue();
 });

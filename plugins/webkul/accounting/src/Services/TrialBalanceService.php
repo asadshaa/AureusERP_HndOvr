@@ -46,23 +46,36 @@ class TrialBalanceService
         $range = $this->rangeSums($companyId, $fromDate, $toDate, $postedOnly, $journalIds);
         $warnings = $this->openingDateWarnings($companyId, $fromDate, $toDate, $postedOnly, $journalIds);
 
-        // Leaf accounts of the company (postable), optionally filtered.
+        // Leaf accounts of the company (postable), plus every account that
+        // carries this company's lines even though it is not linked to the
+        // company or is a group: the totals must reconcile to the ledger.
+        $ledgerAccountIds = array_values(array_unique(array_merge(array_keys($opening), array_keys($range))));
+
         $accounts = Account::query()
-            ->postable()
-            ->whereHas('companies', fn ($q) => $q->where('companies.id', $companyId))
+            ->where(fn ($q) => $q
+                ->where(fn ($linked) => $linked->postable()->whereHas('companies', fn ($c) => $c->where('companies.id', $companyId)))
+                ->orWhereIn('id', $ledgerAccountIds))
             ->when($accountIds !== [], fn ($q) => $q->whereIn('id', $accountIds))
+            ->withExists(['companies as linked_to_company' => fn ($c) => $c->where('companies.id', $companyId)])
             ->orderBy('code')
             ->get(['id', 'code', 'name', 'is_group', 'parent_id']);
 
+        if (in_array(0, $ledgerAccountIds, true) && $accountIds === []) {
+            $accounts->push(new Account(['code' => null, 'name' => 'Journal items without an account']));
+        }
+
         $rows = [];
         $totals = $this->emptyTotals();
+        $unclassified = [];
 
         foreach ($accounts as $account) {
-            $openingNet = (float) ($opening[$account->id] ?? 0.0);
-            $movementDebit = (float) ($range[$account->id]['mov_debit'] ?? 0.0);
-            $movementCredit = (float) ($range[$account->id]['mov_credit'] ?? 0.0);
-            $adjustmentDebit = (float) ($range[$account->id]['adj_debit'] ?? 0.0);
-            $adjustmentCredit = (float) ($range[$account->id]['adj_credit'] ?? 0.0);
+            $key = (int) $account->id;
+            $openingNet = (float) ($opening[$key] ?? 0.0);
+            $movementDebit = (float) ($range[$key]['mov_debit'] ?? 0.0);
+            $movementCredit = (float) ($range[$key]['mov_credit'] ?? 0.0);
+            $adjustmentDebit = (float) ($range[$key]['adj_debit'] ?? 0.0);
+            $adjustmentCredit = (float) ($range[$key]['adj_credit'] ?? 0.0);
+            $isUnclassified = ! $account->exists || ! $account->linked_to_company || $account->is_group;
 
             $closingNet = $openingNet
                 + $movementDebit - $movementCredit
@@ -81,12 +94,17 @@ class TrialBalanceService
                 'adjustment_credit' => round($adjustmentCredit, 2),
                 'closing_debit'     => $this->pos($closingNet),
                 'closing_credit'    => $this->neg($closingNet),
+                'unclassified'      => $isUnclassified,
             ];
 
             $nonZero = $this->rowHasValue($row);
 
             if (! $includeZero && ! $nonZero) {
                 continue;
+            }
+
+            if ($isUnclassified && $nonZero) {
+                $unclassified[] = $account->code ?: $account->name;
             }
 
             $rows[] = $row;
@@ -99,6 +117,12 @@ class TrialBalanceService
 
         $totals = array_map(fn ($v) => round($v, 2), $totals);
         $totals['difference'] = round($totals['closing_debit'] - $totals['closing_credit'], 2);
+
+        if ($unclassified !== []) {
+            $warnings[] = 'Unclassified: '.count($unclassified).' account(s) carry this company\'s posted lines but are not linked to the company or are group accounts ('
+                .implode(', ', array_slice($unclassified, 0, 10)).(count($unclassified) > 10 ? ', ...' : '')
+                .'). They are included in the totals so the trial balance reconciles to the ledger; link or reclassify them.';
+        }
 
         if ($includeGroups) {
             $rows = $this->withGroupAggregates($companyId, $rows);

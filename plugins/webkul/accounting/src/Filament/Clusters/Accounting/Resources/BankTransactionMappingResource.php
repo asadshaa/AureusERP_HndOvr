@@ -14,6 +14,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Filament\Support\Exceptions\Halt;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -207,12 +208,29 @@ class BankTransactionMappingResource extends Resource
                     ->createOptionUsing(function (array $data) use ($companyId): int {
                         abort_unless(Auth::user()?->can(AccountingPermissions::ManageFsTags), 403);
 
-                        return app(FsTagService::class)->create(Company::query()->findOrFail($companyId), $data)->id;
+                        try {
+                            return app(FsTagService::class)->create(Company::query()->findOrFail($companyId), $data)->id;
+                        } catch (\RuntimeException $exception) {
+                            Notification::make()->danger()->title('The FS Tag was not created')->body($exception->getMessage())->send();
+
+                            throw new Halt;
+                        }
                     }),
                 Select::make('offset_account_id')->label('Offset GL')->searchable()
                     ->options(fn (): array => $accountSearch(''))
                     ->getSearchResultsUsing($accountSearch)->getOptionLabelUsing($accountLabel)
                     ->required(fn (Get $get): bool => ! filled($get('fs_tag_id')))
+                    // With an FS Tag the offset GL must be the tag's own GL account
+                    // (approval refuses anything else); this reports it on the form.
+                    ->rule(fn (Get $get): \Closure => function (string $attribute, mixed $value, \Closure $fail) use ($get, $companyId): void {
+                        $tagAccountId = filled($get('fs_tag_id'))
+                            ? FsTag::query()->where('company_id', $companyId)->whereKey($get('fs_tag_id'))->value('account_id')
+                            : null;
+
+                        if ($tagAccountId !== null && filled($value) && (int) $value !== (int) $tagAccountId) {
+                            $fail('The offset GL must be the selected FS Tag\'s GL account. Clear the FS Tag to post to a different GL.');
+                        }
+                    })
                     ->createOptionForm([
                         TextInput::make('code')->label('GL code')->required()->maxLength(64),
                         TextInput::make('name')->label('Title')->required()->maxLength(255),

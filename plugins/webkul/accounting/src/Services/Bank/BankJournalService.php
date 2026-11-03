@@ -15,6 +15,7 @@ use Webkul\Accounting\Enums\BankPostingStatus;
 use Webkul\Accounting\Enums\BankReviewStatus;
 use Webkul\Accounting\Enums\ConversionStatus;
 use Webkul\Accounting\Models\BankTransactionMapping;
+use Webkul\Accounting\Models\FsTag;
 use Webkul\Security\Models\User;
 
 class BankJournalService
@@ -54,6 +55,11 @@ class BankJournalService
 
             if (! BigDecimal::of($companyAmount)->isPositive() || ! $debitAccountId || ! $creditAccountId || $debitAccountId === $creditAccountId) {
                 throw new RuntimeException('The journal mapping is incomplete or would not create a valid balanced entry.');
+            }
+
+            if (! $isApprovedTransfer && $mapping->fs_tag_id !== null
+                && (int) FsTag::query()->whereKey($mapping->fs_tag_id)->value('account_id') !== (int) $mapping->offset_account_id) {
+                throw new RuntimeException('The mapping\'s FS Tag is configured for a different GL account than its offset GL; re-review the mapping before generating the journal.');
             }
 
             $now = now();

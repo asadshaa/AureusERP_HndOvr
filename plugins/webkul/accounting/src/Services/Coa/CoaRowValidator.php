@@ -2,6 +2,7 @@
 
 namespace Webkul\Accounting\Services\Coa;
 
+use Webkul\Account\Enums\AccountType;
 use Webkul\Accounting\Data\Coa\CoaRow;
 use Webkul\Accounting\Data\Coa\CoaWarning;
 
@@ -25,18 +26,28 @@ class CoaRowValidator
         'guarrantee',
     ];
 
+    public function __construct(
+        protected CoaAccountTypeMapper $typeMapper = new CoaAccountTypeMapper,
+    ) {}
+
     /**
+     * $typeOverrides (account code => AccountType value, as chosen in the
+     * import preview) are checked against each row's Nature: an override
+     * that contradicts it (an expense type on a B/S row, an asset type on a
+     * P&L row) or is not a valid type is a blocking error.
+     *
      * @param  array<int, CoaRow>  $rows
+     * @param  array<string, string>  $typeOverrides
      * @return array<int, CoaWarning>
      */
-    public function validate(array $rows): array
+    public function validate(array $rows, array $typeOverrides = []): array
     {
         $warnings = [];
 
         $codeCounts = [];
         $titleCounts = [];
         foreach ($rows as $row) {
-            $codeCounts[$row->code] = ($codeCounts[$row->code] ?? 0) + 1;
+            $codeCounts[CoaRow::normalizeCode($row->code)] = ($codeCounts[CoaRow::normalizeCode($row->code)] ?? 0) + 1;
             $titleCounts[mb_strtolower($row->title)] = ($titleCounts[mb_strtolower($row->title)] ?? 0) + 1;
         }
 
@@ -53,10 +64,10 @@ class CoaRowValidator
                 $warnings[] = CoaWarning::error('empty_title', "Row {$row->sheetRow}: missing account title.", $row->sheetRow);
             }
 
-            if ($row->code !== '' && $codeCounts[$row->code] > 1) {
+            if ($row->code !== '' && $codeCounts[CoaRow::normalizeCode($row->code)] > 1) {
                 $warnings[] = CoaWarning::error(
                     'duplicate_code',
-                    "Duplicate account code '{$row->code}' appears {$codeCounts[$row->code]} times in the file.",
+                    "Duplicate account code '{$row->code}' appears {$codeCounts[CoaRow::normalizeCode($row->code)]} times in the file (codes are compared ignoring case and a trailing \".0\").",
                     $row->sheetRow, $row->code,
                 );
             }
@@ -86,6 +97,24 @@ class CoaRowValidator
                     "Title '{$row->title}' appears {$titleCounts[$title]} times — confirm these are distinct accounts.",
                     $row->sheetRow, $row->code,
                 );
+            }
+
+            if ($row->code !== '' && array_key_exists($row->code, $typeOverrides)) {
+                $override = AccountType::tryFrom((string) $typeOverrides[$row->code]);
+
+                if ($override === null) {
+                    $warnings[] = CoaWarning::error(
+                        'invalid_type_override',
+                        "Row {$row->sheetRow} ('{$row->title}'): '{$typeOverrides[$row->code]}' is not a valid account type.",
+                        $row->sheetRow, $row->code,
+                    );
+                } elseif (! $this->typeMapper->natureAllows($row, $override)) {
+                    $warnings[] = CoaWarning::error(
+                        'nature_type_mismatch',
+                        "Row {$row->sheetRow} ('{$row->title}'): account type '{$override->value}' contradicts Nature '{$row->nature}'.",
+                        $row->sheetRow, $row->code,
+                    );
+                }
             }
 
             if ($nature === 'p&l' && str_contains($class1, 'asset')) {

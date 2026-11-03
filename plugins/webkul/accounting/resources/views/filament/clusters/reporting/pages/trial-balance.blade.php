@@ -54,7 +54,7 @@
                             @forelse ($data['rows'] as $row)
                                 <tr @class(['bg-gray-50/40 dark:bg-white/5 font-semibold' => $row['is_group']])>
                                     <td class="px-3 py-1.5 whitespace-nowrap">{{ $row['code'] }}</td>
-                                    <td class="px-3 py-1.5 whitespace-nowrap">{{ $row['name'] }}</td>
+                                    <td class="px-3 py-1.5 whitespace-nowrap">{{ $row['name'] }}@if ($row['unclassified'] ?? false) <span class="text-warning-600 text-xs">(unclassified / not linked to this company)</span>@endif</td>
                                     <td class="px-3 py-1.5 whitespace-nowrap">{{ $row['currency'] ?? $data['company']?->currency?->code }}</td>
                                     @foreach ($cols as $c)
                                         <td class="px-3 py-1.5 text-right tabular-nums">{{ $fmt($row[$c]) }}</td>

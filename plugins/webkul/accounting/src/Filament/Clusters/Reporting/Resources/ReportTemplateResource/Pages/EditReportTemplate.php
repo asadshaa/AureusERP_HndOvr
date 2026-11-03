@@ -11,6 +11,7 @@ use Webkul\Accounting\Filament\Clusters\Reporting\Pages\FinancialReports;
 use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource;
 use Webkul\Accounting\Services\ReportTemplateValidator;
 use Webkul\Chatter\Filament\Actions\ChatterAction;
+use Webkul\Security\Services\CurrentCompany;
 
 class EditReportTemplate extends EditRecord
 {
@@ -40,7 +41,7 @@ class EditReportTemplate extends EditRecord
                 ->icon('heroicon-o-shield-check')
                 ->color('info')
                 ->action(function () {
-                    $issues = app(ReportTemplateValidator::class)->validate($this->getRecord());
+                    $issues = app(ReportTemplateValidator::class)->validate($this->getRecord(), CurrentCompany::id());
 
                     if ($issues->isEmpty()) {
                         Notification::make()

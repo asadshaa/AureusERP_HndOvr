@@ -57,6 +57,22 @@ final class CoaRow
         return $path;
     }
 
+    /**
+     * The code as compared for duplicates and re-import matching: trimmed,
+     * case-insensitive, and with a spreadsheet's numeric ".0" suffix dropped
+     * (A100 = a100, 1011 = 1011.0).
+     */
+    public static function normalizeCode(?string $code): string
+    {
+        $code = mb_strtoupper(trim((string) $code));
+
+        if (preg_match('/^(\d+)\.0+$/', $code, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return $code;
+    }
+
     public function classificationPathLabel(): string
     {
         return implode(' > ', [$this->nature, ...$this->classifications]);

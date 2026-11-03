@@ -293,7 +293,7 @@ class FinancialReports extends Page implements HasForms
         $columns = $service->columnsFor($template, $year, $context);
         $rows = $service->getReport($template, $year, $context);
 
-        $issues = app(ReportTemplateValidator::class)->validate($template);
+        $issues = app(ReportTemplateValidator::class)->validate($template, CurrentCompany::id());
 
         return [
             'template'    => $template,

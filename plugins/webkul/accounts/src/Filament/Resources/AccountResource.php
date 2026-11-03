@@ -2,6 +2,7 @@
 
 namespace Webkul\Account\Filament\Resources;
 
+use Closure;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -71,7 +72,14 @@ class AccountResource extends Resource
                             ->label(__('accounts::filament/resources/account.form.sections.fields.code'))
                             ->maxLength(255)
                             ->columnSpan(1)
-                            ->unique(ignoreRecord: true),
+                            // Unique per company (through the pivot), as the API and the
+                            // account services check: the same code may exist once in
+                            // each company's chart.
+                            ->rule(fn (?Model $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                                if (filled($value) && Account::codeExistsInCompanies((string) $value, self::formCompanyIds($record), $record?->getKey())) {
+                                    $fail('This code is already used in this company\'s chart of accounts.');
+                                }
+                            }),
                         TextInput::make('name')
                             ->required()
                             ->label(__('accounts::filament/resources/account.form.sections.fields.account-name'))
@@ -104,17 +112,31 @@ class AccountResource extends Resource
                                     ->relationship(
                                         name: 'parent',
                                         titleAttribute: 'name',
-                                        modifyQueryUsing: function (Builder $query, ?Account $record) {
-                                            if ($record) {
-                                                $excludedIds = [
-                                                    $record->id,
-                                                    ...$record->getDescendantIds(),
-                                                ];
-
-                                                $query->whereNotIn('id', $excludedIds);
-                                            }
-                                        },
+                                        modifyQueryUsing: fn (Builder $query, ?Account $record, Get $get): Builder => $query
+                                            ->eligibleParents(self::formCompanyIds($record), $get('account_type'), $record),
                                     )
+                                    // Server side too: only an eligible group of the same
+                                    // company and section, and never a loop in the hierarchy.
+                                    ->rule(fn (?Model $record, Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record, $get): void {
+                                        if (blank($value)) {
+                                            return;
+                                        }
+
+                                        if ($record instanceof Account && $record->parentWouldCreateCycle($value)) {
+                                            $fail('An account cannot be placed under itself or one of its sub-accounts.');
+
+                                            return;
+                                        }
+
+                                        // An unchanged parent (e.g. an older import's group) is kept as is.
+                                        if ($record instanceof Account && (int) $record->parent_id === (int) $value) {
+                                            return;
+                                        }
+
+                                        if (! Account::query()->eligibleParents(self::formCompanyIds($record), $get('account_type'), $record instanceof Account ? $record : null)->whereKey($value)->exists()) {
+                                            $fail('The parent must be a group account of this company in the same section (asset, liability, equity, income or expense).');
+                                        }
+                                    })
                                     ->getOptionLabelFromRecordUsing(function (Account $record) {
                                         if ($record->code) {
                                             return "{$record->code} - {$record->name}";
@@ -169,7 +191,13 @@ class AccountResource extends Resource
                                     // required-and-dehydrated value still submits correctly.
                                     ->default(fn () => array_filter([Auth::user()?->default_company_id]))
                                     ->disabled()
-                                    ->dehydrated(),
+                                    ->dehydrated()
+                                    // Filament skips saving a disabled field, which left accounts
+                                    // created here linked to no company. Save it, but treat the
+                                    // (client-side) state as untrusted: never add, and never
+                                    // detach, a company the user is not in.
+                                    ->saveRelationshipsWhenDisabled()
+                                    ->saveRelationshipsUsing(fn (Account $record, $state) => $record->syncCompaniesFor(Auth::user(), (array) $state)),
                                 Toggle::make('deprecated')
                                     ->inline(false)
                                     ->label(__('accounts::filament/resources/account.form.sections.fields.deprecated')),
@@ -253,7 +281,7 @@ class AccountResource extends Resource
                     ),
                 DeleteAction::make()
                     ->action(function (Account $record, DeleteAction $action) {
-                        if ($record->moveLines()->count() > 0) {
+                        if ($record->deletionBlockers() !== []) {
                             $action->failure();
 
                             return;
@@ -264,10 +292,10 @@ class AccountResource extends Resource
                         $action->success();
                     })
                     ->failureNotification(
-                        Notification::make()
+                        fn (Account $record): Notification => Notification::make()
                             ->danger()
                             ->title(__('accounts::filament/resources/account.table.actions.delete.notification.error.title'))
-                            ->body(__('accounts::filament/resources/account.table.actions.delete.notification.error.body'))
+                            ->body('The account could not be deleted because '.implode(', ', $record->deletionBlockers()).'.')
                     )
                     ->successNotification(
                         Notification::make()
@@ -280,11 +308,11 @@ class AccountResource extends Resource
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
                         ->action(function (Collection $records, DeleteBulkAction $action) {
-                            $hasMoveLines = $records->contains(function ($record) {
-                                return $record->moveLines()->exists();
+                            $isBlocked = $records->contains(function ($record) {
+                                return $record->deletionBlockers() !== [] || Auth::user()?->cannot('delete', $record);
                             });
 
-                            if ($hasMoveLines) {
+                            if ($isBlocked) {
                                 $action->failure();
 
                                 return;
@@ -393,6 +421,25 @@ class AccountResource extends Resource
         return [
             'index' => ManageAccounts::route('/'),
         ];
+    }
+
+    /**
+     * The companies the account in the form belongs to: its linked companies,
+     * or the user's active company for a new account.
+     *
+     * @return array<int, int>
+     */
+    protected static function formCompanyIds(?Model $record): array
+    {
+        if ($record instanceof Account && $record->exists) {
+            $companyIds = $record->companies()->pluck('companies.id')->map(fn ($id): int => (int) $id)->all();
+
+            if ($companyIds !== []) {
+                return $companyIds;
+            }
+        }
+
+        return array_filter([(int) Auth::user()?->default_company_id]);
     }
 
     protected static function suggestJournalIdsForAccountType(?string $accountType): array

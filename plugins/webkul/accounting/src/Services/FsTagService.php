@@ -46,6 +46,51 @@ final class FsTagService
         });
     }
 
+    /**
+     * Change an FS Tag with the same rules as create: a non-blank code that
+     * is unique in the company (case-insensitively), a name, and a mapped GL
+     * that is an active postable account of the company (or none).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function update(FsTag $tag, array $data): FsTag
+    {
+        $company = Company::query()->findOrFail($tag->company_id);
+
+        return Cache::lock("accounting-fs-tag-code:{$company->id}", 10)->block(5, function () use ($company, $tag, $data): FsTag {
+            return DB::transaction(function () use ($company, $tag, $data): FsTag {
+                $code = trim((string) ($data['code'] ?? $tag->code));
+                $name = trim((string) ($data['name'] ?? $tag->name));
+
+                if ($code === '') {
+                    throw new RuntimeException('The FS Tag code is required.');
+                }
+                if ($name === '') {
+                    throw new RuntimeException('The FS Tag name is required.');
+                }
+
+                if (FsTag::query()->where('company_id', $company->id)->whereKeyNot($tag->id)->whereRaw('UPPER(code) = ?', [mb_strtoupper($code)])->exists()) {
+                    throw new RuntimeException("An FS Tag with code '{$code}' already exists in this company.");
+                }
+
+                $account = array_key_exists('account_id', $data) || ($data['create_account'] ?? false)
+                    ? $this->resolveAccount($company, $data)
+                    : $tag->account;
+
+                $tag->update([
+                    'account_id'         => $account?->id,
+                    'code'               => $code,
+                    'name'               => $name,
+                    'cash_flow_category' => array_key_exists('cash_flow_category', $data) ? $data['cash_flow_category'] : $tag->cash_flow_category,
+                    'tax_treatment'      => array_key_exists('tax_treatment', $data) ? $data['tax_treatment'] : $tag->tax_treatment,
+                    'is_active'          => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $tag->is_active,
+                ]);
+
+                return $tag->refresh();
+            });
+        });
+    }
+
     /** @param array<string, mixed> $data */
     private function resolveAccount(Company $company, array $data): ?Account
     {
@@ -152,15 +197,14 @@ final class FsTagService
         return sprintf('FS-%06d', $next);
     }
 
+    /** The next free FSGL code, unique per company by the same rule as the account form and API (M1). */
     private function nextAccountCode(Company $company): string
     {
-        $next = Account::query()
-            ->whereHas('companies', fn ($query) => $query->where('companies.id', $company->id))
-            ->count() + 1;
+        $next = Account::query()->linkedToCompanies([$company->id])->count() + 1;
 
         do {
             $code = sprintf('FSGL-%06d', $next++);
-        } while (Account::query()->where('code', $code)->whereHas('companies', fn ($query) => $query->where('companies.id', $company->id))->exists());
+        } while (Account::codeExistsInCompanies($code, [$company->id]));
 
         return $code;
     }

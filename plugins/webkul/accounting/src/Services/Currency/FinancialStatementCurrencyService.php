@@ -172,6 +172,12 @@ class FinancialStatementCurrencyService
             }
         }
 
+        foreach (['assets', 'unclassified', 'liabilities_and_equity', 'difference'] as $field) {
+            if (isset($statement['balance_check'][$field])) {
+                $statement['balance_check'][$field] = $this->scale($statement['balance_check'][$field], $rate);
+            }
+        }
+
         return $statement;
     }
 

@@ -12,6 +12,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
@@ -237,8 +238,13 @@ class BalanceSheet extends Page implements HasForms
                 $currentYearStart->copy()->subDay()->toDateString(),
                 $journalIds,
             );
+            // Every P&L-type account carrying the company's lines counts in
+            // earnings (as calculateEarnings does), linked to the company or not.
             $profitLossAccountIds = Account::query()
-                ->whereHas('companies', fn ($query) => $query->where('companies.id', $companyId))
+                ->whereIn('id', collect([...array_values($currentEarningsBundles), ...array_values($previousEarningsBundles)])
+                    ->flatMap(fn ($bundle) => collect($bundle)->keys())
+                    ->unique()
+                    ->values())
                 ->whereIn('account_type', array_merge(array_keys(AccountType::income()), array_keys(AccountType::expenses())))
                 ->pluck('id');
             $currencyCodes = collect(array_keys($balanceBundles))
@@ -280,7 +286,7 @@ class BalanceSheet extends Page implements HasForms
                 'currency'          => count($reports) === 1 ? array_key_first($reports) : 'Multiple currencies',
                 'conversion_status' => 'complete',
                 'rate_basis'        => 'Stored original debit and credit amounts, grouped separately by currency.',
-                'warnings'          => [],
+                'warnings'          => collect($reports)->pluck('warnings')->flatten()->unique()->values()->all(),
             ]);
         }
 
@@ -311,7 +317,7 @@ class BalanceSheet extends Page implements HasForms
             'currency'          => $currencyCode,
             'conversion_status' => $conversionStatus,
             'rate_basis'        => $rateBasis,
-            'warnings'          => array_values(array_unique($warnings)),
+            'warnings'          => array_values(array_unique(array_merge($statement['warnings'], $warnings))),
         ]);
     }
 
@@ -335,6 +341,33 @@ class BalanceSheet extends Page implements HasForms
             $currentYearEarnings,
             $previousYearsEarnings,
         );
+
+        $unclassified = $this->unclassifiedBalances($accounts, $balances);
+        $unclassifiedTotal = (float) collect($unclassified)->sum('balance');
+        $liabilitiesAndEquity = $liabilities['total'] + $equity['total'];
+        $difference = round($assets['total'] + $unclassifiedTotal - $liabilitiesAndEquity, 2);
+        $warnings = [];
+
+        if ($unclassified !== []) {
+            $warnings[] = 'Unclassified: '.count($unclassified).' account(s) with posted lines for this company totalling '.number_format($unclassifiedTotal, 2)
+                .' (net debit) are not linked to this company or are not balance-sheet accounts. They are shown under "Unclassified / not linked to this company" so the statement reconciles to the ledger; link or reclassify them.';
+        }
+
+        if (abs($difference) >= 0.01) {
+            $warnings[] = 'Balance check failed: assets plus unclassified balances differ from liabilities plus equity by '.number_format($difference, 2).'.';
+        }
+
+        $unclassifiedSections = $unclassified === [] ? [] : [[
+            'title'       => 'Unclassified / not linked to this company',
+            'subsections' => [[
+                'title'       => 'Accounts with posted lines outside this company\'s balance-sheet chart (net debit)',
+                'accounts'    => $unclassified,
+                'total_label' => 'Total unclassified',
+                'total'       => $unclassifiedTotal,
+            ]],
+            'total_label' => 'Total UNCLASSIFIED (net debit)',
+            'total'       => $unclassifiedTotal,
+        ]];
 
         return [
             'sections' => [
@@ -413,11 +446,58 @@ class BalanceSheet extends Page implements HasForms
                     'total_label' => __('accounting::filament/clusters/reporting.pages.balance-sheet.content.sections.equity.total-label'),
                     'total'       => $equity['total'],
                 ],
+                ...$unclassifiedSections,
             ],
             'grand_total_label' => __('accounting::filament/clusters/reporting.pages.balance-sheet.content.grand-total-label'),
-            'grand_total'       => $liabilities['total'] + $equity['total'],
+            'grand_total'       => $liabilitiesAndEquity,
+            'balance_check'     => [
+                'assets'                 => $assets['total'],
+                'unclassified'           => $unclassifiedTotal,
+                'liabilities_and_equity' => $liabilitiesAndEquity,
+                'difference'             => $difference,
+                'balanced'               => abs($difference) < 0.01,
+            ],
+            'warnings'          => $warnings,
             'date'              => $date,
         ];
+    }
+
+    /**
+     * Posted balances the statement would otherwise drop: accounts that carry
+     * this company's lines but are not among its linked balance-sheet accounts,
+     * excluding P&L-type accounts (those flow into unallocated earnings), and
+     * lines without an account. Balances are net debit.
+     *
+     * @return array<int, array{id: int|null, code: string|null, name: string, balance: float}>
+     */
+    protected function unclassifiedBalances($accounts, $balances): array
+    {
+        $missing = collect($balances)->reject(fn ($row, $accountId) => $accounts->has($accountId));
+
+        if ($missing->isEmpty()) {
+            return [];
+        }
+
+        $profitLossTypes = array_merge(array_keys(AccountType::income()), array_keys(AccountType::expenses()));
+        $known = Account::query()->whereIn('id', $missing->keys()->filter())->get(['id', 'code', 'name', 'account_type'])->keyBy('id');
+
+        return $missing
+            ->map(function ($row, $accountId) use ($known): array {
+                $account = $known->get($accountId);
+
+                return [
+                    'id'      => $account?->id,
+                    'code'    => $account?->code,
+                    'name'    => $account?->name ?? 'Journal items without an account',
+                    'type'    => $account?->account_type instanceof AccountType ? $account->account_type->value : $account?->account_type,
+                    'balance' => (float) ($row->balance ?? 0),
+                ];
+            })
+            ->reject(fn (array $row): bool => in_array($row['type'], $profitLossTypes, true) || abs($row['balance']) < 0.005)
+            ->map(fn (array $row): array => Arr::except($row, 'type'))
+            ->sortBy('code')
+            ->values()
+            ->all();
     }
 
     #[Computed]

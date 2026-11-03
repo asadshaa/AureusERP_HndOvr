@@ -63,7 +63,7 @@ class ReportMappingReview extends Page
             ->orderBy('sort')
             ->get()
             ->map(function (ReportTemplate $template) use ($validator) {
-                $issues = $validator->validate($template);
+                $issues = $validator->validate($template, CurrentCompany::id());
 
                 return [
                     'template' => $template,
