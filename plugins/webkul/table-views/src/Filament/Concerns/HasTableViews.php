@@ -8,6 +8,7 @@ use Filament\Actions\ActionGroup;
 use Filament\Support\Concerns\EvaluatesClosures;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Url;
 use Webkul\TableViews\Filament\Actions\CreateViewAction;
@@ -34,9 +35,26 @@ trait HasTableViews
      */
     protected array $cachedFavoriteTableViews;
 
+    /**
+     * @var array<string | int, PresetView>
+     */
+    protected array $cachedPresetTableViews;
+
+    /**
+     * The page's base table query, built once per request. Filament asks the
+     * table for its query (to read the model) for every action of every row
+     * and clones it each time, so the base query itself never changes.
+     */
+    protected Builder|Relation|null $memoizedTableQuery = null;
+
     protected string|Closure|null $tableViewsFormMaxHeight = '500px';
 
     protected Width|string|Closure|null $tableViewsFormWidth = null;
+
+    protected function getTableQuery(): Builder|Relation|null
+    {
+        return $this->memoizedTableQuery ??= parent::getTableQuery();
+    }
 
     public function bootedInteractsWithTable(): void
     {
@@ -160,7 +178,7 @@ trait HasTableViews
      */
     public function getAllTableViews(): array
     {
-        return $this->getPresetTableViews() + $this->getCachedTableViews();
+        return ($this->cachedPresetTableViews ??= $this->getPresetTableViews()) + $this->getCachedTableViews();
     }
 
     /**

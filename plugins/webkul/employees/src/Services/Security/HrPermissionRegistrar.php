@@ -28,15 +28,6 @@ class HrPermissionRegistrar
                 'names'       => ['hr_administrator', 'hr administrator'],
                 'permissions' => HrPermissions::hrAdministrator(),
             ],
-            // Deliberately NOT named "hr_manager"/"hr manager" -- those
-            // names already match the pre-existing $hrRoles tier below
-            // and get the FULL HrPermissions::all() (admin-equivalent)
-            // bundle. "HR Operations Manager" is this work's genuinely
-            // new, correctly-scoped senior-but-not-admin role.
-            'hr_ops_manager' => [
-                'names'       => ['hr_ops_manager', 'hr ops manager', 'hr operations manager'],
-                'permissions' => HrPermissions::hrManager(),
-            ],
             'hr_officer' => [
                 'names'       => ['hr_officer', 'hr officer'],
                 'permissions' => HrPermissions::hrOfficer(),

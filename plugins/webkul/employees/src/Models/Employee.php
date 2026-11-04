@@ -38,6 +38,9 @@ class Employee extends Model
 
     protected $table = 'employees_employees';
 
+    /** @var array<string, array{0: string, 1: array<int, mixed>}> compiled missing-documents count subquery per connection */
+    private static array $missingRequiredDocumentsCountSql = [];
+
     protected $fillable = [
         'company_id',
         'user_id',
@@ -348,9 +351,17 @@ class Employee extends Model
             $query->select($query->qualifyColumn('*'));
         }
 
-        return $query->addSelect([
-            'missing_required_documents_count' => static::missingRequiredDocumentTypesSubquery()->selectRaw('count(*)'),
-        ]);
+        // Same SQL as addSelect([alias => subquery]), compiled once per
+        // connection: list tables apply this scope every time Filament asks
+        // the table for its query (several times per row).
+        $connection = $query->getConnection()->getName();
+        [$sql, $bindings] = self::$missingRequiredDocumentsCountSql[$connection] ??= (function (): array {
+            $subquery = static::missingRequiredDocumentTypesSubquery()->selectRaw('count(*)');
+
+            return [$subquery->toSql(), $subquery->getBindings()];
+        })();
+
+        return $query->selectRaw('('.$sql.') as '.$query->getQuery()->getGrammar()->wrap('missing_required_documents_count'), $bindings);
     }
 
     /** Employees missing at least one required document. */

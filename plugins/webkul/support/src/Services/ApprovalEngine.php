@@ -34,9 +34,6 @@ final class ApprovalEngine
         'hr',
         'hr_manager',
         'hr manager',
-        'hr_ops_manager',
-        'hr ops manager',
-        'hr operations manager',
         'hr_administrator',
         'hr administrator',
         'human resources',
@@ -93,6 +90,15 @@ final class ApprovalEngine
 
     /** @var WeakMap<User, array<int, bool>>|null */
     private static ?WeakMap $companyAccessMemo = null;
+
+    /**
+     * actionableRequestsFor() per HTTP request, actor and company: the home
+     * action center and the Approvals navigation badge ask the same question
+     * on one page. Dropped whenever an approval request is saved or deleted.
+     *
+     * @var WeakMap<object, array<string, Collection<int, ApprovalRequest>>>|null
+     */
+    private static ?WeakMap $actionableMemo = null;
 
     /** @param array<string, mixed> $context */
     public function matchingWorkflow(int $companyId, string $requestType, ?string $amount = null, array $context = []): ?ApprovalWorkflow
@@ -543,6 +549,23 @@ final class ApprovalEngine
             return collect();
         }
 
+        self::$actionableMemo ??= new WeakMap;
+        $httpRequest = app('request');
+        $key = $actor->getKey().':'.$companyId;
+        $memo = self::$actionableMemo[$httpRequest] ?? [];
+
+        if (! array_key_exists($key, $memo)) {
+            $memo[$key] = $this->resolveActionableRequests($actor, $companyId);
+            self::$actionableMemo[$httpRequest] = $memo;
+        }
+
+        return $memo[$key]->values();
+    }
+
+    /** @return Collection<int, ApprovalRequest> */
+    private function resolveActionableRequests(User $actor, int $companyId): Collection
+    {
+
         $actor->loadMissing('roles');
 
         $requests = ApprovalRequest::query()
@@ -686,9 +709,6 @@ final class ApprovalEngine
             'hr_manager',
             'Hr_manager',
             'hr manager',
-            'hr_ops_manager',
-            'hr ops manager',
-            'hr operations manager',
             'hr_administrator',
             'hr administrator',
             'human resources',
@@ -1003,6 +1023,13 @@ final class ApprovalEngine
         self::$canActMemo = null;
         self::$hrApproverMemo = null;
         self::$companyAccessMemo = null;
+        self::$actionableMemo = null;
+    }
+
+    /** Forgets the memoised actionable requests (an approval request changed). */
+    public static function flushActionableMemo(): void
+    {
+        self::$actionableMemo = null;
     }
 
     private function cleanText(?string $text): ?string

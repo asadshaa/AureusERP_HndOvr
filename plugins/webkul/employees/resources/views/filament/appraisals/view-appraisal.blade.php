@@ -6,7 +6,7 @@
     $editsManager = $this->editsManager();
     $num = fn ($value): string => $value === null ? '—' : number_format((float) $value, 2);
     $weight = fn ($value): string => rtrim(rtrim(number_format((float) $value, 2), '0'), '.');
-    $grid = 'display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));';
+    $grid = 'display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));';
     $label = 'font-size: .75rem; opacity: .7; margin-bottom: .15rem;';
     $big = 'font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums;';
     $table = 'width: 100%; border-collapse: collapse; font-size: .875rem;';
@@ -119,7 +119,8 @@
             @foreach ($sheet['sections'] as $section)
                 <x-filament::section :heading="$section['title']" :description="$section['description']">
                     <div style="overflow-x: auto;">
-                        <table style="{{ $table }}">
+                        {{-- min-width: on a phone the self / manager columns scroll inside the card instead of being squeezed. --}}
+                        <table style="{{ $table }} min-width: 32rem;">
                             <thead>
                                 <tr>
                                     <th style="{{ $th }}">Item</th>
@@ -182,6 +183,7 @@
 
             @if ($sheet['goals'] !== [])
                 <x-filament::section heading="Goals for the next period">
+                    <div style="overflow-x: auto;">
                     <table style="{{ $table }}">
                         <thead>
                             <tr>
@@ -205,6 +207,7 @@
                             @endforeach
                         </tbody>
                     </table>
+                    </div>
                 </x-filament::section>
             @endif
         @endif

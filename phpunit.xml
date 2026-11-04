@@ -50,6 +50,7 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <!-- Never use the local speed caches in tests: they are built from the dev database,
              whose installed plugins differ from the testing database. -->
+        <env name="APP_CONFIG_CACHE" value="bootstrap/cache/testing-config-none.php" force="true"/>
         <env name="APP_ROUTES_CACHE" value="bootstrap/cache/testing-routes-none.php" force="true"/>
         <env name="APP_EVENTS_CACHE" value="bootstrap/cache/testing-events-none.php" force="true"/>
         <env name="FILAMENT_CACHE_PATH" value="bootstrap/cache/filament-testing-none" force="true"/>

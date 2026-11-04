@@ -15,7 +15,7 @@ class StatsOverviewWidget extends BaseWidget
 {
     use HasWidgetShield, InteractsWithPageFilters;
 
-    protected ?string $pollingInterval = '15s';
+    protected ?string $pollingInterval = '60s';
 
     protected static function getPagePermission(): ?string
     {

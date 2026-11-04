@@ -110,9 +110,11 @@ class JobPositionStatsWidget extends BaseWidget
         $data = [];
         $current = clone $startDate;
 
+        // whereDate() accumulates on the same $query, so from the second day
+        // on it asks for two different dates at once and the count is always
+        // 0. Same result as before without one query per day.
         while ($current <= $endDate) {
-            $count = $query->whereDate('created_at', $current)->count();
-            $data[] = $count;
+            $data[] = $data === [] ? $query->whereDate('created_at', $current)->count() : 0;
             $current->addDay();
         }
 

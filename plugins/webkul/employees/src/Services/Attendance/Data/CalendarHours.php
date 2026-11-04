@@ -77,7 +77,7 @@ final readonly class CalendarHours
     {
         $day = Carbon::parse($date);
         $weekday = $day->dayOfWeekIso;
-        $slot = CalendarAttendance::getWeekType($day);
+        $slot = $this->twoWeeks ? CalendarAttendance::getWeekType($day) : null;
 
         $intervals = [];
         foreach ($this->rows as $row) {

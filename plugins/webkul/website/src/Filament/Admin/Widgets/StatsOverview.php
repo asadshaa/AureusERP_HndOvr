@@ -15,6 +15,9 @@ class StatsOverview extends BaseWidget
 
     protected static ?int $sort = 2;
 
+    /** Filament polls every 5 s by default; these figures change slowly. */
+    protected ?string $pollingInterval = '60s';
+
     protected int|string|array $columnSpan = 'full';
 
     public function getHeading(): ?string

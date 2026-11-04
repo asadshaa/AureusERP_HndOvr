@@ -590,7 +590,7 @@ class ChatterNotificationService
             return 'Line Manager';
         }
 
-        if ($causer->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_ops_manager', 'hr ops manager', 'hr_administrator', 'human resources', 'human resources manager'])
+        if ($causer->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_administrator', 'human resources', 'human resources manager'])
             || $causer->can('hr_approve_leave')
             || $causer->can('hr_manage_attendance')) {
             return 'HR';

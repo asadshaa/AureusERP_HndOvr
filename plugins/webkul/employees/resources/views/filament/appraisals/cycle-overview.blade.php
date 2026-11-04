@@ -3,7 +3,7 @@
     $statuses = \Webkul\Employee\Support\AppraisalKinds::statuses();
     $maxBand = max(1, collect($stats['bands'])->max('count'));
     $colors = ['success' => '22, 163, 74', 'info' => '59, 130, 246', 'primary' => '217, 119, 6', 'warning' => '245, 158, 11', 'danger' => '220, 38, 38', 'gray' => '107, 114, 128'];
-    $grid = 'display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));';
+    $grid = 'display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));';
     $muted = 'font-size: .8rem; opacity: .75;';
 @endphp
 

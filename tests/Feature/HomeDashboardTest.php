@@ -171,7 +171,7 @@ it('gives an employee their day, leave and pending actions only', function () {
         ->assertDontSee('My team today')
         ->assertDontSee('Best new applicants');
 
-    expect($queries)->toBeLessThanOrEqual(45);
+    expect($queries)->toBeLessThanOrEqual(40);
 });
 
 it('shows a line manager their team today with names and only their team', function () {
@@ -213,7 +213,7 @@ it('shows a line manager their team today with names and only their team', funct
         ->assertDontSee("Today's Roll Call", false)
         ->assertDontSee('Your companies');
 
-    expect($queries)->toBeLessThanOrEqual(65);
+    expect($queries)->toBeLessThanOrEqual(58);
 });
 
 it('gives HR the company roll call and hiring, scoped to the active company', function () {
@@ -257,7 +257,7 @@ it('gives HR the company roll call and hiring, scoped to the active company', fu
         ->assertDontSee('My team today')
         ->assertDontSee('Your companies');
 
-    expect($queries)->toBeLessThanOrEqual(80);
+    expect($queries)->toBeLessThanOrEqual(62);
 });
 
 it('gives a recruiter hiring cards without HR or employee widgets', function () {
@@ -282,7 +282,7 @@ it('gives a recruiter hiring cards without HR or employee widgets', function () 
         ->assertDontSee('My day')
         ->assertDontSee("Today's Roll Call", false);
 
-    expect($queries)->toBeLessThanOrEqual(30);
+    expect($queries)->toBeLessThanOrEqual(18);
 });
 
 it('shows the CEO a snapshot of their own companies only, each switching company', function () {
@@ -318,7 +318,7 @@ it('shows the CEO a snapshot of their own companies only, each switching company
         ->assertDontSee('Home Group Not Mine')
         ->assertSee(route('security.switch-company'), false);
 
-    expect($queries)->toBeLessThanOrEqual(55);
+    expect($queries)->toBeLessThanOrEqual(42);
 
     $this->post(route('security.switch-company'), ['company_id' => $ship->id])->assertRedirect();
     expect($user->fresh()->default_company_id)->toBe($ship->id);
@@ -375,7 +375,7 @@ it('shows announcements and birthdays of the week to an employee, within the emp
         ->assertSee('Bilal Birthday')
         ->assertDontSee('1991');
 
-    expect($queries)->toBeLessThanOrEqual(45);
+    expect($queries)->toBeLessThanOrEqual(40);
 
     // Nothing to read and nobody celebrating: neither card is shown.
     $colleague->update(['show_birthday' => false]);

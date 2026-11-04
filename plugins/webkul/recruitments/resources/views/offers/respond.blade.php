@@ -44,7 +44,7 @@
         .decline { background: #fff; color: #b91c1c; border: 1px solid #fca5a5; }
         a { color: #1d4ed8; }
         .errors { color: #b91c1c; font-size: 14px; }
-        @media (max-width: 520px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
+        @media (max-width: 520px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } main { margin: 16px auto; } .card { padding: 18px; } .actions button { flex: 1 1 100%; min-height: 48px; } }
     </style>
 </head>
 <body>

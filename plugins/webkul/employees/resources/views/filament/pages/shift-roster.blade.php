@@ -18,6 +18,12 @@
     <style>
         .roster-wrap { --roster-bg: #ffffff; }
         .dark .roster-wrap { --roster-bg: rgb(24 24 27); }
+        .roster-chip { min-height: 2rem; }
+        @media (max-width: 639px) {
+            /* Phones: keep the sticky name column narrow so the days stay visible, and make the day chips easy to tap. */
+            .roster-name { max-width: 7.5rem; white-space: normal !important; overflow-wrap: anywhere; }
+            .roster-chip { min-height: 2.5rem; min-width: 2.5rem !important; }
+        }
     </style>
 
     {{ $this->form }}
@@ -67,7 +73,7 @@
                         <tbody>
                             @foreach ($calendar['rows'] as $row)
                                 <tr wire:key="roster-{{ $row['employee_id'] }}">
-                                    <td style="{{ $name }}">
+                                    <td class="roster-name" style="{{ $name }}">
                                         <div style="font-weight: 600;">{{ $row['name'] }}</div>
                                         <div style="font-size: .7rem; opacity: .6;">{{ trim($row['code'].($row['department'] !== '' ? ' · '.$row['department'] : ''), ' ·') }}</div>
                                     </td>
@@ -82,7 +88,7 @@
                                         @endphp
                                         <td style="{{ $td }} {{ $date['today'] ? 'background: rgba(37,99,235,.06);' : '' }}">
                                             @if ($row['can_edit'])
-                                                <button type="button" style="{{ $style }}" title="{{ $cell['title'] }}"
+                                                <button type="button" class="roster-chip" style="{{ $style }}" title="{{ $cell['title'] }}"
                                                         wire:click="mountAction('editDay', @js(['employee' => $row['employee_id'], 'date' => $date['date']]))">
                                                     {{ $cell['code'] }}
                                                 </button>

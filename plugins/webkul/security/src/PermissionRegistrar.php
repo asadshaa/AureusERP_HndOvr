@@ -67,6 +67,16 @@ class PermissionRegistrar
     private ?SupportCollection $indexedPermissions = null;
 
     /**
+     * Hydrated permission models of indexed (name or id + guard) lookups, per
+     * permission class and lookup. A page checks the same few permissions
+     * hundreds of times (every row action); hydrating a model per check was
+     * the bulk of the cost. Dropped with the lookup index.
+     *
+     * @var array<string, array<int|string, Model>>
+     */
+    private array $hydratedLookups = [];
+
+    /**
      * PermissionRegistrar constructor.
      */
     public function __construct(CacheManager $cacheManager)
@@ -236,7 +246,11 @@ class PermissionRegistrar
         $indexedMatches = $this->findIndexedPermissions($params);
 
         if ($indexedMatches !== null) {
-            $permissions = new Collection($onlyOne ? array_slice(array_values($indexedMatches), 0, 1) : $indexedMatches);
+            $lookupKey = $this->permissionClass.'|'.($onlyOne ? '1' : '0').'|'.json_encode($params);
+
+            return new Collection($this->hydratedLookups[$lookupKey] ??= (new Collection($onlyOne ? array_slice(array_values($indexedMatches), 0, 1) : $indexedMatches))
+                ->map(fn ($permission) => $this->hydratePermission($permission))
+                ->all());
         } else {
             $method = $onlyOne ? 'first' : 'filter';
 
@@ -255,18 +269,22 @@ class PermissionRegistrar
             );
         }
 
-        $permissions = $permissions->map(function ($permission) {
-            $permissionInstance = (new ($this->getPermissionClass())())->newInstance([], true);
-            $permissionInstance->id = $permission['id'];
-            $permissionInstance->name = $permission['name'];
-            $permissionInstance->guard_name = $permission['guard_name'];
-            $permissionInstance->setRelation('roles', Collection::make($permission['roles']));
-            $permissionInstance->exists = true;
+        return $permissions->map(fn ($permission) => $this->hydratePermission($permission));
+    }
 
-            return $permissionInstance;
-        });
+    /**
+     * @param  array<string, mixed>  $permission
+     */
+    private function hydratePermission(array $permission): Model
+    {
+        $permissionInstance = (new ($this->getPermissionClass())())->newInstance([], true);
+        $permissionInstance->id = $permission['id'];
+        $permissionInstance->name = $permission['name'];
+        $permissionInstance->guard_name = $permission['guard_name'];
+        $permissionInstance->setRelation('roles', Collection::make($permission['roles']));
+        $permissionInstance->exists = true;
 
-        return $permissions;
+        return $permissionInstance;
     }
 
     /**
@@ -276,6 +294,7 @@ class PermissionRegistrar
     {
         $this->permissionLookupIndex = [];
         $this->indexedPermissions = null;
+        $this->hydratedLookups = [];
     }
 
     /**
@@ -332,6 +351,7 @@ class PermissionRegistrar
     {
         if ($this->indexedPermissions !== $this->permissions) {
             $this->permissionLookupIndex = [];
+            $this->hydratedLookups = [];
             $this->indexedPermissions = $this->permissions instanceof SupportCollection ? $this->permissions : null;
         }
 

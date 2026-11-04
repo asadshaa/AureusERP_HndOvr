@@ -17,6 +17,9 @@ class BlogStatusPieChart extends ChartWidget
 
     protected static ?int $sort = 4;
 
+    /** Filament polls every 5 s by default; these figures change slowly. */
+    protected ?string $pollingInterval = '60s';
+
     protected function getType(): string
     {
         return 'pie';

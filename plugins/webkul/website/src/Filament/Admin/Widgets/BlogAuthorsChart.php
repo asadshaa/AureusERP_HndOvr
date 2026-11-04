@@ -18,6 +18,9 @@ class BlogAuthorsChart extends ChartWidget
 
     protected static ?int $sort = 3;
 
+    /** Filament polls every 5 s by default; these figures change slowly. */
+    protected ?string $pollingInterval = '60s';
+
     protected ?string $maxHeight = '250px';
 
     protected function getData(): array

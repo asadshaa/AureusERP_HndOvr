@@ -75,6 +75,7 @@
             </x-filament::section>
 
             <x-filament::section heading="Departure reasons">
+                <div class="hr-report-scroll">
                 <table style="{{ $table }}">
                     <thead>
                         <tr>
@@ -97,6 +98,7 @@
                         @endforelse
                     </tbody>
                 </table>
+                </div>
             </x-filament::section>
         </div>
 

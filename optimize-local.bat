@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 echo [1/4] Optimizing Composer autoload files...
-call composer dump-autoload -o
+call composer dump-autoload --optimize --classmap-authoritative
 if errorlevel 1 goto :failed
 
 echo [2/4] Clearing stale Laravel caches...

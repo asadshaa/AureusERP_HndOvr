@@ -61,7 +61,7 @@ it('creates every genuinely-missing HR role exactly once', function (): void {
     seedHrRoles();
 
     $expectedNames = [
-        'hr_manager', 'hr_administrator', 'hr_ops_manager', 'hr_officer',
+        'hr_manager', 'hr_administrator', 'hr_officer',
         'sensitive_data_custodian', 'recruiter', 'hiring_manager', 'hr_auditor',
     ];
 
@@ -137,16 +137,33 @@ it('gives HR Administrator config-CRUD permissions but no approvals, ViewAllReco
         ->and($names)->not->toContain(HrPermissions::ManageSensitiveEmployeeData);
 });
 
-it('gives HR Operations Manager ViewAllRecords and approval authority but not sensitive-data access', function (): void {
+it('has a single HR manager role: hr:sync-permissions does not recreate hr_ops_manager, and hr_manager keeps every permission the old ops role had', function (): void {
     seedHrRoles();
-    $role = Role::query()->whereRaw('LOWER(name) = ?', ['hr_ops_manager'])->firstOrFail();
-    $names = $role->permissions()->pluck('name');
 
-    expect($names)->toContain(HrPermissions::ViewAllRecords)
-        ->and($names)->toContain(HrPermissions::ApproveLeave)
-        ->and($names)->toContain(HrPermissions::ApproveTimesheets)
-        ->and($names)->not->toContain(HrPermissions::ViewSensitiveEmployeeData)
-        ->and($names)->not->toContain(HrPermissions::ManageSensitiveEmployeeData);
+    test()->artisan('hr:sync-permissions')->assertSuccessful();
+
+    expect(Role::query()->whereIn(DB::raw('LOWER(name)'), ['hr_ops_manager', 'hr ops manager', 'hr operations manager'])->exists())->toBeFalse();
+
+    $formerOpsManagerPermissions = [
+        'hr_view_all_records', 'hr_manage_employee_documents', 'hr_manage_onboarding', 'hr_manage_announcements',
+        'hr_export_payroll', 'hr_view_reports', 'hr_approve_leave', 'hr_approve_timesheets', 'hr_manage_performance',
+        'hr_manage_attendance', 'hr_finalise_attendance', 'hr_manage_employee_requests', 'page_employees_hr_analytics',
+        'hr_manage_attendance_geofences', 'hr_view_attendance_location_evidence', 'hr_review_attendance_verifications',
+        'view_any_employee_employee', 'view_employee_employee', 'create_employee_employee', 'update_employee_employee',
+        'view_any_employee_department', 'view_employee_department', 'view_any_employee_job::position', 'view_employee_job::position',
+        'view_any_time_off_time::off', 'view_time_off_time::off', 'update_time_off_time::off',
+        'view_any_time_off_allocation', 'view_time_off_allocation', 'create_time_off_allocation', 'update_time_off_allocation',
+        'page_time_off_overview', 'widget_time_off_overview_calendar_widget', 'widget_time_off_leave_type_widget',
+        'widget_time_off_calendar_widget', 'widget_time_off_my_time_off_widget',
+        'view_any_employee_employee::request', 'view_employee_employee::request', 'page_employee_hr_analytics',
+        'view_any_support_approval::request', 'view_support_approval::request',
+        'view_any_support_calendar', 'view_support_calendar', 'create_support_calendar', 'update_support_calendar', 'delete_support_calendar',
+    ];
+
+    $hrManagerPermissions = Role::query()->whereRaw('LOWER(name) = ?', ['hr_manager'])->firstOrFail()->permissions()->pluck('name');
+
+    expect($formerOpsManagerPermissions)->toHaveCount(46)
+        ->and(array_values(array_diff($formerOpsManagerPermissions, $hrManagerPermissions->all())))->toBe([]);
 });
 
 it('gives HR Officer basic employee record access but no approvals, no ViewAllRecords, no sensitive data', function (): void {
@@ -235,7 +252,7 @@ it('closes the AttendanceRecordResource/PerformanceCycleResource/PerformanceRevi
         ->and(EmployeeRequestTypeResource::canViewAny())->toBeFalse();
 });
 
-it('enforces the ViewAllRecords hierarchy boundary: HR Officer sees only their own reporting tree, HR Ops Manager sees everyone', function (): void {
+it('enforces the ViewAllRecords hierarchy boundary: HR Officer sees only their own reporting tree, HR Manager sees everyone', function (): void {
     // HrHierarchyService::visibleEmployeeIds() is the real access-control
     // mechanism for most HR screens -- ViewAllRecords is the bypass.
     // Without it, a role is scoped to "me + my descendants + teams/
@@ -249,9 +266,9 @@ it('enforces the ViewAllRecords hierarchy boundary: HR Officer sees only their o
     $officerUser->assignRole(Role::query()->whereRaw('LOWER(name) = ?', ['hr_officer'])->firstOrFail());
     $officerEmployee = hrRoleTestEmployee($company, $officerUser, 'HR Officer Employee');
 
-    $opsManagerUser = hrRoleTestUser($company);
-    $opsManagerUser->assignRole(Role::query()->whereRaw('LOWER(name) = ?', ['hr_ops_manager'])->firstOrFail());
-    hrRoleTestEmployee($company, $opsManagerUser, 'HR Ops Manager Employee');
+    $hrManagerUser = hrRoleTestUser($company);
+    $hrManagerUser->assignRole(Role::query()->whereRaw('LOWER(name) = ?', ['hr_manager'])->firstOrFail());
+    hrRoleTestEmployee($company, $hrManagerUser, 'HR Manager Employee');
 
     $unrelatedUser = hrRoleTestUser($company);
     $unrelatedEmployee = hrRoleTestEmployee($company, $unrelatedUser, 'Unrelated Employee');
@@ -262,9 +279,9 @@ it('enforces the ViewAllRecords hierarchy boundary: HR Officer sees only their o
     expect($hierarchy->visibleEmployeeIds($officerUser, $company->id))->toContain($officerEmployee->id)
         ->and($hierarchy->visibleEmployeeIds($officerUser, $company->id))->not->toContain($unrelatedEmployee->id);
 
-    // HR Ops Manager (has ViewAllRecords): sees everyone in the company.
-    expect($hierarchy->visibleEmployeeIds($opsManagerUser, $company->id))->toContain($unrelatedEmployee->id)
-        ->and($hierarchy->visibleEmployeeIds($opsManagerUser, $company->id))->toContain($officerEmployee->id);
+    // HR Manager (has ViewAllRecords): sees everyone in the company.
+    expect($hierarchy->visibleEmployeeIds($hrManagerUser, $company->id))->toContain($unrelatedEmployee->id)
+        ->and($hierarchy->visibleEmployeeIds($hrManagerUser, $company->id))->toContain($officerEmployee->id);
 });
 
 it('redirects to the Employees list after creating an employee, not a view page the creator may not be able to see', function (): void {

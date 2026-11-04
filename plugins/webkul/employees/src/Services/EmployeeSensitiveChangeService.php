@@ -98,7 +98,6 @@ class EmployeeSensitiveChangeService
                 ->filter(fn (User $u): bool => (
                     $u->hasRole([
                         'hr', 'Hr', 'hr_manager', 'Hr_manager', 'hr manager',
-                        'hr_ops_manager', 'hr ops manager', 'hr operations manager',
                         'hr_administrator', 'hr administrator', 'human resources', 'human resources manager',
                         'sensitive_data_custodian', 'Sensitive_data_custodian',
                     ])

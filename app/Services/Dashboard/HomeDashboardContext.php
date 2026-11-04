@@ -4,6 +4,7 @@ namespace App\Services\Dashboard;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 use Throwable;
 use Webkul\Employee\Filament\Pages\AttendanceReport;
@@ -12,6 +13,7 @@ use Webkul\Employee\Filament\Pages\TodayAttendance as TodayAttendancePage;
 use Webkul\Employee\Filament\Resources\EmployeeRequestResource;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
 use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Support\HrPermissions;
@@ -48,9 +50,6 @@ class HomeDashboardContext
         'hr',
         'hr_manager',
         'hr manager',
-        'hr_ops_manager',
-        'hr ops manager',
-        'hr operations manager',
         'hr_administrator',
         'hr administrator',
         'Hr_manager',
@@ -61,6 +60,12 @@ class HomeDashboardContext
 
     /** @var array<string, array<string, mixed>> */
     private array $resolved = [];
+
+    /** @var array<string, ?string> page / resource URLs the user may open, per class, route and parameters */
+    private array $urls = [];
+
+    /** @var array<int, array<string, mixed>|null> GeofencedAttendanceService::todayState() per user id */
+    private array $todayStates = [];
 
     public function __construct(
         protected HrHierarchyService $hierarchy,
@@ -128,6 +133,25 @@ class HomeDashboardContext
     public function flush(): void
     {
         $this->resolved = [];
+        $this->urls = [];
+        $this->todayStates = [];
+    }
+
+    /**
+     * The user's check-in state today, worked out once per request: the
+     * action center and My day both show it.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function todayState(User $user): ?array
+    {
+        $key = (int) $user->getKey();
+
+        if (! array_key_exists($key, $this->todayStates)) {
+            $this->todayStates[$key] = app(GeofencedAttendanceService::class)->todayState($user);
+        }
+
+        return $this->todayStates[$key];
     }
 
     /** @return array<int, string> e.g. ['HR Manager', 'Recruiter'] */
@@ -239,22 +263,34 @@ class HomeDashboardContext
     /** @param  class-string  $page */
     public function pageUrl(string $page, array $parameters = []): ?string
     {
+        $key = Auth::id().'|'.$page.'|'.serialize($parameters);
+
+        if (array_key_exists($key, $this->urls)) {
+            return $this->urls[$key];
+        }
+
         try {
-            return $page::canAccess() ? $page::getUrl($parameters) : null;
+            return $this->urls[$key] = $page::canAccess() ? $page::getUrl($parameters) : null;
         } catch (Throwable) {
-            return null;
+            return $this->urls[$key] = null;
         }
     }
 
     /** @param  class-string  $resource */
     public function resourceUrl(string $resource, string $name = 'index', array $parameters = []): ?string
     {
+        $key = Auth::id().'|'.$resource.'|'.$name.'|'.serialize($parameters);
+
+        if (array_key_exists($key, $this->urls)) {
+            return $this->urls[$key];
+        }
+
         try {
             $allowed = $name === 'create' ? $resource::canCreate() : $resource::canViewAny();
 
-            return $allowed ? $resource::getUrl($name, $parameters) : null;
+            return $this->urls[$key] = $allowed ? $resource::getUrl($name, $parameters) : null;
         } catch (Throwable) {
-            return null;
+            return $this->urls[$key] = null;
         }
     }
 

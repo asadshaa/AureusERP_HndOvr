@@ -24,8 +24,9 @@ use Webkul\Security\Models\Role;
  * manager") -- that tier already grants the complete HrPermissions::
  * all() bundle (152 permissions spanning every HR plugin), so no new
  * bundle or registrar logic was needed, only creating the role row
- * itself. "hr_ops_manager" remains the separate, narrower senior-but-
- * not-full-access role from the earlier HR-roles work. Idempotent
+ * itself. HR is a single role: the former "hr_ops_manager" role was
+ * merged into "hr_manager" (see the employees migration
+ * 2026_11_04_100001_merge_hr_ops_manager_into_hr_manager). Idempotent
  * (firstOrCreate) and safe to re-run.
  */
 class HrRoleSeeder extends Seeder
@@ -36,7 +37,6 @@ class HrRoleSeeder extends Seeder
     private const ROLE_NAMES = [
         'hr_manager',
         'hr_administrator',
-        'hr_ops_manager',
         'hr_officer',
         'sensitive_data_custodian',
         'recruiter',

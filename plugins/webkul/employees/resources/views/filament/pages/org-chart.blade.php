@@ -13,12 +13,12 @@
     <style>
         .hr-oc-toolbar { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: flex-end; }
         .hr-oc-field { display: flex; flex-direction: column; gap: .25rem; font-size: .8125rem; font-weight: 500; }
-        .hr-oc-search { min-width: 16rem; }
+        .hr-oc-search { min-width: min(16rem, 100%); }
         .hr-oc-hits { font-size: .8125rem; opacity: .75; align-self: center; }
         .hr-oc-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
         .hr-oc-summary { margin-top: .75rem; font-size: .8125rem; opacity: .75; }
-        .hr-oc-tree { display: flex; flex-direction: column; gap: .375rem; }
-        .hr-oc-row { position: relative; display: flex; align-items: center; gap: .625rem; padding: .5rem .75rem; border: 1px solid rgba(127, 127, 127, .22); border-radius: .625rem; background: rgba(127, 127, 127, .04); max-width: 46rem; }
+        .hr-oc-tree { display: flex; flex-direction: column; gap: .375rem; overflow-x: auto; padding-bottom: .25rem; }
+        .hr-oc-row { position: relative; display: flex; align-items: center; gap: .625rem; padding: .5rem .75rem; border: 1px solid rgba(127, 127, 127, .22); border-radius: .625rem; background: rgba(127, 127, 127, .04); max-width: 46rem; margin-left: calc(var(--oc-depth, 0) * 2.25rem); }
         .hr-oc-child::before { content: ''; position: absolute; left: -1.1rem; top: 50%; width: 1.1rem; border-top: 1px solid rgba(127, 127, 127, .35); }
         .hr-oc-child::after { content: ''; position: absolute; left: -1.1rem; top: -.45rem; height: calc(50% + .45rem); border-left: 1px solid rgba(127, 127, 127, .35); }
         .hr-oc-self { border-color: var(--primary-500); }
@@ -40,6 +40,16 @@
         .hr-oc-manager { font-size: .75rem; opacity: .7; }
         .hr-oc-count { flex: none; font-size: .75rem; opacity: .7; white-space: nowrap; }
         .hr-oc-empty { padding: 1rem 0; opacity: .7; }
+        @media (max-width: 639px) {
+            /* Phones: shallower indent per level, bigger expand buttons, full-width search. */
+            .hr-oc-field, .hr-oc-search { width: 100%; }
+            .hr-oc-buttons { margin-left: 0; }
+            .hr-oc-row { margin-left: calc(var(--oc-depth, 0) * 1rem); padding: .5rem; gap: .5rem; min-width: 15rem; }
+            .hr-oc-child::before { left: -.75rem; width: .75rem; }
+            .hr-oc-child::after { left: -.75rem; }
+            .hr-oc-toggle, .hr-oc-spacer { width: 2.25rem; height: 2.25rem; }
+            .hr-oc-avatar { width: 2rem; height: 2rem; }
+        }
         @media print {
             .fi-topbar, .fi-sidebar, .fi-header-actions, .hr-oc-toolbar, .hr-oc-toggle, .hr-oc-spacer { display: none !important; }
             .hr-oc-row { break-inside: avoid; background: none; max-width: none; }
@@ -274,7 +284,7 @@
                             role="treeitem"
                             :id="'hr-oc-' + row.id"
                             :aria-expanded="row.kids ? (open[row.id] ? 'true' : 'false') : null"
-                            :style="'margin-left: ' + (row.depth * 2.25) + 'rem'"
+                            :style="'--oc-depth: ' + row.depth"
                             :class="{ 'hr-oc-child': row.depth > 0, 'hr-oc-hit': hitSet[row.id], 'hr-oc-current': hits[current] === row.id, 'hr-oc-self': row.n.self }"
                         >
                             <template x-if="row.kids">

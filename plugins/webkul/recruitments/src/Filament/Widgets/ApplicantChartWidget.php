@@ -41,7 +41,6 @@ class ApplicantChartWidget extends ChartWidget
             'hiring_manager',
             'hr_administrator',
             'hr_manager',
-            'hr_ops_manager',
         ])
         || (int) $user->id === 1
         || $user->can('view_any_recruitment_applicant');

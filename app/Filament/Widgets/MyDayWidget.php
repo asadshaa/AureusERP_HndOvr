@@ -74,7 +74,7 @@ class MyDayWidget extends Widget
     /** @return array{state: string, label: string, detail: string, tone: string, button: string}|null */
     protected function attendance(User $user): ?array
     {
-        $state = app(GeofencedAttendanceService::class)->todayState($user);
+        $state = app(HomeDashboardContext::class)->todayState($user);
 
         if ($state === null) {
             return null;

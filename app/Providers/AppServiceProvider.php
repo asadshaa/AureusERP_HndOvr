@@ -2,9 +2,13 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\StartSession;
 use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
+use Illuminate\Session\Middleware\StartSession as BaseStartSession;
+use Illuminate\Session\SessionManager;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -28,6 +32,13 @@ class AppServiceProvider extends ServiceProvider
 
         // The home dashboard's widgets share one role / company resolution per request.
         $this->app->scoped(HomeDashboardContext::class);
+
+        // Every route that starts a session (web group, both Filament panels) gets the
+        // variant that never lets a stale guest response overwrite a newer session cookie.
+        $this->app->singleton(BaseStartSession::class, fn ($app): StartSession => new StartSession(
+            $app->make(SessionManager::class),
+            fn (): CacheFactory => $app->make(CacheFactory::class),
+        ));
 
         $this->registerNativeMobileComponents();
     }

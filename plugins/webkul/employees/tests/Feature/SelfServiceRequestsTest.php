@@ -215,7 +215,7 @@ it('keeps read-only HR auditors out of the HR approver set and keeps Admin and t
     $viewOnly->givePermissionTo(Permission::query()->firstOrCreate(['name' => 'hr_view_all_records', 'guard_name' => 'web']));
 
     $admin = selfServiceUser($f['company'], 'Admin');
-    $opsManager = selfServiceUser($f['company'], 'hr_ops_manager');
+    $secondHrManager = selfServiceUser($f['company'], 'hr_manager');
     $hrAdministrator = selfServiceUser($f['company'], 'hr_administrator');
 
     DB::flushQueryLog();
@@ -227,7 +227,7 @@ it('keeps read-only HR auditors out of the HR approver set and keeps Admin and t
     expect($queries)->toBe(1)
         ->and($auditor->can('hr_view_all_records'))->toBeTrue()
         ->and($auditingManager->can('hr_view_all_records') && $auditingManager->can('hr_approve_leave'))->toBeTrue()
-        ->and($ids)->toContain($f['hrUser']->id, $admin->id, $opsManager->id, $hrAdministrator->id)
+        ->and($ids)->toContain($f['hrUser']->id, $admin->id, $secondHrManager->id, $hrAdministrator->id)
         ->and($ids)->not->toContain($auditor->id, $auditingManager->id, $viewOnly->id)
         ->and($engine->isCompanyHrApprover($auditor, $companyId))->toBeFalse()
         ->and($engine->isCompanyHrApprover($viewOnly, $companyId))->toBeFalse()

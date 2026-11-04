@@ -108,6 +108,17 @@
             transform: translateY(-1px);
             box-shadow: 0 6px 18px rgba(16, 185, 129, 0.45);
         }
+
+        /* Phones: a larger check-in button and tap targets, and a compact 7-day calendar. */
+        .att-punch-btn, .att-checkout-btn, .att-complete-btn { min-height: 3rem; }
+        .att-nav-btn { min-width: 2.25rem; min-height: 2.25rem; display: inline-flex; align-items: center; justify-content: center; }
+        @media (max-width: 639px) {
+            .att-punch-btn, .att-checkout-btn, .att-complete-btn { min-height: 3.5rem; font-size: 1rem; }
+            .att-nav-btn { min-width: 2.75rem; min-height: 2.75rem; }
+            .att-cal-grid { gap: .2rem !important; }
+            .att-day-cell, .att-day-cell-empty { min-height: 2.75rem !important; padding: .25rem !important; }
+            .att-day-label { display: none !important; }
+        }
     </style>
 
     <div
@@ -386,7 +397,7 @@
                                     <button
                                         type="button"
                                         wire:click="previousMonth"
-                                        class="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/10 dark:text-gray-400 dark:hover:text-white transition cursor-pointer"
+                                        class="att-nav-btn rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/10 dark:text-gray-400 dark:hover:text-white transition cursor-pointer"
                                         title="Previous Month"
                                     >
                                         <x-filament::icon icon="heroicon-m-chevron-left" class="h-4 w-4" />
@@ -395,7 +406,7 @@
                                     <button
                                         type="button"
                                         wire:click="currentMonth"
-                                        class="rounded-lg px-2.5 py-1 text-xs font-semibold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-950/30 transition cursor-pointer"
+                                        class="att-nav-btn rounded-lg px-2.5 py-1 text-xs font-semibold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-950/30 transition cursor-pointer"
                                     >
                                         Current Month
                                     </button>
@@ -403,7 +414,7 @@
                                     <button
                                         type="button"
                                         wire:click="nextMonth"
-                                        class="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/10 dark:text-gray-400 dark:hover:text-white transition cursor-pointer"
+                                        class="att-nav-btn rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/10 dark:text-gray-400 dark:hover:text-white transition cursor-pointer"
                                         title="Next Month"
                                     >
                                         <x-filament::icon icon="heroicon-m-chevron-right" class="h-4 w-4" />
@@ -413,7 +424,7 @@
                         </x-slot>
 
                         {{-- 7-Column Weekday Headers --}}
-                        <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.375rem;" class="text-center text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 pb-1 border-b border-gray-100 dark:border-white/10">
+                        <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.375rem;" class="att-cal-grid text-center text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 pb-1 border-b border-gray-100 dark:border-white/10">
                             <div>Mon</div>
                             <div>Tue</div>
                             <div>Wed</div>
@@ -424,10 +435,10 @@
                         </div>
 
                         {{-- 7-Column Calendar Days Grid (Full standard sizing) --}}
-                        <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.375rem;">
+                        <div class="att-cal-grid" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.375rem;">
                             @foreach ($calendar['days'] as $cell)
                                 @if ($cell['type'] === 'empty')
-                                    <div class="min-h-[4.25rem] rounded-xl border border-dashed border-gray-200/40 dark:border-white/5 opacity-30"></div>
+                                    <div class="att-day-cell-empty min-h-[4.25rem] rounded-xl border border-dashed border-gray-200/40 dark:border-white/5 opacity-30"></div>
                                 @else
                                     <div class="att-day-cell min-h-[4.25rem] p-1.5 flex flex-col justify-between
                                         {{ $cell['isToday'] ? 'att-day-today' : '' }}
@@ -460,7 +471,7 @@
 
                                         {{-- Bottom label/badge --}}
                                         @if (! empty($cell['label']))
-                                            <div class="text-[10px] font-medium leading-tight truncate px-1.5 py-0.5 rounded text-center
+                                            <div class="att-day-label text-[10px] font-medium leading-tight truncate px-1.5 py-0.5 rounded text-center
                                                 {{ $cell['status'] === 'present' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : '' }}
                                                 {{ $cell['status'] === 'late' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : '' }}
                                                 {{ $cell['status'] === 'leave' ? 'bg-purple-500/10 text-purple-700 dark:text-purple-300' : '' }}
@@ -473,7 +484,7 @@
                                                 {{ $cell['label'] }}
                                             </div>
                                         @elseif ($cell['isWeekend'])
-                                            <div class="text-[10px] text-gray-400 dark:text-gray-500 text-center">
+                                            <div class="att-day-label text-[10px] text-gray-400 dark:text-gray-500 text-center">
                                                 Off
                                             </div>
                                         @endif

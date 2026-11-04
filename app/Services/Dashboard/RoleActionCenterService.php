@@ -11,7 +11,6 @@ use Webkul\Accounting\Models\BankTransactionMapping;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
-use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\Checklists\EmployeeChecklistService;
 use Webkul\Employee\Services\PerformanceService;
 use Webkul\Employee\Support\HrPermissions;
@@ -270,7 +269,7 @@ class RoleActionCenterService
         // =========================================================================
         if ($employee) {
             // Check if employee hasn't checked in yet today or is active on shift
-            $todayState = app(GeofencedAttendanceService::class)->todayState($user);
+            $todayState = app(HomeDashboardContext::class)->todayState($user);
             if (($todayState['state'] ?? 'none') === 'not_checked_in' && ($todayState['mode'] ?? 'none') !== 'none') {
                 $items[] = [
                     'id'           => 'emp_missing_checkin',

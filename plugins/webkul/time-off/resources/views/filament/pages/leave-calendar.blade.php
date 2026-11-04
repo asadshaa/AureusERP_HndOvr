@@ -7,13 +7,23 @@
 @endphp
 
 <x-filament-panels::page>
+    <style>
+        .lc-control { min-height: 2.5rem; color: inherit; }
+        .lc-chip { max-width: 100%; overflow-wrap: anywhere; }
+        @media (max-width: 639px) {
+            /* Phones: a narrower day column and full-width filters. */
+            .lc-row { grid-template-columns: 5.5rem minmax(0, 1fr) !important; gap: .5rem !important; }
+            .lc-control { flex: 1 1 100%; width: 100%; }
+        }
+    </style>
+
     <x-filament::section>
         <div style="display: flex; flex-wrap: wrap; gap: .75rem; align-items: center;">
             <x-filament::button color="gray" size="sm" icon="heroicon-o-chevron-left" wire:click="previousMonth">Previous</x-filament::button>
-            <input type="month" wire:model.live="month" style="{{ $control }}" aria-label="Month">
+            <input type="month" wire:model.live="month" class="lc-control" style="{{ $control }}" aria-label="Month">
             <x-filament::button color="gray" size="sm" icon-position="after" icon="heroicon-o-chevron-right" wire:click="nextMonth">Next</x-filament::button>
 
-            <select wire:model.live="departmentId" style="{{ $control }}" aria-label="Department">
+            <select wire:model.live="departmentId" class="lc-control" style="{{ $control }}" aria-label="Department">
                 <option value="">All departments</option>
                 @foreach ($departments as $id => $name)
                     <option value="{{ $id }}">{{ $name }}</option>
@@ -33,7 +43,7 @@
     >
         <div>
             @foreach ($calendar['days'] as $day)
-                <div style="{{ $row }} {{ $day['weekend'] ? 'opacity: .55;' : '' }}">
+                <div class="lc-row" style="{{ $row }} {{ $day['weekend'] ? 'opacity: .55;' : '' }}">
                     <div style="font-weight: 600; font-size: .875rem; font-variant-numeric: tabular-nums;">
                         {{ $day['label'] }}
                         @if ($day['weekend'])
@@ -43,6 +53,7 @@
                     <div>
                         @forelse ($day['entries'] as $entry)
                             <span
+                                class="lc-chip"
                                 style="{{ $chip }} {{ $entry['approved'] ? 'background: rgba(37,99,235,.12);' : 'border: 1px dashed rgba(217,119,6,.8);' }}"
                                 title="{{ $entry['state'] }}"
                             >

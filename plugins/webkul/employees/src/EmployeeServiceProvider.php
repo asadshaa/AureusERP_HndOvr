@@ -109,6 +109,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_10_31_500004_create_employees_shift_overrides_table',
                 '2026_10_31_500005_add_break_minutes_to_employees_work_schedules_table',
                 '2026_11_02_300001_backfill_attendance_overtime_hours_from_approved_overtime',
+                '2026_11_04_100001_merge_hr_ops_manager_into_hr_manager',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')

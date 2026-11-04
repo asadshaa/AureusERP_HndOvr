@@ -446,7 +446,7 @@ class LeaveApprovalService
             $isLineManager = $leave->employee && $actorEmployee && (int) $leave->employee->parent_id === (int) $actorEmployee->id;
             if ($isLineManager) {
                 $approverRole = 'Line Manager';
-            } elseif ($actor && ($actor->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_ops_manager', 'hr ops manager', 'hr_administrator', 'human resources', 'human resources manager']) || $actor->can('hr_approve_leave') || $actor->can('hr_manage_attendance'))) {
+            } elseif ($actor && ($actor->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_administrator', 'human resources', 'human resources manager']) || $actor->can('hr_approve_leave') || $actor->can('hr_manage_attendance'))) {
                 $approverRole = 'HR';
             } else {
                 $approverRole = 'Line Manager';

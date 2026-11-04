@@ -64,7 +64,8 @@ class CalendarAttendance extends Model implements Sortable
      */
     public static function getWeekType(\DateTime|Carbon $date): int
     {
-        return Carbon::instance($date)->isoWeek() % 2 === 0 ? 0 : 1;
+        // format('W') is the ISO-8601 week number, the same as Carbon's isoWeek() without its locale machinery.
+        return (int) $date->format('W') % 2 === 0 ? 0 : 1;
     }
 
     /**

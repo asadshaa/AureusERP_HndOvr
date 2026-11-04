@@ -1,5 +1,5 @@
 @php
-    $grid = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem;';
+    $grid = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: .75rem;';
     $card = 'border: 1px solid rgba(127,127,127,.2); border-radius: .75rem; padding: .875rem 1rem;';
     $label = 'font-size: .75rem; font-weight: 600; opacity: .75;';
     $value = 'font-size: 1.5rem; font-weight: 700; margin-top: .25rem; font-variant-numeric: tabular-nums;';

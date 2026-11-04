@@ -21,6 +21,9 @@ class BlogChart extends ChartWidget
 
     protected static ?int $sort = 1;
 
+    /** Filament polls every 5 s by default; these figures change slowly. */
+    protected ?string $pollingInterval = '60s';
+
     protected function getData(): array
     {
         $filters = $this->filters;

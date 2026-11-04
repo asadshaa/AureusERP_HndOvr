@@ -21,6 +21,9 @@ class TaskByStateChart extends ChartWidget
 
     protected static ?int $sort = 1;
 
+    /** Filament polls every 5 s by default; these figures change slowly. */
+    protected ?string $pollingInterval = '60s';
+
     protected static function getPagePermission(): ?string
     {
         return 'widget_project_task_by_state_chart';

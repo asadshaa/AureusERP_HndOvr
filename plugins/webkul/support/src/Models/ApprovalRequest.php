@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Collection;
 use Webkul\Security\Models\User;
+use Webkul\Support\Services\ApprovalEngine;
 
 class ApprovalRequest extends Model
 {
@@ -30,6 +31,12 @@ class ApprovalRequest extends Model
         'current_step_started_at',
         'completed_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::saved(fn () => ApprovalEngine::flushActionableMemo());
+        static::deleted(fn () => ApprovalEngine::flushActionableMemo());
+    }
 
     protected function casts(): array
     {

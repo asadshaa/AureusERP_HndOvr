@@ -41,8 +41,9 @@
         .ci-note { font-size: .75rem; opacity: .6; max-width: 24rem; line-height: 1.35; }
         .ci-install { width: 100%; max-width: 26rem; display: flex; align-items: center; gap: .75rem; text-align: left; border: 1px dashed rgba(127,127,127,.4); border-radius: .875rem; padding: .7rem .9rem; font-size: .82rem; }
         .ci-install button { font: inherit; cursor: pointer; }
-        .ci-install-go { border: 0; border-radius: .6rem; padding: .45rem .8rem; color: #fff; background: var(--primary-600, #2563eb); font-weight: 600; white-space: nowrap; }
-        .ci-install-x { border: 0; background: transparent; opacity: .6; padding: .25rem; }
+        .ci-install-go { border: 0; border-radius: .6rem; padding: .45rem .8rem; min-height: 2.75rem; color: #fff; background: var(--primary-600, #2563eb); font-weight: 600; white-space: nowrap; }
+        .ci-install-x { border: 0; background: transparent; opacity: .6; padding: .25rem; min-width: 2.75rem; min-height: 2.75rem; }
+        @media (max-width: 380px) { .ci-stats { grid-template-columns: 1fr; } .ci-install { flex-wrap: wrap; } }
         [x-cloak] { display: none !important; }
     </style>
 

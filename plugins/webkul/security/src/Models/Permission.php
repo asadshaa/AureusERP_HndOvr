@@ -13,8 +13,13 @@ class Permission extends BasePermission
      */
     protected static function getPermissions(array $params = [], bool $onlyOne = false): Collection
     {
-        return app(PermissionRegistrar::class)
-            ->setPermissionClass(static::class)
-            ->getPermissions($params, $onlyOne);
+        $registrar = app(PermissionRegistrar::class);
+
+        // Re-binding the class on every permission check (config write + container bind) is costly; do it only when it changes.
+        if ($registrar->getPermissionClass() !== static::class) {
+            $registrar->setPermissionClass(static::class);
+        }
+
+        return $registrar->getPermissions($params, $onlyOne);
     }
 }

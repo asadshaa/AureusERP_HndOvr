@@ -1,6 +1,6 @@
 @php
     $batch = $this->previewBatch();
-    $grid = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .625rem;';
+    $grid = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: .625rem;';
     $card = 'border: 1px solid rgba(127,127,127,.22); border-radius: .75rem; padding: .625rem .875rem;';
     $label = 'font-size: .72rem; font-weight: 600; opacity: .75;';
     $value = 'font-size: 1.35rem; font-weight: 700; margin-top: .125rem; font-variant-numeric: tabular-nums;';

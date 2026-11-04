@@ -1179,7 +1179,7 @@ class EmployeeRequestService
             $isLineManager = $request->employee && $actorEmployee && (int) $request->employee->parent_id === (int) $actorEmployee->id;
             if ($isLineManager) {
                 $approverRole = 'Line Manager';
-            } elseif ($actor && ($actor->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_ops_manager', 'hr ops manager', 'hr_administrator', 'human resources', 'human resources manager']) || $actor->can('hr_manage_attendance') || $actor->can('hr_view_all_records'))) {
+            } elseif ($actor && ($actor->hasRole(['Admin', 'Super Admin', 'hr', 'hr_manager', 'hr manager', 'hr_administrator', 'human resources', 'human resources manager']) || $actor->can('hr_manage_attendance') || $actor->can('hr_view_all_records'))) {
                 $approverRole = 'HR';
             } else {
                 $approverRole = 'Line Manager';

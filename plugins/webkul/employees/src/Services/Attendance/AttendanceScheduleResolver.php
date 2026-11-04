@@ -343,7 +343,10 @@ class AttendanceScheduleResolver
 
     private static function isTimezone(mixed $candidate): bool
     {
-        return is_string($candidate) && $candidate !== '' && in_array($candidate, DateTimeZone::listIdentifiers(), true);
+        static $identifiers = null;
+        $identifiers ??= array_flip(DateTimeZone::listIdentifiers());
+
+        return is_string($candidate) && $candidate !== '' && isset($identifiers[$candidate]);
     }
 
     /**
