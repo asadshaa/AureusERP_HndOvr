@@ -14,6 +14,9 @@ class DemoRecord extends Model
 
     public const PHASE_ACTIVITY = 'activity';
 
+    /** Customers, vendors, products, invoices, bills and payments (demo:business). */
+    public const PHASE_BUSINESS = 'business';
+
     /** record_table of a file the seeder stored ("disk:path" in record_id). */
     public const FILE_TABLE = '__file';
 

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
+use Webkul\Accounting\Services\LedgerVersion;
 use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
 
 /**
@@ -19,8 +20,11 @@ use Webkul\Employee\Services\Attendance\AttendanceMonthLockService;
  * only where they still hold the seeder's value). Nothing that is not in
  * demo_records is ever deleted, except rows hanging off a demo user or
  * application that have no model of their own (role / company pivots, the
- * user's notifications). For a live company (demo:attendance) only its
- * demo attendance is removed, and a demo day someone has since touched is kept.
+ * user's notifications). For a live company only its demo attendance
+ * (demo:attendance) and demo business data (demo:business) are removed, and
+ * what someone has since touched is kept: a changed attendance day, an
+ * invoice or bill no longer in draft, a customer, vendor or product still
+ * used by a document that stays.
  */
 class DemoPurger
 {
@@ -37,6 +41,14 @@ class DemoPurger
     /** The only tables demo:attendance writes to in a live company. */
     public const ATTENDANCE_TABLES = ['employees_attendance_records', 'employees_attendance_intervals'];
 
+    /** Rows that reference customers / vendors (a live company's purge keeps a demo partner still referenced by a row that stays). */
+    private const PARTNER_REFERENCES = [
+        'accounts_account_moves'        => ['partner_id', 'commercial_partner_id', 'partner_shipping_id'],
+        'accounts_account_move_lines'   => ['partner_id'],
+        'accounts_account_payments'     => ['partner_id'],
+        'accounts_bank_statement_lines' => ['partner_id'],
+    ];
+
     /** @var array<int, string> */
     private array $failures = [];
 
@@ -45,25 +57,29 @@ class DemoPurger
      * (a live company): a demo attendance day changed since it was seeded
      * (edited, given an interval or an audit / import row that is not ours) or
      * lying in a finalised month is kept -- with its intervals and its
-     * demo_records rows -- and counted in "kept", never deleted.
+     * demo_records rows -- and counted in "kept", never deleted; so is demo
+     * business data someone has since used (changedBusiness()), counted in
+     * "kept_business". $phase limits the purge to one demo_records phase.
      *
      * @param  array<int, int>|null  $companyIds  null = every company
      * @param  array<int, string>|null  $tables  null = every table
-     * @return array{deleted: int, restored: int, files: int, failed: int, kept: int, users: array<int, string>, failures: array<int, string>}
+     * @return array{deleted: int, restored: int, files: int, failed: int, kept: int, kept_business: int, users: array<int, string>, failures: array<int, string>}
      */
-    public function purge(?array $companyIds = null, bool $activityOnly = false, ?array $tables = null, bool $keepChanged = false): array
+    public function purge(?array $companyIds = null, bool $activityOnly = false, ?array $tables = null, bool $keepChanged = false, ?string $phase = null): array
     {
         $this->failures = [];
 
         $records = DemoRecord::query()
             ->when($companyIds !== null, fn ($query) => $query->whereIn('company_id', $companyIds))
             ->when($activityOnly, fn ($query) => $query->where('phase', DemoRecord::PHASE_ACTIVITY))
+            ->when($phase !== null, fn ($query) => $query->where('phase', $phase))
             ->when($tables !== null, fn ($query) => $query->whereIn('record_table', $tables))
             ->orderByDesc('id')
             ->get();
 
         [$keptIds, $keptDays] = $keepChanged ? $this->changedAttendance($records) : [[], 0];
-        $records = $records->reject(fn (DemoRecord $record): bool => isset($keptIds[$record->id]))->values();
+        [$keptBusinessIds, $keptBusiness] = $keepChanged ? $this->changedBusiness($records) : [[], 0];
+        $records = $records->reject(fn (DemoRecord $record): bool => isset($keptIds[$record->id]) || isset($keptBusinessIds[$record->id]))->values();
 
         $restored = $this->restoreFills($records->whereNotNull('original'));
         $files = $this->deleteFiles($records->where('record_table', DemoRecord::FILE_TABLE));
@@ -80,17 +96,22 @@ class DemoPurger
         $this->cleanDependents($rows);
         $deleted = $this->deleteRows($rows);
 
+        // Deleted without model events: rotate the report cache of each company whose ledger rows went.
+        $rows->whereIn('record_table', ['accounts_account_moves', 'accounts_account_move_lines'])->pluck('company_id')->unique()
+            ->each(fn ($companyId) => LedgerVersion::bump($companyId === null ? null : (int) $companyId));
+
         DemoRecord::query()->whereIn('id', $records->pluck('id'))->delete();
         $this->forgetAccounts($userEmails);
 
         return [
-            'deleted'  => $deleted,
-            'restored' => $restored,
-            'files'    => $files,
-            'failed'   => count($this->failures),
-            'kept'     => $keptDays,
-            'users'    => $userEmails,
-            'failures' => array_slice($this->failures, 0, 20),
+            'deleted'       => $deleted,
+            'restored'      => $restored,
+            'files'         => $files,
+            'failed'        => count($this->failures),
+            'kept'          => $keptDays,
+            'kept_business' => $keptBusiness,
+            'users'         => $userEmails,
+            'failures'      => array_slice($this->failures, 0, 20),
         ];
     }
 
@@ -146,6 +167,79 @@ class DemoPurger
         $ids = $days->only(array_keys($keep))->pluck('id')->merge($ours->only($keptIntervals)->values());
 
         return [array_fill_keys($ids->map(fn ($id): int => (int) $id)->all(), true), count($keep)];
+    }
+
+    /**
+     * The demo business rows to keep (a live company): an invoice or bill
+     * that is no longer a draft (posted or cancelled since: part of the books
+     * now) or has a line that is not ours, with its lines; a customer, vendor
+     * or product still referenced by a row that stays; and the chatter
+     * recorded on what is kept.
+     *
+     * @param  Collection<int, DemoRecord>  $records
+     * @return array{0: array<int, true>, 1: int} the demo_records ids to keep, the number of documents and master records kept
+     */
+    private function changedBusiness(Collection $records): array
+    {
+        $business = $records->where('phase', DemoRecord::PHASE_BUSINESS);
+        $ids = fn (string $table): Collection => $business->where('record_table', $table)->pluck('record_id')->map(fn ($id): int => (int) $id)->unique()->values();
+        $moveIds = $ids('accounts_account_moves');
+        $lineIds = $ids('accounts_account_move_lines');
+        $partnerIds = $ids('partners_partners');
+        $productIds = $ids('products_products');
+
+        if ($moveIds->isEmpty() && $partnerIds->isEmpty() && $productIds->isEmpty()) {
+            return [[], 0];
+        }
+
+        $keptMoves = DB::table('accounts_account_moves')->whereIn('id', $moveIds)->where('state', '!=', 'draft')->pluck('id')
+            ->merge(DB::table('accounts_account_move_lines')->whereIn('move_id', $moveIds)->whereNotIn('id', $lineIds)->distinct()->pluck('move_id'))
+            ->map(fn ($id): int => (int) $id)->unique()->values();
+        $keptLines = DB::table('accounts_account_move_lines')->whereIn('move_id', $keptMoves)->pluck('id')->map(fn ($id): int => (int) $id);
+        $leaving = [
+            'accounts_account_moves'        => $moveIds->diff($keptMoves)->all(),
+            'accounts_account_move_lines'   => $lineIds->diff($keptLines)->all(),
+            'accounts_account_payments'     => $ids('accounts_account_payments')->all(),
+            'accounts_bank_statement_lines' => [],
+        ];
+
+        $keptPartners = collect();
+        foreach (self::PARTNER_REFERENCES as $table => $columns) {
+            foreach ($columns as $column) {
+                $keptPartners = $keptPartners->merge(
+                    DB::table($table)->whereIn($column, $partnerIds)->whereNotIn('id', $leaving[$table])->distinct()->pluck($column)
+                );
+            }
+        }
+        $keptPartners = $keptPartners->map(fn ($id): int => (int) $id)->unique()->values();
+        $keptProducts = DB::table('accounts_account_move_lines')->whereIn('product_id', $productIds)->whereNotIn('id', $leaving['accounts_account_move_lines'])
+            ->distinct()->pluck('product_id')->map(fn ($id): int => (int) $id);
+
+        $keep = [];
+        foreach (['accounts_account_moves' => $keptMoves, 'accounts_account_move_lines' => $keptLines, 'partners_partners' => $keptPartners, 'products_products' => $keptProducts] as $table => $kept) {
+            foreach ($kept as $id) {
+                $keep[$table.'|'.$id] = true;
+            }
+        }
+
+        if ($keep === []) {
+            return [[], 0];
+        }
+
+        foreach (['chatter_messages' => ['messageable_type', 'messageable_id'], 'chatter_followers' => ['followable_type', 'followable_id']] as $table => [$typeColumn, $idColumn]) {
+            foreach (DB::table($table)->whereIn('id', $ids($table))->get(['id', $typeColumn, $idColumn]) as $row) {
+                $owner = class_exists((string) $row->{$typeColumn}) ? (new $row->{$typeColumn})->getTable() : null;
+
+                if ($owner && isset($keep[$owner.'|'.$row->{$idColumn}])) {
+                    $keep[$table.'|'.$row->id] = true;
+                }
+            }
+        }
+
+        $keptIds = $business->filter(fn (DemoRecord $record): bool => isset($keep[$record->record_table.'|'.$record->record_id]))
+            ->mapWithKeys(fn (DemoRecord $record): array => [(int) $record->id => true])->all();
+
+        return [$keptIds, $keptMoves->count() + $keptPartners->count() + $keptProducts->count()];
     }
 
     /** @param  Collection<int, DemoRecord>  $fills */
