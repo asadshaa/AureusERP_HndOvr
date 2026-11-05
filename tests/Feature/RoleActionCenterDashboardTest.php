@@ -20,13 +20,20 @@ class RoleActionCenterDashboardTest extends TestCase
         $response = $this->get('/admin');
         $response->assertStatus(200);
         $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
-        $response->assertSee('Pending actions');
+        $response->assertSee('Today');
         $response->assertSee('HR Manager');
 
         $service = app(RoleActionCenterService::class);
         $actions = $service->getPendingActionsFor($zainab, 1);
 
+        // Items the Today box already lists as a short row are left out of the list below it.
+        $replaced = app(HomeDashboardContext::class)->todayReplacedActionIds();
+
         foreach ($actions['items'] as $item) {
+            if (in_array($item['id'], $replaced, true)) {
+                continue;
+            }
+
             $this->assertNotEmpty($item['url']);
             $this->assertStringStartsWith('http', $item['url']);
             $response->assertSee($item['title']);
@@ -41,13 +48,20 @@ class RoleActionCenterDashboardTest extends TestCase
         $response = $this->get('/admin');
         $response->assertStatus(200);
         $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
-        $response->assertSee('Pending actions');
+        $response->assertSee('Today');
         $response->assertSee('Administrator');
 
         $service = app(RoleActionCenterService::class);
         $actions = $service->getPendingActionsFor($raza, 1);
 
+        // Items the Today box already lists as a short row are left out of the list below it.
+        $replaced = app(HomeDashboardContext::class)->todayReplacedActionIds();
+
         foreach ($actions['items'] as $item) {
+            if (in_array($item['id'], $replaced, true)) {
+                continue;
+            }
+
             $this->assertNotEmpty($item['url']);
             $this->assertStringStartsWith('http', $item['url']);
             $response->assertSee($item['title']);
@@ -65,6 +79,6 @@ class RoleActionCenterDashboardTest extends TestCase
         $response = $this->get('/admin');
         $response->assertStatus(200);
         $response->assertSee(app(HomeDashboardContext::class)->greeting().', ');
-        $response->assertSee('Pending actions');
+        $response->assertSee('Today');
     }
 }

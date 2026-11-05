@@ -269,14 +269,17 @@ class ApplicantResource extends Resource
                                             ->columnSpan(1),
                                         TextInput::make('candidate_email_from')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.email'))
+                                            ->placeholder('e.g. sara.ahmed@gmail.com')
                                             ->email()
                                             ->columnSpan(1),
                                         TextInput::make('candidate_phone')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.phone'))
+                                            ->placeholder('+92 300 1234567')
                                             ->tel()
                                             ->columnSpan(1),
                                         TextInput::make('candidate_linkedin_profile')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.general-information.fields.linkedin-profile'))
+                                            ->placeholder('https://www.linkedin.com/in/sara-ahmed')
                                             ->url()
                                             ->columnSpan(1),
                                         Select::make('job_id')
@@ -402,6 +405,8 @@ class ApplicantResource extends Resource
                                     ->schema([
                                         TextInput::make('salary_expected')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.expected-salary'))
+                                            ->placeholder('e.g. 120000')
+                                            ->helperText('Monthly, as the candidate asked for it.')
                                             ->numeric()
                                             ->minValue(0)
                                             ->maxValue(99999999999)
@@ -417,6 +422,8 @@ class ApplicantResource extends Resource
                                     ->schema([
                                         TextInput::make('salary_proposed')
                                             ->label(__('recruitments::filament/clusters/applications/resources/applicant.form.sections.salary.fields.proposed-salary'))
+                                            ->placeholder('e.g. 110000')
+                                            ->helperText('Monthly, what we plan to offer. The candidate does not see this.')
                                             ->numeric()
                                             ->minValue(0)
                                             ->maxValue(99999999999)
@@ -463,7 +470,7 @@ class ApplicantResource extends Resource
                                     ->maxLength(255),
                                 TextInput::make('screening_score')->label('CV score')->helperText('Set by the CV analyser; you can adjust it. Re-analysing the CV replaces it.')->numeric()->minValue(0)->maxValue(100),
                                 TextInput::make('interview_score')->helperText('Set from interview feedback (average rating x 20); you can adjust it. New feedback recalculates it.')->numeric()->minValue(0)->maxValue(100),
-                                TextInput::make('assessment_score')->numeric()->minValue(0)->maxValue(100),
+                                TextInput::make('assessment_score')->placeholder('0 to 100')->helperText('Optional: the result of a written or practical test.')->numeric()->minValue(0)->maxValue(100),
                                 // Read-only: the latest job offer's status and date (offers are managed on the Offers tab).
                                 TextInput::make('offer_status')
                                     ->label(__('Offer status'))
@@ -760,6 +767,9 @@ class ApplicantResource extends Resource
             ->columnManagerColumns(3)
             ->filtersFormColumns(2)
             ->filtersLayout(FiltersLayout::Dropdown)
+            ->emptyStateIcon('heroicon-o-user-group')
+            ->emptyStateHeading('No applications yet')
+            ->emptyStateDescription('Applications arrive by themselves from the careers website once a job is published, or add one with New. Clear the search and filters if you expected some.')
             ->recordActions([
                 ActivityTableAction::make()
                     ->visible(fn (Applicant $record): bool => static::isActiveCompanyRecord($record)),
@@ -769,6 +779,9 @@ class ApplicantResource extends Resource
                         ->icon('heroicon-o-user-plus')
                         ->color('success')
                         ->requiresConfirmation()
+                        ->modalHeading(fn (Applicant $record): string => 'Make '.($record->candidate?->name ?: 'this candidate').' an employee?')
+                        ->modalDescription('An employee record is created from the candidate\'s details, with yearly leave added automatically. Complete their job, department and line manager on the employee afterwards.')
+                        ->modalSubmitActionLabel('Create employee')
                         ->visible(fn (Applicant $record): bool => static::isActiveCompanyRecord($record)
                             && $record->candidate?->employee_id === null
                             && $record->refuse_reason_id === null
@@ -785,6 +798,8 @@ class ApplicantResource extends Resource
                     RestoreAction::make()
                         ->visible(fn (Applicant $record) => $record->trashed()),
                     DeleteAction::make()
+                        ->modalHeading('Delete this application?')
+                        ->modalDescription('It moves to the Archived view and can be restored. No email is sent to the candidate; to turn someone down politely, use Refuse instead.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -797,6 +812,8 @@ class ApplicantResource extends Resource
                 BulkActionGroup::make([
                     CvAnalysisComponents::bulkAnalyseAction(),
                     DeleteBulkAction::make()
+                        ->modalHeading('Delete the selected applications?')
+                        ->modalDescription('They move to the Archived view and can be restored. No email is sent to the candidates.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -804,6 +821,8 @@ class ApplicantResource extends Resource
                                 ->body(__('recruitments::filament/clusters/applications/resources/applicant.table.bulk-actions.delete.notification.body'))
                         ),
                     ForceDeleteBulkAction::make()
+                        ->modalHeading('Permanently delete the selected applications?')
+                        ->modalDescription('The applications and their CVs are removed for good. This cannot be undone.')
                         ->successNotification(
                             Notification::make()
                                 ->success()

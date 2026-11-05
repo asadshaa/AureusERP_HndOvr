@@ -295,7 +295,7 @@ class LogicalFixesVerificationTest extends TestCase
             $service->submit($leave, $managerUser);
             $this->assertTrue(true);
         } catch (\RuntimeException $e) {
-            $this->assertStringNotContainsString('A user can only submit leave for their own HR hierarchy', $e->getMessage());
+            $this->assertStringNotContainsString('You can only request leave for yourself or for employees you manage.', $e->getMessage());
         }
     }
 
@@ -455,7 +455,7 @@ class LogicalFixesVerificationTest extends TestCase
         $service = app(EmployeeRequestService::class);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('A missed attendance day cannot be requested on a day the employee has an approved leave.');
+        $this->expectExceptionMessage('A missed day cannot be requested on a day with approved leave.');
 
         $service->requestMissingAttendance(
             $employee,

@@ -77,13 +77,17 @@ class WorkSchedulesRelationManager extends RelationManager
                         fn (): WorkSchedule => tap($record)->update($data),
                     )),
                 DeleteAction::make()
+                    ->modalHeading('Remove this work schedule?')
+                    ->modalDescription('Attendance then follows the employee\'s other schedules, their working hours, or the company office hours. A shift roster, when assigned, still comes first.')
                     ->visible(fn (): bool => $this->canManageOwner())
                     ->using(fn (WorkSchedule $record, DeleteAction $action): mixed => WorkScheduleActions::guarded(
                         $action,
                         fn (): ?bool => $record->delete(),
                     )),
             ])
-            ->defaultSort('effective_from', 'desc');
+            ->defaultSort('effective_from', 'desc')
+            ->emptyStateHeading('No work schedule assigned')
+            ->emptyStateDescription('Without one, attendance follows the employee\'s working hours (Work information tab) or the company office hours. A shift roster, when assigned, comes first.');
     }
 
     public function isReadOnly(): bool

@@ -59,7 +59,7 @@ class EmployeeSensitiveChangeService
 
         $changes = array_intersect_key($changes, array_flip(self::FIELDS));
         if ($changes === []) {
-            throw new RuntimeException('No supported sensitive employee changes were supplied.');
+            throw new RuntimeException('Nothing was changed. Edit at least one of the protected details before submitting.');
         }
 
         $fieldNames = collect(array_keys($changes))->map(fn ($k) => str_replace('_', ' ', $k))->implode(', ');
@@ -115,7 +115,7 @@ class EmployeeSensitiveChangeService
             $notification = FilamentNotification::make()
                 ->warning()
                 ->icon('heroicon-o-shield-check')
-                ->title("Sensitive Data Update Request: {$employee->name}")
+                ->title("Change to protected details: {$employee->name}")
                 ->body("{$who} requested to update sensitive information ({$summary}){$reasonNote}. Review in Approval Requests.")
                 ->actions([
                     Action::make('view')
@@ -134,7 +134,7 @@ class EmployeeSensitiveChangeService
     public function applyApproved(ApprovalRequest $request): Employee
     {
         if ($request->request_type !== 'employee_sensitive_change' || $request->status !== 'approved') {
-            throw new RuntimeException('Only approved employee sensitive-change requests can be applied.');
+            throw new RuntimeException('This change can only be applied after it is approved.');
         }
 
         $employee = Employee::query()

@@ -1,9 +1,9 @@
 <?php
 
 return [
-    'confirm'      => 'To Approve',
-    'refuse'       => 'Refused',
-    'validate_one' => 'Second Approval',
+    'confirm'      => 'Waiting for approval',
+    'refuse'       => 'Rejected',
+    'validate_one' => 'Waiting for final approval',
     'validate_two' => 'Approved',
     'cancel'       => 'Cancelled',
 ];

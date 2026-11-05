@@ -3,6 +3,7 @@
 use App\Providers\AppServiceProvider;
 use App\Providers\Filament\AdminPanelProvider;
 use App\Providers\Filament\CustomerPanelProvider;
+use App\Providers\FriendlyErrorsServiceProvider;
 use Webkul\Account\AccountServiceProvider;
 use Webkul\Accounting\AccountingServiceProvider;
 use Webkul\Analytic\AnalyticServiceProvider;
@@ -34,6 +35,7 @@ use Webkul\Website\WebsiteServiceProvider;
 
 return [
     AppServiceProvider::class,
+    FriendlyErrorsServiceProvider::class,
     AdminPanelProvider::class,
     CustomerPanelProvider::class,
     AccountingServiceProvider::class,

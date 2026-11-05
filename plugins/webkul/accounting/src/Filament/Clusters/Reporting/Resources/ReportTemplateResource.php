@@ -20,12 +20,15 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Accounting\Data\ValidationIssue;
 use Webkul\Accounting\Enums\CurrencyMode;
 use Webkul\Accounting\Enums\EntityMode;
 use Webkul\Accounting\Enums\LayoutType;
 use Webkul\Accounting\Enums\TemplateStatus;
 use Webkul\Accounting\Filament\Clusters\Reporting;
+use Webkul\Accounting\Filament\Clusters\Reporting\Pages\FinancialReports;
 use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\Pages\CreateReportTemplate;
 use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\Pages\EditReportTemplate;
 use Webkul\Accounting\Filament\Clusters\Reporting\Resources\ReportTemplateResource\Pages\ListReportTemplates;
@@ -275,6 +278,40 @@ class ReportTemplateResource extends Resource
                     ->title(__('accounting::filament/clusters/reporting/resources/report-template.actions.archive.archived'))
                     ->send();
             });
+    }
+
+    /**
+     * Report templates have no policy, so without this every signed-in user
+     * (employees, HR) could open them and the Accounting > Reporting menu
+     * showed for everyone. Finance users who may run the financial reports,
+     * or who hold the template's own Shield permission, keep access.
+     */
+    public static function canViewAny(): bool
+    {
+        $user = Auth::user();
+
+        return $user !== null
+            && ($user->can('view_any_accounting_report::template') || FinancialReports::canAccess());
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canViewAny() && parent::canCreate();
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canViewAny() && parent::canEdit($record);
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canViewAny() && parent::canDelete($record);
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return static::canViewAny() && parent::canDeleteAny();
     }
 
     public static function getRelations(): array

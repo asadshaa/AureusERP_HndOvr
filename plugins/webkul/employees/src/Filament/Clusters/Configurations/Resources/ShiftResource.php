@@ -136,7 +136,9 @@ class ShiftResource extends Resource
                     ->using(fn (Shift $record, DeleteAction $action): mixed => static::guarded($action, fn (): ?bool => $record->delete())),
             ])
             ->reorderable('sort')
-            ->defaultSort('sort');
+            ->defaultSort('sort')
+            ->emptyStateHeading('No shifts yet')
+            ->emptyStateDescription('A shift is a working time such as Morning 09:00-17:00 or Night 22:00-06:00. Shifts are used in roster patterns and work schedules.');
     }
 
     /** Shows a refused save (duplicate code, bad times, shift in use) as a notification and keeps the modal open. */

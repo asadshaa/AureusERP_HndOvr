@@ -48,7 +48,7 @@ class HierarchicalNotificationService
 
             $routingNote = $hasManager
                 ? ''
-                : ' [Routed to HR: no line manager assigned]';
+                : ' (Sent to HR because no line manager is set.)';
 
             $title = 'Request awaiting your review';
             $body = "A request ({$approval->request_type}) has been submitted and is awaiting your review at step '{$currentStep->name}'.{$routingNote}";
@@ -427,7 +427,7 @@ class HierarchicalNotificationService
                 $routingNote = '';
             } else {
                 $recipients = $this->approvalEngine->resolveHrApproversForCompany($companyId, (int) $review->employee?->user_id);
-                $routingNote = ' [Routed to HR: no manager reviewer assigned]';
+                $routingNote = ' (Sent to HR because no manager reviewer is set.)';
             }
 
             if ($recipients->isEmpty()) {

@@ -109,9 +109,13 @@ class ShiftRosterResource extends Resource
             ->recordActions([
                 EditAction::make()
                     ->using(fn (ShiftRoster $record, array $data, EditAction $action): ?Model => ShiftResource::guarded($action, fn (): ShiftRoster => tap($record)->update($data))),
-                DeleteAction::make(),
+                DeleteAction::make()
+                    ->modalHeading('Delete this roster pattern?')
+                    ->modalDescription('It can no longer be assigned. Check the Shift roster first so nobody is left without a pattern.'),
             ])
-            ->defaultSort('name');
+            ->defaultSort('name')
+            ->emptyStateHeading('No roster patterns yet')
+            ->emptyStateDescription('A pattern is a repeating list of shifts and days off, e.g. 5 days Morning, 2 days Off. Create one, then assign it on the Shift roster.');
     }
 
     /** @return array<int, string> */

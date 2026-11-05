@@ -1,6 +1,6 @@
 <?php
 
 return [
-    'regular' => 'Regular',
-    'accrual' => 'Accrual',
+    'regular' => 'Fixed amount',
+    'accrual' => 'Earned over time',
 ];

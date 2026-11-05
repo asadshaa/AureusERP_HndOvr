@@ -108,7 +108,7 @@ it('keeps one ad per channel and placement, enforces placements, conflicts and c
     expect(fn () => jobPostingAdd($f, ['whatsapp']))->toThrow(ValidationException::class);
     expect(fn () => jobPostingAdd($f, [['channel' => 'rozee', 'placement' => 'Somewhere']]))->toThrow(ValidationException::class);
     expect(fn () => jobPostingAdd($f, ['indeed', 'indeed_feed']))->toThrow(RuntimeException::class, 'would list the job twice');
-    expect(fn () => jobPostingAdd($f, ['no_such_board']))->toThrow(RuntimeException::class, 'Unknown job posting channel');
+    expect(fn () => jobPostingAdd($f, ['no_such_board']))->toThrow(RuntimeException::class, 'Unknown job ad channel');
 
     jobPostingAdd($f, ['google_jobs']);
     expect(JobPosting::query()->where('job_id', $f['job']->id)->pluck('channel')->all())->toContain('google_jobs', 'careers_site');

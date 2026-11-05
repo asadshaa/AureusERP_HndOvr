@@ -33,14 +33,17 @@ class Recruitments extends BaseDashboard
         return 'page_recruitment_recruitments';
     }
 
+    protected static ?int $navigationSort = 1;
+
+    /** Listed first in the Recruitment menu, so "Overview" like the other module dashboards. */
     public static function getNavigationLabel(): string
     {
-        return __('recruitments::filament/pages/recruitment.navigation.title');
+        return 'Overview';
     }
 
     public static function getNavigationGroup(): string|\UnitEnum
     {
-        return NavigationGroup::Dashboard;
+        return NavigationGroup::Recruitment;
     }
 
     public static function getNavigationIcon(): string|BackedEnum|Htmlable|null

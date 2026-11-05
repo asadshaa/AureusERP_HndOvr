@@ -33,6 +33,7 @@ use Webkul\Employee\Services\Attendance\DeviceImportExcel;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 /**
  * Attendance -> Device import: HR uploads a biometric device export
@@ -279,6 +280,7 @@ class DeviceAttendanceImport extends Page implements HasForms, HasTable
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('device-import'),
             Action::make('template')
                 ->label('Download template')
                 ->icon('heroicon-o-document-arrow-down')

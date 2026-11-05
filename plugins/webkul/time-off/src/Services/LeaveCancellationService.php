@@ -156,7 +156,7 @@ class LeaveCancellationService
         $leave = DB::transaction(function () use ($leave, $actor, $reason): Leave {
             $locked = $this->lock($leave);
             if (! $this->canCancel($locked, $actor)) {
-                throw new RuntimeException('Only HR of the leave company can cancel an approved leave.');
+                throw new RuntimeException('Only HR of this employee\'s company can cancel an approved leave.');
             }
 
             $locked->update([

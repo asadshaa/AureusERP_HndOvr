@@ -45,7 +45,7 @@ class WordPressCareersClient
         $url = $this->send('PUT', 'jobs/'.$this->token($token), ['json' => $payload])->json('url');
 
         if (! is_string($url) || filter_var($url, FILTER_VALIDATE_URL) === false || ! in_array(parse_url($url, PHP_URL_SCHEME), ['http', 'https'], true)) {
-            throw new WebsiteRequestException('The careers website accepted the job but did not return its address ("url").');
+            throw new WebsiteRequestException('The careers website accepted the job but did not send back its web address.');
         }
 
         return $url;
@@ -205,7 +205,7 @@ class WordPressCareersClient
     protected function token(string $token): string
     {
         if (preg_match('/^[0-9a-f]{32}$/', $token) !== 1) {
-            throw new WebsiteRequestException('Invalid job token.');
+            throw new WebsiteRequestException('This job link is not valid.');
         }
 
         return $token;

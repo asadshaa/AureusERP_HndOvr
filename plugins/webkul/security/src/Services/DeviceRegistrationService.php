@@ -28,7 +28,7 @@ class DeviceRegistrationService
 
         if ($device !== null) {
             if ($device->user_id !== $user->id) {
-                throw new RuntimeException('This device key is already registered to another user.');
+                throw new RuntimeException('This device is already registered to another user.');
             }
 
             $device->update(['label' => $label, 'platform' => $platform, 'last_seen_at' => now()]);
@@ -50,7 +50,7 @@ class DeviceRegistrationService
     public function revoke(User $actor, UserDevice $device): UserDevice
     {
         if ($device->user_id !== $actor->id) {
-            throw new RuntimeException('You cannot revoke a device you do not own.');
+            throw new RuntimeException('You can only remove your own devices.');
         }
 
         $device->update(['revoked_at' => now()]);

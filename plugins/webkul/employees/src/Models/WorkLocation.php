@@ -114,29 +114,29 @@ class WorkLocation extends Model
 
         if ($this->location_type === WorkLocationEnum::Home
             && ($this->latitude !== null || $this->longitude !== null || $this->geofence_enabled)) {
-            throw new InvalidArgumentException('Home locations cannot store coordinates or a geofence.');
+            throw new InvalidArgumentException('A home location cannot have a map position or check-in area. Clear those fields, or choose a different location type.');
         }
 
         if ($this->isDirty(self::GEOFENCE_COLUMNS) && Auth::check()
             && ! Auth::user()->can(HrPermissions::ManageAttendanceGeofences)) {
-            throw new AuthorizationException('You are not allowed to change workplace geofence settings.');
+            throw new AuthorizationException('You are not allowed to change the check-in area of a workplace. Ask HR to make this change.');
         }
 
         if ($this->latitude !== null || $this->longitude !== null) {
             if (! app(GeoDistanceCalculator::class)->isValidCoordinate($this->latitude, $this->longitude)) {
-                throw new InvalidArgumentException('The workplace coordinates are not valid.');
+                throw new InvalidArgumentException('The map position (latitude and longitude) is not valid. Check the numbers and try again.');
             }
         }
 
         if ($this->geofence_radius_meters !== null
             && ($this->geofence_radius_meters < (int) config('hr_attendance_geofence.radius_min_meters')
                 || $this->geofence_radius_meters > (int) config('hr_attendance_geofence.radius_max_meters'))) {
-            throw new InvalidArgumentException('The geofence radius is outside the allowed range.');
+            throw new InvalidArgumentException('The check-in area size (radius) is too small or too large. Enter a value within the allowed range.');
         }
 
         if ($this->geofence_enabled
             && ($this->latitude === null || $this->longitude === null || $this->geofence_radius_meters === null)) {
-            throw new InvalidArgumentException('A geofence needs latitude, longitude and a radius.');
+            throw new InvalidArgumentException('To set a check-in area, enter the latitude, longitude and radius.');
         }
     }
 

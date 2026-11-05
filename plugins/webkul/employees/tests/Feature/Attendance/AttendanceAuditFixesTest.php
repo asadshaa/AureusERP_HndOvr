@@ -334,9 +334,9 @@ it('X5: sends a flagged check-in of an employee without a line manager to the co
 
     $titles = fn ($user) => $user->notifications()->get()->map(fn ($notification): string => (string) ($notification->data['title'] ?? ''));
 
-    expect($titles($hrApprover))->toContain('Attendance review: Check-in flagged')
-        ->and($titles($teamLead))->not->toContain('Attendance review: Check-in flagged')
-        ->and($titles($f['user']))->not->toContain('Attendance review: Check-in flagged');
+    expect($titles($hrApprover))->toContain('Attendance to check: Check-in flagged')
+        ->and($titles($teamLead))->not->toContain('Attendance to check: Check-in flagged')
+        ->and($titles($f['user']))->not->toContain('Attendance to check: Check-in flagged');
 });
 
 // ---------------------------------------------------------------------
@@ -427,7 +427,7 @@ it('X11: hr:notify-shift-completion uses the schedule\'s required minutes, not a
     $this->travelTo(axfUtc('2026-10-05', '16:05'));
     $this->artisan('hr:notify-shift-completion')->assertSuccessful();
 
-    $completed = fn ($user): bool => $user->notifications()->get()->contains(fn ($notification): bool => ($notification->data['title'] ?? '') === 'Working Hours Complete');
+    $completed = fn ($user): bool => $user->notifications()->get()->contains(fn ($notification): bool => ($notification->data['title'] ?? '') === 'Working hours complete');
     expect($completed($partTimeUser))->toBeTrue()
         ->and($completed($f['user']))->toBeFalse();
 });

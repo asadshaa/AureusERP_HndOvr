@@ -26,6 +26,7 @@ use Webkul\Recruitment\Models\JobPosting;
 use Webkul\Recruitment\Services\CandidateApplicationService;
 use Webkul\Recruitment\Support\RecruitmentCompanyScope;
 use Webkul\Recruitment\Traits\HasApplicantImportAction;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
@@ -146,6 +147,7 @@ class ListApplicants extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('applicants'),
             $this->getApplicantImportAction(),
             CreateAction::make()
                 ->icon('heroicon-o-plus-circle')

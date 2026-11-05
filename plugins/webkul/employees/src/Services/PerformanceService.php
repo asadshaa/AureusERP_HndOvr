@@ -45,11 +45,11 @@ class PerformanceService
     {
         if ((int) $actor->default_company_id !== (int) $cycle->company_id
             && ! $actor->allowedCompanies()->whereKey($cycle->company_id)->exists()) {
-            throw new RuntimeException('The user cannot launch a performance cycle for this company.');
+            throw new RuntimeException('You are not allowed to start an appraisal cycle for this company.');
         }
 
         if ($cycle->status === AppraisalKinds::CycleClosed) {
-            throw new RuntimeException('This performance cycle is closed.');
+            throw new RuntimeException('This appraisal cycle is closed.');
         }
 
         $created = new EloquentCollection;
@@ -131,7 +131,7 @@ class PerformanceService
     public function submitSelfReview(PerformanceReview $review, Employee $employee, float $rating, ?string $comments = null): PerformanceReview
     {
         if ((int) $review->employee_id !== (int) $employee->id || $review->status !== AppraisalKinds::StatusSelfReview || $review->cycle?->isClosed()) {
-            throw new RuntimeException('This performance review is not available for employee self-review.');
+            throw new RuntimeException('This appraisal is not open for your self review.');
         }
         $review->update([
             'self_rating'  => $rating,
@@ -153,7 +153,7 @@ class PerformanceService
     public function completeManagerReview(PerformanceReview $review, Employee $reviewer, float $rating, ?string $comments = null, array $extra = []): PerformanceReview
     {
         if ((int) $review->reviewer_id !== (int) $reviewer->id || $review->status !== AppraisalKinds::StatusManagerReview || $review->cycle?->isClosed()) {
-            throw new RuntimeException('This employee is not the assigned manager reviewer.');
+            throw new RuntimeException('You are not the manager chosen to review this appraisal.');
         }
         $band = AppraisalScoring::band($rating, AppraisalScoring::bands($review->cycle));
         $updates = [
@@ -280,18 +280,18 @@ class PerformanceService
         $reason = trim($reason);
 
         if ($rating < 1 || $rating > 5) {
-            throw new RuntimeException('The calibrated rating must be between 1 and 5.');
+            throw new RuntimeException('The adjusted rating must be between 1 and 5.');
         }
 
         if (mb_strlen($reason) < 5) {
-            throw new RuntimeException('Give a reason for the calibration.');
+            throw new RuntimeException('Give a reason for changing the rating.');
         }
 
         return DB::transaction(function () use ($review, $actor, $rating, $reason): PerformanceReview {
             $review = $this->locked($review);
 
             if (! $this->access->canCalibrate($actor, $review)) {
-                throw new RuntimeException('This appraisal cannot be calibrated now.');
+                throw new RuntimeException('The rating of this appraisal cannot be changed now.');
             }
 
             $rating = round($rating, 2);

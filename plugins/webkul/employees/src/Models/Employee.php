@@ -518,7 +518,7 @@ class Employee extends Model
             $relatedCompanyId = $modelClass::query()->whereKey($relatedId)->value('company_id');
 
             if ($relatedCompanyId !== null && (int) $relatedCompanyId !== (int) $companyId) {
-                throw new InvalidArgumentException("{$label} belongs to a different company than this employee.");
+                throw new InvalidArgumentException("{$label}: the one you chose belongs to a different company. Choose one from this employee's company.");
             }
         }
 
@@ -527,7 +527,7 @@ class Employee extends Model
 
             if ($user && (int) $user->default_company_id !== (int) $companyId
                 && ! $user->allowedCompanies()->whereKey($companyId)->exists()) {
-                throw new InvalidArgumentException('The linked user does not have access to this company.');
+                throw new InvalidArgumentException('The linked user account cannot use this company. Give that user access to this company first, or link a different user.');
             }
         }
     }

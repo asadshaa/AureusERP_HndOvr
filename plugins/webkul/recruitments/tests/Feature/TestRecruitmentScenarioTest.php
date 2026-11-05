@@ -350,7 +350,7 @@ it('15. PASS: conversion is blocked across company boundaries -- existing employ
     $applicationB = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidateB->id, 'create_date' => now()]);
     DB::table('recruitments_applicants')->where('id', $applicationB->id)->update(['department_id' => $otherDepartment->id]);
     expect(fn () => app(CandidateConversionService::class)->convert($applicationB->fresh()))
-        ->toThrow(RuntimeException::class, 'department does not belong');
+        ->toThrow(RuntimeException::class, 'department on this application belongs to a different company');
 
     // (c) application's job belongs to a different company.
     $otherJob = JobPosition::query()->create(['company_id' => $otherCompany->id, 'name' => 'Other Co Role', 'is_active' => true]);
@@ -361,7 +361,7 @@ it('15. PASS: conversion is blocked across company boundaries -- existing employ
     $applicationC = Applicant::query()->create(['company_id' => $f['company']->id, 'candidate_id' => $candidateC->id, 'create_date' => now()]);
     DB::table('recruitments_applicants')->where('id', $applicationC->id)->update(['job_id' => $otherJob->id]);
     expect(fn () => app(CandidateConversionService::class)->convert($applicationC->fresh()))
-        ->toThrow(RuntimeException::class, 'job does not belong');
+        ->toThrow(RuntimeException::class, 'job on this application belongs to a different company');
 
     expect(Employee::whereIn('name', ['Cross Co', 'Dept Cross', 'Job Cross'])->exists())->toBeFalse();
 });

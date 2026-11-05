@@ -1,8 +1,8 @@
 <?php
 
 return [
-    'no-validation'                             => 'No Validation',
-    'by-time-off-officer'                       => 'By Time Off Officer',
-    'by-employee-approver'                      => 'By Employee\'s Approver',
-    'by-employee-approver-and-time-off-officer' => 'By Employee\'s Approver and Time Off Officer',
+    'no-validation'                             => 'No approval needed',
+    'by-time-off-officer'                       => 'HR approves',
+    'by-employee-approver'                      => 'Employee\'s manager approves',
+    'by-employee-approver-and-time-off-officer' => 'Employee\'s manager, then HR',
 ];

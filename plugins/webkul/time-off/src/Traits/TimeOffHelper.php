@@ -579,7 +579,7 @@ trait TimeOffHelper
         if (! empty($data['employee_id'])) {
             $employee = Employee::find($data['employee_id']);
             if ($employee && (int) $employee->company_id !== (int) Auth::user()?->default_company_id) {
-                throw new RuntimeException('The selected employee is outside the active company.');
+                throw new RuntimeException('The selected employee is not in the company you are working in. Switch company or choose another employee.');
             }
             $user = $employee?->user;
         } else {

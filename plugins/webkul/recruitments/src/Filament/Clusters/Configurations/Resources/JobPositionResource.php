@@ -474,6 +474,8 @@ class JobPositionResource extends Resource
                 EditAction::make()
                     ->authorizationTooltip(static::switchCompanyTooltip()),
                 DeleteAction::make()
+                    ->modalHeading('Delete this job position?')
+                    ->modalDescription('It is removed from the list and can be restored. A job with ads that may still be online cannot be deleted: close it first.')
                     ->failureNotificationTitle('This job has ads that may still be up. Close it and confirm the ads are taken down first.')
                     ->successNotification(
                         Notification::make()
@@ -499,6 +501,8 @@ class JobPositionResource extends Resource
                                 ->body(__('recruitments::filament/clusters/configurations/resources/job-position.table.bulk-actions.delete.notification.body'))
                         ),
                     ForceDeleteBulkAction::make()
+                        ->modalHeading('Permanently delete the selected job positions?')
+                        ->modalDescription('This cannot be undone.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -514,6 +518,8 @@ class JobPositionResource extends Resource
                         ),
                 ]),
             ])
+            ->emptyStateHeading('No job positions yet')
+            ->emptyStateDescription('Create the job you are hiring for, submit it for approval, then publish it to the careers website.')
             ->emptyStateActions([
                 CreateAction::make()
                     ->icon('heroicon-o-plus-circle')

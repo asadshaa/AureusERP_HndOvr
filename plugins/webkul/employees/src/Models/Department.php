@@ -89,7 +89,7 @@ class Department extends Model
             $department->creator_id ??= Auth::id();
 
             if (! static::validateNoRecursion($department)) {
-                throw new InvalidArgumentException('Circular reference detected in department hierarchy');
+                throw new InvalidArgumentException('A department can\'t be placed under itself or under one of its own sub-departments. Choose a different parent department.');
             }
 
             static::handleDepartmentData($department);
@@ -97,7 +97,7 @@ class Department extends Model
 
         static::updating(function ($department) {
             if (! static::validateNoRecursion($department)) {
-                throw new InvalidArgumentException('Circular reference detected in department hierarchy');
+                throw new InvalidArgumentException('A department can\'t be placed under itself or under one of its own sub-departments. Choose a different parent department.');
             }
 
             static::handleDepartmentData($department);

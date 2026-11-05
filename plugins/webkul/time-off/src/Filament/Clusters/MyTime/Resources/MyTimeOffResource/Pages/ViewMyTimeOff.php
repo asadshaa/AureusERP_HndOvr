@@ -39,6 +39,10 @@ class ViewMyTimeOff extends ViewRecord
                 ->label(fn (): string => LeaveApprovalService::isReturned($this->getRecord()) ? 'Resubmit' : 'Submit for approval')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('primary')
+                ->requiresConfirmation()
+                ->modalHeading('Send this leave request for approval?')
+                ->modalDescription('Your line manager reviews it first, then HR. While it waits, the days already count against your balance. You are notified of the decision.')
+                ->modalSubmitActionLabel(fn (): string => LeaveApprovalService::isReturned($this->getRecord()) ? 'Resubmit' : 'Submit for approval')
                 ->visible(function (): bool {
                     /** @var Leave $record */
                     $record = $this->getRecord();
@@ -69,6 +73,8 @@ class ViewMyTimeOff extends ViewRecord
             ...LeaveCancellationActions::make(),
             EditAction::make(),
             DeleteAction::make()
+                ->modalHeading('Delete this leave request?')
+                ->modalDescription('It is removed for good. To take back a request that is waiting for approval, use Withdraw instead.')
                 ->successNotification(
                     Notification::make()
                         ->success()

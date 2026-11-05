@@ -23,7 +23,7 @@ enum JobPostingStatus: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::DRAFT            => __('Draft'),
-            self::PENDING_APPROVAL => __('Pending approval'),
+            self::PENDING_APPROVAL => __('Waiting for approval'),
             self::APPROVED         => __('Approved'),
             self::PUBLISHED        => __('Published'),
             self::PAUSED           => __('Paused'),

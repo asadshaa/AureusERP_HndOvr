@@ -55,7 +55,7 @@ class ApprovalStep extends Model
         static::saving(function (self $step): void {
             $routes = collect([$step->approver_user_id, $step->approver_role_id, $step->hierarchy_route])->filter();
             if ($routes->count() !== 1) {
-                throw new RuntimeException('Each approval step must use exactly one specific user, role, or hierarchy route.');
+                throw new RuntimeException('Each approval step needs exactly one approver: a specific user, a role, or a manager (such as the line manager).');
             }
         });
     }

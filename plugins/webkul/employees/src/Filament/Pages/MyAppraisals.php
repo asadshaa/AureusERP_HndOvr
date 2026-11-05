@@ -16,6 +16,7 @@ use Webkul\Employee\Services\Appraisals\AppraisalAccess;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 /**
  * My appraisals: the signed-in employee's own appraisals in the active
@@ -85,5 +86,12 @@ class MyAppraisals extends Page implements HasTable
         $user = CurrentCompany::user();
 
         return $user;
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            HelpAction::make('my-appraisals'),
+        ];
     }
 }

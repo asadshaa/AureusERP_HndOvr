@@ -56,7 +56,7 @@ class NotifyShiftCompletionCommand extends Command
                         $elapsedFormatted = intdiv($totalMinutes, 60).'h '.($totalMinutes % 60).'m';
 
                         $notification = Notification::make()
-                            ->title('Working Hours Complete')
+                            ->title('Working hours complete')
                             ->body("Your working hours are complete ({$elapsedFormatted} worked). You can check out now!")
                             ->icon('heroicon-o-check-circle')
                             ->color('success')

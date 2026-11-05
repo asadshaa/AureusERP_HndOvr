@@ -433,7 +433,7 @@ class JobPostingService
             $key = (string) ($selection['channel'] ?? '');
 
             if (! $this->channels->has($key)) {
-                throw new RuntimeException("Unknown job posting channel [{$key}].");
+                throw new RuntimeException("Unknown job ad channel ({$key}).");
             }
 
             $channel = $this->channels->resolve($key);

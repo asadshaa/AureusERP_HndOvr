@@ -29,7 +29,7 @@ enum ChannelPostingStatus: string implements HasColor, HasLabel
             self::WAITING         => __('Waiting for channel'),
             self::LIVE            => __('Live'),
             self::FAILED          => __('Problem'),
-            self::REMOVAL_PENDING => __('Take down'),
+            self::REMOVAL_PENDING => __('Needs taking down'),
             self::CLOSED          => __('Closed'),
         };
     }

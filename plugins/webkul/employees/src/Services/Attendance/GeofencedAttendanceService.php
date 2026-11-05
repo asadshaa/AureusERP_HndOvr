@@ -96,7 +96,7 @@ class GeofencedAttendanceService
         $verifierClass = match ($methodKey) {
             Method::Gps->value, 'gps'             => GpsGeofenceVerifier::class,
             Method::None->value, 'none', 'remote' => RemoteExemptVerifier::class,
-            default                               => throw new InvalidArgumentException("No verifier registered for method [{$methodKey}]."),
+            default                               => throw new InvalidArgumentException("This check-in method ({$methodKey}) is not supported."),
         };
 
         /** @var AttendanceVerifier $verifier */
@@ -233,11 +233,11 @@ class GeofencedAttendanceService
     public function recordClientFailure(User $user, Action $action, string $clientErrorCode, ?string $clientRequestId, Request $request): AttendanceAttemptResult
     {
         if (! isset(self::CLIENT_ERRORS[$clientErrorCode])) {
-            throw new InvalidArgumentException('Unknown client error code.');
+            throw new InvalidArgumentException('Your phone reported a problem we do not recognise. Please try again.');
         }
 
         if (! in_array($action, [Action::CheckIn, Action::CheckOut], true)) {
-            throw new InvalidArgumentException('Only check-in and check-out attempts can fail on the client.');
+            throw new InvalidArgumentException('Only a check-in or check-out can report a location problem.');
         }
 
         return $this->attempt($user, $action, null, $clientErrorCode, $request, $clientRequestId);
@@ -516,7 +516,7 @@ class GeofencedAttendanceService
     public function reviewVerification(AttendanceRecord $record, User $reviewer, bool $approve, string $note): void
     {
         if (trim($note) === '') {
-            throw new InvalidArgumentException('A review note is required.');
+            throw new InvalidArgumentException('Write a short note explaining your decision.');
         }
 
         DB::transaction(function () use ($record, $reviewer, $approve, $note): void {
@@ -526,12 +526,12 @@ class GeofencedAttendanceService
 
             $pending = $record->verifications()->where('review_status', 'pending')->get();
             if ($pending->isEmpty()) {
-                throw new RuntimeException('There is no pending verification to review on this record.');
+                throw new RuntimeException('This attendance has nothing waiting to be checked.');
             }
 
             foreach ($pending as $verification) {
                 if (! $reviewer->can('review', $verification)) {
-                    throw new AuthorizationException('You are not allowed to review this attendance verification.');
+                    throw new AuthorizationException('You are not allowed to check this attendance.');
                 }
             }
 
@@ -579,16 +579,16 @@ class GeofencedAttendanceService
             || ! $actor->can(HrPermissions::ManageAttendance)
             || (int) $employee->user_id === (int) $actor->id
             || ! $this->hierarchy->canManage($actor, $employee)) {
-            throw new AuthorizationException('You are not allowed to correct this attendance record.');
+            throw new AuthorizationException('You are not allowed to correct this attendance.');
         }
 
         if (mb_strlen(trim($reason)) < 10) {
-            throw new InvalidArgumentException('A correction reason of at least 10 characters is required.');
+            throw new InvalidArgumentException('Write a reason for the correction (at least 10 characters).');
         }
 
         $after = array_intersect_key($after, array_flip(['check_in', 'check_out']));
         if ($after === []) {
-            throw new InvalidArgumentException('A correction must change the check-in or check-out time.');
+            throw new InvalidArgumentException('Change the check-in or check-out time to save a correction.');
         }
 
         return DB::transaction(function () use ($record, $actor, $after, $reason, $employee): AttendanceVerification {
@@ -607,7 +607,7 @@ class GeofencedAttendanceService
                 $this->withAuditSuppressed(function () use ($record, $after, $actor): void {
                     $record->fill($after);
                     if ($record->check_in && $record->check_out && $record->check_out->lessThanOrEqualTo($record->check_in)) {
-                        throw new InvalidArgumentException('Check-out must be after check-in.');
+                        throw new InvalidArgumentException('Check-out time must be later than check-in time.');
                     }
                     $record->approved_by = $actor->id;
                     $record->verification_status = Status::Overridden->value;
@@ -688,12 +688,12 @@ class GeofencedAttendanceService
             || ! $actor->can(HrPermissions::ManageAttendance)
             || (int) $employee->user_id === (int) $actor->id
             || ! $this->hierarchy->canManage($actor, $employee)) {
-            throw new AuthorizationException('You are not allowed to delete this attendance record.');
+            throw new AuthorizationException('You are not allowed to delete this attendance.');
         }
 
         $evidenceBacked = in_array($record->source, AttendanceSource::evidenceBacked(), true);
         if ($evidenceBacked && mb_strlen(trim((string) $reason)) < 10) {
-            throw new InvalidArgumentException('A reason of at least 10 characters is required to delete GPS-verified attendance.');
+            throw new InvalidArgumentException('Write a reason (at least 10 characters) to delete attendance that was confirmed by location.');
         }
 
         DB::transaction(function () use ($record, $reason): void {
@@ -887,9 +887,9 @@ class GeofencedAttendanceService
 
                 $notification = FilamentNotification::make()
                     ->warning()
-                    ->title("Attendance review: {$title}")
+                    ->title("Attendance to check: {$title}")
                     ->body(sprintf(
-                        '%s (%s) %s [Forwarded to HR: no line manager assigned]',
+                        '%s (%s) %s (Sent to HR because no line manager is set.)',
                         $record->employee->name,
                         $record->attendance_date?->format('d M Y'),
                         $what,
@@ -906,7 +906,7 @@ class GeofencedAttendanceService
 
             $notification = FilamentNotification::make()
                 ->warning()
-                ->title("Attendance review: {$title}")
+                ->title("Attendance to check: {$title}")
                 ->body(sprintf(
                     '%s (%s) %s',
                     $record->employee->name,

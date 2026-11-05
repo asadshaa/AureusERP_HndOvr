@@ -51,10 +51,10 @@ class EmployeeRequestService
         $this->assertRequestIntegrity($request, $requester);
 
         if ($request->requestType->requires_amount && BigDecimal::of((string) ($request->amount ?? 0))->isLessThanOrEqualTo(0)) {
-            throw new RuntimeException('This employee request type requires a positive amount.');
+            throw new RuntimeException('Enter an amount greater than zero for this request.');
         }
         if ($request->requestType->requires_document && empty($request->attachments)) {
-            throw new RuntimeException('This employee request type requires a supporting document.');
+            throw new RuntimeException('Attach a supporting document for this request.');
         }
         $this->assertClaimTaxConsistency($request);
         $this->prepareSelfServicePayload($request);
@@ -130,7 +130,7 @@ class EmployeeRequestService
     ): EmployeeRequest {
         $record->loadMissing('employee');
         if (! $record->employee) {
-            throw new RuntimeException('The attendance record has no linked employee.');
+            throw new RuntimeException('This attendance is not linked to an employee, so a change cannot be requested.');
         }
         if ((int) $record->employee->user_id !== (int) $requester->id) {
             $this->hierarchy->assertCanManage($requester, $record->employee);
@@ -148,7 +148,7 @@ class EmployeeRequestService
             ARRAY_FILTER_USE_BOTH,
         );
         if ($requestedChanges === []) {
-            throw new RuntimeException('A time change request must propose at least a new check-in or check-out time.');
+            throw new RuntimeException('Enter a new check-in time, a new check-out time, or both.');
         }
 
         $requestType = EmployeeRequestType::query()
@@ -157,7 +157,7 @@ class EmployeeRequestService
             ->where('is_active', true)
             ->first();
         if (! $requestType) {
-            throw new RuntimeException('No active "Attendance Time Change" request type is configured for this company.');
+            throw new RuntimeException('Attendance change requests are not set up for this company yet. Ask HR to add an "Attendance Time Change" request type.');
         }
 
         $original = [
@@ -230,13 +230,13 @@ class EmployeeRequestService
             ->where('attendance_date', $date->toDateString())
             ->exists();
         if ($exists) {
-            throw new RuntimeException('A record already exists for that day. Request a time change on it instead.');
+            throw new RuntimeException('Attendance already exists for that day. Request a time change on it instead.');
         }
 
         if (ApprovedLeaveLookup::available()) {
             $onLeave = ApprovedLeaveLookup::approvedForEmployee($employee->id, $date->toDateString(), $date->toDateString())->exists();
             if ($onLeave) {
-                throw new RuntimeException('A missed attendance day cannot be requested on a day the employee has an approved leave.');
+                throw new RuntimeException('A missed day cannot be requested on a day with approved leave.');
             }
         }
 
@@ -245,7 +245,7 @@ class EmployeeRequestService
             fn ($value): bool => filled($value),
         );
         if (! array_key_exists('check_in', $times)) {
-            throw new RuntimeException('A missed-day request needs at least a check-in time.');
+            throw new RuntimeException('Enter at least the check-in time.');
         }
 
         $requested = [
@@ -253,7 +253,7 @@ class EmployeeRequestService
             'check_out' => isset($times['check_out']) ? $this->storedTime($times['check_out']) : null,
         ];
         if ($requested['check_out'] !== null && $requested['check_out'] <= $requested['check_in']) {
-            throw new RuntimeException('Check-out must be after check-in.');
+            throw new RuntimeException('Check-out time must be later than check-in time.');
         }
         $timezone = app(AttendanceScheduleResolver::class)->timezoneFor($employee);
 
@@ -263,7 +263,7 @@ class EmployeeRequestService
             ->where('is_active', true)
             ->first();
         if (! $requestType) {
-            throw new RuntimeException('No active "Attendance Time Change" request type is configured for this company.');
+            throw new RuntimeException('Attendance change requests are not set up for this company yet. Ask HR to add an "Attendance Time Change" request type.');
         }
 
         return DB::transaction(function () use ($employee, $requester, $requestType, $date, $requested, $reason, $timezone): EmployeeRequest {
@@ -296,7 +296,7 @@ class EmployeeRequestService
     /** @param  array<string, mixed>  $decisionValues  kept on the approval decision (e.g. overtime approved_minutes) */
     public function approve(EmployeeRequest $request, User $actor, ?string $reason = null, array $decisionValues = []): EmployeeRequest
     {
-        $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
+        $approval = $request->approvalRequest ?? throw new RuntimeException('This request has not been submitted yet.');
         $this->approvals->approve($approval, $actor, $reason, ['status' => $request->status], ['status' => 'approved'] + $decisionValues);
 
         return $this->synchronize($request);
@@ -304,7 +304,7 @@ class EmployeeRequestService
 
     public function reject(EmployeeRequest $request, User $actor, string $reason): EmployeeRequest
     {
-        $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
+        $approval = $request->approvalRequest ?? throw new RuntimeException('This request has not been submitted yet.');
         $this->approvals->reject($approval, $actor, $reason, ['status' => $request->status], ['status' => 'rejected']);
 
         return $this->synchronize($request);
@@ -319,7 +319,7 @@ class EmployeeRequestService
      */
     public function returnToRequester(EmployeeRequest $request, User $actor, string $comment): EmployeeRequest
     {
-        $approval = $request->approvalRequest ?? throw new RuntimeException('The employee request has not been submitted.');
+        $approval = $request->approvalRequest ?? throw new RuntimeException('This request has not been submitted yet.');
         $this->approvals->returnToRequester(
             $approval,
             $actor,
@@ -599,16 +599,16 @@ class EmployeeRequestService
     public function createAccountingDraft(EmployeeRequest $request): EmployeeRequest
     {
         if ($request->status !== 'approved' || ! $request->requestType->is_financial) {
-            throw new RuntimeException('Only approved financial employee requests can be sent to Accounting.');
+            throw new RuntimeException('Only approved money requests can be sent to Accounting.');
         }
         if ($request->accounting_move_id) {
             return $request;
         }
         if (BigDecimal::of((string) ($request->amount ?? 0))->isLessThanOrEqualTo(0)) {
-            throw new RuntimeException('A positive amount is required for Accounting integration.');
+            throw new RuntimeException('Enter an amount greater than zero before sending this to Accounting.');
         }
         if ((int) $request->currency_id !== (int) $request->company->currency_id) {
-            throw new RuntimeException('Financial employee requests must use the company currency until an approved HR exchange-rate workflow is configured.');
+            throw new RuntimeException('Money requests must be in the company\'s own currency. Change the currency and try again.');
         }
 
         $type = $request->requestType;
@@ -620,7 +620,7 @@ class EmployeeRequestService
         // here instead of posting against a journal nobody chose.
         $journal = Journal::query()->whereKey($type->journal_id)->where('company_id', $request->company_id)->first();
         if (! $journal || $journal->type !== JournalType::PURCHASE) {
-            throw new RuntimeException('The employee request type requires a company-owned Purchase Journal.');
+            throw new RuntimeException('This request type has no purchase journal of this company. Ask your accountant to set one on the request type.');
         }
         // Only the debit (expense) account is used to build a line here --
         // credit_account_id is intentionally not read: the balancing
@@ -728,7 +728,7 @@ class EmployeeRequestService
         if ($request->tax_deduction_rate !== null
             && (BigDecimal::of((string) $request->tax_deduction_rate)->isNegative()
                 || BigDecimal::of((string) $request->tax_deduction_rate)->isGreaterThan('100'))) {
-            throw new RuntimeException('Tax deduction rate must be between 0 and 100.');
+            throw new RuntimeException('The tax deduction rate must be between 0 and 100%.');
         }
 
         $totalDeductions = $incomeTax->plus($salesTax);
@@ -1053,12 +1053,12 @@ class EmployeeRequestService
     private function assertRequestIntegrity(EmployeeRequest $request, User $requester): void
     {
         if (! in_array($request->status, ['draft', 'rejected', 'returned'], true)) {
-            throw new RuntimeException('Only draft, rejected or returned employee requests can be submitted.');
+            throw new RuntimeException('Only a draft, rejected or returned request can be submitted.');
         }
         if ((int) $request->employee?->company_id !== (int) $request->company_id
             || (int) $request->requestType?->company_id !== (int) $request->company_id
             || ! $request->requestType?->is_active) {
-            throw new RuntimeException('Employee request, employee, and request type must belong to the same company.');
+            throw new RuntimeException('The employee and the request type must be in the same company as the request. Switch to the employee\'s company and try again.');
         }
         if ((int) $request->employee->user_id !== (int) $requester->id) {
             $this->hierarchy->assertCanManage($requester, $request->employee);
@@ -1074,7 +1074,7 @@ class EmployeeRequestService
             ->whereHas('companies', fn ($query) => $query->where('companies.id', $companyId))
             ->first();
         if (! $account) {
-            throw new RuntimeException('Employee request accounting accounts must be active, postable, and owned by the company.');
+            throw new RuntimeException('The accounts set on this request type cannot be used. Ask your accountant to choose active accounts of this company on the request type.');
         }
 
         return $account;
@@ -1123,7 +1123,7 @@ class EmployeeRequestService
                 $routingNote = '[Routed to Line Manager]';
             } else {
                 $recipients = $this->approvals->resolveHrApproversForCompany((int) $request->company_id, (int) $requester->id);
-                $routingNote = '[Forwarded to HR: no line manager assigned]';
+                $routingNote = '(Sent to HR because no line manager is set.)';
             }
 
             if ($recipients->isEmpty()) {

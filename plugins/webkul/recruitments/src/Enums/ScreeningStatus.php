@@ -20,7 +20,7 @@ enum ScreeningStatus: string implements HasColor, HasLabel
         return match ($this) {
             self::PASSED     => __('Passed'),
             self::FLAGGED    => __('Not qualified'),
-            self::OVERRIDDEN => __('Passed (override)'),
+            self::OVERRIDDEN => __('Accepted anyway'),
         };
     }
 

@@ -479,7 +479,7 @@ it('refuses the whole undo when a day is in a locked month', function () {
     ]));
     dviLockMonth('2026-09');
 
-    expect(fn () => $this->service->undo($hr, $batch))->toThrow(RuntimeException::class, 'Undo refused');
+    expect(fn () => $this->service->undo($hr, $batch))->toThrow(RuntimeException::class, 'Nothing was undone');
 
     expect(dviRecord($employee, '2026-09-30'))->not->toBeNull()
         ->and(dviRecord($employee, '2026-10-01'))->not->toBeNull()

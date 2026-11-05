@@ -1,6 +1,6 @@
 <?php
 
 return [
-    'yes' => 'Extra Days Request Allowed',
-    'no'  => 'Not Allowed',
+    'yes' => 'Employees can ask for extra days',
+    'no'  => 'Employees cannot ask for extra days',
 ];

@@ -2,8 +2,8 @@
 
 namespace App\Filament\Widgets;
 
+use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Widgets\Widget;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Employee\Enums\AttendanceVerificationStatus;
 use Webkul\Employee\Filament\Pages\TodayAttendance as TodayAttendancePage;
@@ -58,12 +58,10 @@ class TodayAttendanceRollCallWidget extends Widget
         $offDay = null;
 
         if ($user instanceof User && $companyId !== null) {
-            try {
-                $report = $service->forCompany($user, $companyId);
-            } catch (AuthorizationException) {
-                // Admin roles that may see the widget without the attendance permissions: whole active company, as before.
-                $report = $service->forWholeCompany($companyId);
-            }
+            // Shared with the Today box (worked out once per request). Admin roles that may see the
+            // widget without the attendance permissions get the whole active company, as before.
+            $context = app(HomeDashboardContext::class);
+            $report = $context->todayAttendance() ?? $context->wholeCompanyAttendance();
 
             $counts = $report['counts'];
             $dateLabel = $report['date_label'];

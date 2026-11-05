@@ -238,7 +238,7 @@ class WebsiteIntakeService
 
         try {
             if (! $applicationId) {
-                throw new RuntimeException('The website sent an application without a valid id.');
+                throw new RuntimeException('The website sent an application without a valid reference number.');
             }
 
             // Imported before (the acknowledgement did not reach the website): acknowledge again.
@@ -502,7 +502,7 @@ class WebsiteIntakeService
         $declared = $declared ?: strtolower(pathinfo((string) $file['filename'], PATHINFO_EXTENSION));
 
         if ($declared !== '' && $declared !== $type && ! (in_array($declared, ['doc', 'docx'], true) && in_array($type, ['doc', 'docx'], true))) {
-            throw new RuntimeException("The CV's content ({$type}) does not match its file name (.{$declared}).");
+            throw new RuntimeException("The CV file looks like {$type}, but its name ends in .{$declared}. Ask the applicant to send it again.");
         }
 
         $path = 'recruitment/cv/'.Str::uuid()->toString().'.'.$type;

@@ -25,17 +25,17 @@ class LeaveApprovalService
     {
         $leave->loadMissing('employee');
         if (! $leave->employee || (int) $leave->employee->company_id !== (int) $leave->company_id) {
-            throw new RuntimeException('The leave employee does not belong to the leave company.');
+            throw new RuntimeException('This employee is not in the company of this leave request. Switch to the employee\'s company and try again.');
         }
         if (
             (int) $leave->employee->user_id !== (int) $requester->id
             && ! app(HrHierarchyService::class)->canManage($requester, $leave->employee)
             && ! $requester->can('hr_approve_leave')
         ) {
-            throw new RuntimeException('A user can only submit leave for their own HR hierarchy.');
+            throw new RuntimeException('You can only request leave for yourself or for employees you manage.');
         }
         if (! in_array($leave->state, [State::CONFIRM, State::REFUSE], true)) {
-            throw new RuntimeException('Only a new or refused leave request can be submitted.');
+            throw new RuntimeException('Only a new or rejected leave request can be submitted.');
         }
         if ($leave->request_unit_hours) {
             // Re-checked on submit: a refused request resubmitted must still fit this month's limit.
@@ -116,7 +116,7 @@ class LeaveApprovalService
     public function returnToRequester(Leave $leave, User $actor, string $comment): Leave
     {
         $approval = $leave->approvalRequest
-            ?? throw new RuntimeException('The leave request has not been submitted.');
+            ?? throw new RuntimeException('This leave request has not been submitted yet.');
         $this->approvals->returnToRequester(
             $approval,
             $actor,
@@ -231,7 +231,7 @@ class LeaveApprovalService
     public function approve(Leave $leave, User $actor, ?string $reason = null): Leave
     {
         $approval = $leave->approvalRequest
-            ?? throw new RuntimeException('The leave request has not been submitted.');
+            ?? throw new RuntimeException('This leave request has not been submitted yet.');
         $this->approvals->approve($approval, $actor, $reason);
 
         return $this->synchronize($leave);
@@ -240,7 +240,7 @@ class LeaveApprovalService
     public function reject(Leave $leave, User $actor, string $reason): Leave
     {
         $approval = $leave->approvalRequest
-            ?? throw new RuntimeException('The leave request has not been submitted.');
+            ?? throw new RuntimeException('This leave request has not been submitted yet.');
         $this->approvals->reject($approval, $actor, $reason);
 
         return $this->synchronize($leave);
@@ -338,7 +338,7 @@ class LeaveApprovalService
                 // The company's HR people, as the approval engine resolves them for its HR
                 // fallback: a plain manager holding hr_approve_leave for their own reports is not HR.
                 $recipients = $this->approvals->resolveHrApproversForCompany((int) $leave->company_id, (int) $requester->id);
-                $routingNote = '[Forwarded to HR: no line manager assigned]';
+                $routingNote = '(Sent to HR because no line manager is set.)';
             }
 
             if ($recipients->isEmpty()) {

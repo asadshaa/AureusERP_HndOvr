@@ -36,7 +36,7 @@ class JobPostingChannelRegistry
     public function resolve(string $key): JobPostingChannel
     {
         return $this->channels[$key]
-            ?? throw new InvalidArgumentException("Unknown job posting channel [{$key}].");
+            ?? throw new InvalidArgumentException("Unknown job ad channel ({$key}).");
     }
 
     public function has(string $key): bool

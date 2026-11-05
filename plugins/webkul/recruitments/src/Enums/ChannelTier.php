@@ -21,9 +21,9 @@ enum ChannelTier: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::AUTOMATIC => __('Automatic'),
-            self::FEED      => __('Feed'),
+            self::FEED      => __('Automatic feed'),
             self::MANUAL    => __('Posted by recruiter'),
-            self::API       => __('API'),
+            self::API       => __('Connected account'),
         };
     }
 

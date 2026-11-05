@@ -89,11 +89,11 @@ class AttendanceInterval extends Model
         static::saving(function (self $interval): void {
             $record = $interval->attendanceRecord;
             if ($record && ((int) $record->company_id !== (int) $interval->company_id || (int) $record->employee_id !== (int) $interval->employee_id)) {
-                throw new InvalidArgumentException('An attendance interval must belong to the same company and employee as its day.');
+                throw new InvalidArgumentException('This time entry belongs to a different employee or company. Open the right employee\'s day and add it there.');
             }
 
             if ($interval->check_out !== null && $interval->check_out->lessThanOrEqualTo($interval->check_in)) {
-                throw new InvalidArgumentException('Check-out must be after check-in.');
+                throw new InvalidArgumentException('Check-out time must be later than check-in time.');
             }
         });
     }

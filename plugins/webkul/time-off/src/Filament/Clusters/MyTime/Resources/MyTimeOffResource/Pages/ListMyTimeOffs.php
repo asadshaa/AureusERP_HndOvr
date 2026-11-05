@@ -4,6 +4,7 @@ namespace Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource\Pa
 
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\TimeOff\Filament\Clusters\MyTime\Resources\MyTimeOffResource;
 
 class ListMyTimeOffs extends ListRecords
@@ -13,6 +14,7 @@ class ListMyTimeOffs extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('my-leave'),
             CreateAction::make()
                 ->icon('heroicon-o-plus-circle'),
         ];

@@ -356,7 +356,7 @@ it('shows the recorded extra minutes and validates an overtime request server-si
     // A colleague outside the employee's reporting line cannot file it.
     $colleague = solUser($company);
     solEmployee($company, 'Colleague', ['user_id' => $colleague->id]);
-    expect(fn () => $service->request($team['employee'], $colleague, '2026-08-03', 60))->toThrow(RuntimeException::class, 'hierarchy');
+    expect(fn () => $service->request($team['employee'], $colleague, '2026-08-03', 60))->toThrow(RuntimeException::class, 'employees you manage');
 });
 
 it('routes overtime to the line manager, then HR, and never approves more than recorded', function () {

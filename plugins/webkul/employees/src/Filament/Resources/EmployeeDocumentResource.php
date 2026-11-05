@@ -86,6 +86,9 @@ class EmployeeDocumentResource extends Resource
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['documentType', 'employee', 'uploader']))
             ->columns(static::documentColumns(withEmployee: true))
             ->defaultSort('expires_on')
+            ->emptyStateIcon('heroicon-o-document-text')
+            ->emptyStateHeading('No documents to follow up')
+            ->emptyStateDescription('Documents are uploaded on each employee\'s Documents tab. They are listed here so you can find expired, expiring and unchecked ones.')
             ->filters([
                 static::companyFilter(),
                 SelectFilter::make('document_type')
@@ -118,6 +121,7 @@ class EmployeeDocumentResource extends Resource
                     ->label('Employee')
                     ->icon('heroicon-o-user')
                     ->color('gray')
+                    ->tooltip('Open the employee to upload or replace documents')
                     ->url(fn (EmployeeDocument $record): string => EmployeeResource::getUrl('view', ['record' => $record->employee_id])),
                 ActionGroup::make(static::manageActions()),
             ]);
@@ -201,16 +205,19 @@ class EmployeeDocumentResource extends Resource
             TextInput::make('title')
                 ->label('Title')
                 ->maxLength(255)
-                ->helperText('Optional, e.g. "BS Computer Science".'),
+                ->placeholder('e.g. BS Computer Science')
+                ->helperText('Optional.'),
             TextInput::make('number')
                 ->label('Document number')
                 ->maxLength(120)
+                ->placeholder('e.g. 12345-1234567-1')
                 ->helperText('e.g. CNIC or passport number.'),
             DatePicker::make('issued_on')
                 ->label('Issued on')
                 ->native(false),
             DatePicker::make('expires_on')
                 ->label('Expires on')
+                ->helperText('HR is reminded 30 days and 7 days before this date.')
                 ->native(false)
                 ->afterOrEqual('issued_on')
                 ->visible($withType ? $hasExpiry : $showExpiry),
@@ -256,6 +263,9 @@ class EmployeeDocumentResource extends Resource
                 ->color('success')
                 ->visible(fn (EmployeeDocument $record): bool => $record->status === EmployeeDocument::STATUS_PENDING && $canManage($record))
                 ->requiresConfirmation()
+                ->modalHeading('Mark this document as checked?')
+                ->modalDescription('Confirm you have looked at the file and it is correct. It then counts as received for this employee.')
+                ->modalSubmitActionLabel('Mark as checked')
                 ->action(function (EmployeeDocument $record) use ($service): void {
                     $service()->verify($record, Auth::user());
                     Notification::make()->success()->title('Document checked')->send();
@@ -287,6 +297,7 @@ class EmployeeDocumentResource extends Resource
                 ->color('danger')
                 ->visible($canManage)
                 ->requiresConfirmation()
+                ->modalHeading('Delete this document?')
                 ->modalDescription('The document is removed from the list. The file is kept for the audit trail.')
                 ->action(function (EmployeeDocument $record) use ($service): void {
                     $service()->delete($record, Auth::user());

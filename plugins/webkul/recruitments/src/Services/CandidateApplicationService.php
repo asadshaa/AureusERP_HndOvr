@@ -40,7 +40,7 @@ class CandidateApplicationService
         }
 
         if ($posting && ((int) $posting->job_id !== (int) $job->id || (int) $posting->company_id !== $companyId)) {
-            throw new RuntimeException('The posting does not belong to this job.');
+            throw new RuntimeException('The selected job ad does not belong to this job.');
         }
 
         $attribution = $posting ? $this->links->attributionFor($posting) : null;

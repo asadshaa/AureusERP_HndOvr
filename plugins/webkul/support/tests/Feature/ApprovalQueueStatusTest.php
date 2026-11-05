@@ -94,7 +94,7 @@ it('shows a withdrawn request as a gray Withdrawn badge, filters by it, and neve
     $list = Livewire::test(ListApprovalRequests::class)
         ->assertCanSeeTableRecords([$pending, $withdrawn])
         ->assertTableColumnFormattedStateSet('status', 'Withdrawn', $withdrawn)
-        ->assertTableColumnFormattedStateSet('status', 'Pending', $pending);
+        ->assertTableColumnFormattedStateSet('status', 'Waiting for approval', $pending);
 
     $statusColumn = $list->instance()->getTable()->getColumn('status');
     $statusColumn->record($withdrawn->fresh());

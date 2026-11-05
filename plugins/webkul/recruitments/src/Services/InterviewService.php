@@ -165,7 +165,7 @@ class InterviewService
         $this->assertCanManage($actor, $applicant);
 
         if ($applicant->refuse_reason_id || ! $applicant->is_active || $applicant->trashed()) {
-            throw new RuntimeException(__('This application is refused or archived. Reopen it before scheduling an interview.'));
+            throw new RuntimeException(__('This application is rejected or archived. Reopen it before scheduling an interview.'));
         }
 
         $notifyCandidate = (bool) ($data['notify_candidate'] ?? true);

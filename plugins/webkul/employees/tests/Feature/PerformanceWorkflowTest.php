@@ -121,7 +121,7 @@ it('refuses submitSelfReview() for anyone other than the review\'s own employee'
     $other = Employee::query()->create(['company_id' => $f['company']->id, 'user_id' => $otherUser->id, 'name' => 'Someone Else']);
 
     expect(fn () => $service->submitSelfReview($review, $other, 5.0))
-        ->toThrow(RuntimeException::class, 'not available for employee self-review');
+        ->toThrow(RuntimeException::class, 'not open for your self review');
 });
 
 // ---------------------------------------------------------------------
@@ -138,7 +138,7 @@ it('refuses completeManagerReview() for anyone other than the assigned reviewer'
     $stranger = Employee::query()->create(['company_id' => $f['company']->id, 'user_id' => $otherUser->id, 'name' => 'Unrelated Manager']);
 
     expect(fn () => $service->completeManagerReview($review, $stranger, 4.0))
-        ->toThrow(RuntimeException::class, 'not the assigned manager reviewer');
+        ->toThrow(RuntimeException::class, 'not the manager chosen to review this appraisal');
 });
 
 // ---------------------------------------------------------------------

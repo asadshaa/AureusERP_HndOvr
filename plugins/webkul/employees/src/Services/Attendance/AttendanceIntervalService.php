@@ -90,12 +90,12 @@ class AttendanceIntervalService
         $intervals = $isFirstCheckIn ? collect() : $this->intervalsFor($record);
 
         if ($intervals->contains(fn (AttendanceInterval $interval): bool => $interval->isOpen())) {
-            throw new RuntimeException('This day already has an open check-in.');
+            throw new RuntimeException('This day already has a check-in without a check-out. Add the check-out first.');
         }
 
         $last = $intervals->last();
         if ($last && $last->check_out && Carbon::instance($at)->lessThan($last->check_out)) {
-            throw new InvalidArgumentException('A new check-in cannot be earlier than the previous check-out.');
+            throw new InvalidArgumentException('A new check-in must be later than the previous check-out.');
         }
 
         return AttendanceInterval::query()->create([
@@ -112,7 +112,7 @@ class AttendanceIntervalService
     /** Closes the day's open interval. */
     public function close(AttendanceRecord $record, CarbonInterface $at, ?int $verificationId = null, ?string $verificationStatus = null): AttendanceInterval
     {
-        $open = $this->openInterval($record) ?? throw new RuntimeException('There is no open check-in to close.');
+        $open = $this->openInterval($record) ?? throw new RuntimeException('There is no check-in waiting for a check-out.');
 
         $open->fill([
             'check_out'           => $at,

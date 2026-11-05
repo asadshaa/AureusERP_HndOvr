@@ -5,14 +5,14 @@ return [
     'results' => [
         'verified'               => 'Location verified.',
         'needs_review'           => 'Recorded, but your location could not be confirmed precisely, so HR may review it.',
-        'outside_geofence'       => 'You appear to be outside your authorized workplace. Move closer and try again, or contact your manager.',
+        'outside_geofence'       => 'You seem to be away from your workplace. Move closer and try again, or contact your manager.',
         'low_accuracy'           => 'Location accuracy is too low. Turn on precise location, move near a window or outdoors, and try again.',
         'invalid_coordinates'    => 'We could not read a valid location. Please try again.',
         'stale_location'         => 'Your location reading was out of date. Please try again.',
         'permission_denied'      => 'Location permission is required to check in. Allow location for this site in your browser settings, then try again.',
         'location_unavailable'   => 'Your phone could not determine your location. Check that location services are on, then try again.',
         'location_timeout'       => 'Finding your location took too long. Check that location services are on, then try again.',
-        'insecure_context'       => 'Location can only be used over a secure (https) connection. Please use the official Aureus address.',
+        'insecure_context'       => 'Location only works on the secure Aureus address (starting with https). Please open Aureus from the official link.',
         'no_location_configured' => 'No workplace is set up for mobile check-in. Please contact HR.',
         'employee_not_eligible'  => 'Your employee profile is not set up for mobile check-in. Please contact HR.',
         'already_checked_in'     => 'You already checked in today.',
@@ -21,16 +21,16 @@ return [
         'open_shift_exists'      => 'You are still checked in. Please check out first.',
         'on_leave_or_holiday'    => 'Today is recorded as leave or holiday. Contact HR if this is wrong.',
         'remote_exempt'          => 'Recorded (remote).',
-        'review_approved'        => 'Review approved.',
-        'review_rejected'        => 'Review rejected.',
-        'too_early_for_checkout' => 'Minimum shift duration is 1 hour. You cannot check out yet.',
+        'review_approved'        => 'Checked and accepted.',
+        'review_rejected'        => 'Checked and rejected.',
+        'too_early_for_checkout' => 'You can check out 1 hour after checking in. Please try again later.',
     ],
 
     'with_time' => [
         'already_checked_in'     => 'You already checked in today at :time.',
         'already_checked_out'    => 'You already checked out today at :time.',
         'open_shift_exists'      => 'You are still checked in since :time. Please check out first.',
-        'too_early_for_checkout' => 'Minimum shift duration is 1 hour. Check-out will be available at :time.',
+        'too_early_for_checkout' => 'You can check out 1 hour after checking in, from :time.',
     ],
 
     'done' => [

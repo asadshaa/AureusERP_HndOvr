@@ -22,6 +22,7 @@ use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Models\Company;
 
 /**
@@ -132,6 +133,7 @@ class PayrollInput extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('attendance-report'),
             Action::make('downloadExcel')
                 ->label(fn (): string => $this->isDraft() ? 'Download DRAFT Excel' : 'Download Excel')
                 ->icon('heroicon-o-arrow-down-tray')

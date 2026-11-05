@@ -469,9 +469,11 @@ class EmployeeRequestResource extends Resource
                 Select::make('employee_id')
                     ->relationship('employee', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', $companyId)->whereIn('id', $visibleEmployeeIds))
                     ->default(fn (): ?int => Auth::user()?->employee?->id)
+                    ->helperText('Who the request is for. Usually yourself.')
                     ->required()->searchable()->preload()->live(),
                 Select::make('request_type_id')
                     ->label('Approval Type')
+                    ->helperText('Loan, salary advance, HR letter, overtime, claim or attendance correction. The form then shows only what that type needs.')
                     ->relationship('requestType', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', $companyId)->where('is_active', true))
                     ->required()->searchable()->preload()->live()
                     ->afterStateUpdated(function (Set $set, $state, Get $get) {
@@ -543,6 +545,7 @@ class EmployeeRequestResource extends Resource
                 ->placeholder(fn (Get $get): string => $isAttendance($get) ? 'e.g. Attendance time change for Sunday (optional -- auto-generated if left blank)' : 'Request title (optional -- auto-generated if left blank)'),
             Textarea::make('description')
                 ->label(fn (Get $get): string => $isAttendance($get) ? 'Reason for attendance adjustment (optional)' : 'Description / Notes (optional)')
+                ->placeholder(fn (Get $get): string => $isAttendance($get) ? 'e.g. Forgot to check out, fingerprint machine was down' : 'Anything your approvers should know')
                 ->columnSpanFull(),
 
             Section::make('Attendance Details')
@@ -650,6 +653,7 @@ class EmployeeRequestResource extends Resource
                     TextInput::make('amount')
                         ->label(fn (Get $get): string => $isLoan($get) ? 'Loan amount' : 'Advance amount')
                         ->prefix($companyCurrency)
+                        ->placeholder(fn (Get $get): string => $isLoan($get) ? 'e.g. 150000' : 'e.g. 25000')
                         ->numeric()
                         ->minValue(1)
                         ->maxValue(fn (Get $get): ?float => $isAdvance($get) && ($cap = $advanceCap($get)) !== null ? (float) $cap : null)
@@ -671,12 +675,14 @@ class EmployeeRequestResource extends Resource
                         ->integer()
                         ->minValue(EmployeeRequestKinds::MinInstalments)
                         ->maxValue(EmployeeRequestKinds::MaxInstalments)
-                        ->helperText('Monthly, 1 to 24.')
+                        ->placeholder('e.g. 6')
+                        ->helperText('Monthly, 1 to 24. The amount is split equally and taken from salary each month.')
                         ->live(onBlur: true)
                         ->visible($isLoan)
                         ->required($isLoan),
                     Select::make('payload.start_month')
                         ->label('First instalment month')
+                        ->helperText('The first salary the instalment is taken from.')
                         ->options(fn (): array => EmployeeRequestKinds::upcomingMonths())
                         ->live()
                         ->visible($isLoan)
@@ -695,16 +701,19 @@ class EmployeeRequestResource extends Resource
                         }),
                     Select::make('payload.deduct_month')
                         ->label('Deduct from salary of')
+                        ->helperText('The whole advance is taken back from this month\'s salary.')
                         ->options(fn (): array => EmployeeRequestKinds::upcomingMonths())
                         ->visible($isAdvance)
                         ->required($isAdvance),
                     Textarea::make('payload.purpose')
                         ->label('Purpose of the loan')
+                        ->placeholder('e.g. Medical treatment for a family member')
                         ->columnSpanFull()
                         ->visible($isLoan)
                         ->required($isLoan),
                     Textarea::make('payload.reason')
                         ->label('Reason for the advance')
+                        ->placeholder('e.g. School fee due before payday')
                         ->columnSpanFull()
                         ->visible($isAdvance)
                         ->required($isAdvance),
@@ -725,11 +734,13 @@ class EmployeeRequestResource extends Resource
                         ->required($isLetter),
                     DatePicker::make('payload.needed_by')
                         ->label('Needed by')
+                        ->helperText('HR prepares the letter by this date. You can download it here once it is issued.')
                         ->native(false)
                         ->minDate(today())
                         ->required($isLetter),
                     Textarea::make('payload.letter_purpose')
                         ->label('Purpose')
+                        ->placeholder('e.g. Visa application for a family visit to the UAE')
                         ->columnSpanFull()
                         ->required($isLetter),
                 ]),
@@ -749,6 +760,7 @@ class EmployeeRequestResource extends Resource
                         ->integer()
                         ->minValue(OvertimeService::MinimumMinutes)
                         ->step(OvertimeService::StepMinutes)
+                        ->placeholder('e.g. 90')
                         ->helperText('At least 30, in steps of 15, and not more than the extra time recorded that day.')
                         ->required($isOvertime),
                     Placeholder::make('overtime_recorded')
@@ -757,6 +769,7 @@ class EmployeeRequestResource extends Resource
                         ->columnSpanFull(),
                     Textarea::make('payload.overtime_reason')
                         ->label('What was the overtime for?')
+                        ->placeholder('e.g. Month-end shipment loading')
                         ->columnSpanFull(),
                 ]),
 
@@ -790,12 +803,15 @@ class EmployeeRequestResource extends Resource
                 ->schema([
                     TextInput::make('billed_amount')
                         ->label('Claim/budget')
+                        ->placeholder('e.g. 12500')
+                        ->helperText('The full amount on the bill or receipt.')
                         ->numeric()->minValue(0)
                         ->required($isFinancial)
                         ->live(onBlur: true)
                         ->afterStateUpdated(fn (Set $set, Get $get) => static::recalculateNetPayment($set, $get)),
                     TextInput::make('tax_deduction_rate')
                         ->label('Tax deduction rate (%)')
+                        ->helperText('Leave empty if no tax is withheld. Finance can adjust it during review.')
                         ->numeric()->minValue(0)->maxValue(100)->suffix('%')
                         ->live(onBlur: true)
                         ->afterStateUpdated(fn (Set $set, Get $get) => static::recalculateNetPayment($set, $get)),
@@ -821,9 +837,9 @@ class EmployeeRequestResource extends Resource
             Section::make('Bank Details')->columns(3)
                 ->visible(fn (Get $get): bool => $isFinancial($get) && $canSeeBankDetails($get))
                 ->schema([
-                    TextInput::make('account_title')->label('Account Title')->required($isFinancial)->maxLength(255),
-                    TextInput::make('iban')->label('IBAN')->required($isFinancial)->maxLength(50),
-                    TextInput::make('bank_name')->label('Bank Name')->required($isFinancial)->maxLength(255),
+                    TextInput::make('account_title')->label('Account Title')->placeholder('e.g. Ali Raza Khan')->helperText('The name on the account the money is paid into.')->required($isFinancial)->maxLength(255),
+                    TextInput::make('iban')->label('IBAN')->placeholder('PK36 SCBL 0000 0011 2345 6702')->required($isFinancial)->maxLength(50),
+                    TextInput::make('bank_name')->label('Bank Name')->placeholder('e.g. Meezan Bank')->required($isFinancial)->maxLength(255),
                 ]),
         ];
     }
@@ -1114,6 +1130,9 @@ class EmployeeRequestResource extends Resource
             TextColumn::make('submitted_at')->dateTime()->placeholder('Not submitted')->toggleable(),
         ])
             ->defaultSort('created_at', 'desc')
+            ->emptyStateIcon('heroicon-o-inbox')
+            ->emptyStateHeading('No requests yet')
+            ->emptyStateDescription('Press Submit above to ask for a loan, salary advance, HR letter, overtime or claim. Requests of the people you manage, and ones waiting for your approval, appear here too.')
             ->filters([
                 SelectFilter::make('status')->options([
                     'draft'    => 'Draft', 'pending_approval' => 'Pending approval',
@@ -1132,6 +1151,9 @@ class EmployeeRequestResource extends Resource
                     ->url(fn (EmployeeRequest $record): string => EmployeeResource::getUrl('view', ['record' => $record->employee_id])),
                 Action::make('submit')
                     ->icon('heroicon-o-paper-airplane')->color('primary')->requiresConfirmation()
+                    ->modalHeading('Send this request for approval?')
+                    ->modalDescription('It goes to the first approver, usually the line manager, then HR. You are notified of each decision, and the list shows who has to act next.')
+                    ->modalSubmitActionLabel('Submit for approval')
                     ->visible(fn (EmployeeRequest $record): bool => in_array($record->status, ['draft', 'rejected'], true))
                     ->action(function (EmployeeRequest $record): void {
                         try {
@@ -1233,6 +1255,9 @@ class EmployeeRequestResource extends Resource
                     ->label('Approve')
                     ->icon('heroicon-o-check')
                     ->color('success')
+                    ->modalHeading(fn (EmployeeRequest $record): string => 'Approve '.($record->requestType?->name ?? 'this request').($record->employee?->name ? ' for '.$record->employee->name : '').'?')
+                    ->modalDescription('If you are the last approver, the request becomes final: money requests are scheduled for payment or salary deduction, and attendance corrections change the attendance record. Otherwise it moves to the next approver. The requester is notified.')
+                    ->modalSubmitActionLabel('Approve')
                     ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
                         && $record->approvalRequest !== null
                         && Auth::user() !== null
@@ -1268,13 +1293,16 @@ class EmployeeRequestResource extends Resource
                     ->icon('heroicon-o-x-mark')
                     ->color('danger')
                     ->requiresConfirmation()
+                    ->modalHeading('Reject this request?')
+                    ->modalDescription('The request is closed and nothing is paid or changed. The requester sees your reason and can make a new request.')
+                    ->modalSubmitActionLabel('Reject')
                     ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
                         && $record->approvalRequest !== null
                         && Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user())
                     )
                     ->schema([
-                        Textarea::make('reason')->label('Rejection reason')->required(),
+                        Textarea::make('reason')->label('Rejection reason')->placeholder('e.g. Receipt is missing; please attach it and submit again')->required(),
                     ])
                     ->action(function (EmployeeRequest $record, array $data): void {
                         try {
@@ -1288,7 +1316,9 @@ class EmployeeRequestResource extends Resource
                     ->label('Return to requester')
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->color('info')
+                    ->modalHeading('Return this request for changes?')
                     ->modalDescription('The requester is asked to change the request and resubmit it. Approval then starts again from the first step.')
+                    ->modalSubmitActionLabel('Return to requester')
                     ->visible(fn (EmployeeRequest $record): bool => $record->status === 'pending_approval'
                         && $record->approvalRequest !== null
                         && Auth::user() !== null
@@ -1310,7 +1340,9 @@ class EmployeeRequestResource extends Resource
                     ->icon('heroicon-o-paper-airplane')
                     ->color('primary')
                     ->requiresConfirmation()
+                    ->modalHeading('Resubmit this request?')
                     ->modalDescription('The changed request goes back to approval and starts again from the first step.')
+                    ->modalSubmitActionLabel('Resubmit')
                     ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
                         && app(EmployeeRequestService::class)->canResubmit($record, Auth::user()))
                     ->action(function (EmployeeRequest $record): void {
@@ -1329,7 +1361,9 @@ class EmployeeRequestResource extends Resource
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->color('gray')
                     ->requiresConfirmation()
+                    ->modalHeading('Withdraw this request?')
                     ->modalDescription('The request is taken back and nobody needs to approve it any more. This cannot be undone; create a new request if needed.')
+                    ->modalSubmitActionLabel('Withdraw')
                     ->schema([
                         Textarea::make('reason')->label('Reason (optional)')->maxLength(2000),
                     ])
@@ -1347,6 +1381,9 @@ class EmployeeRequestResource extends Resource
                     ->label('Generate letter (PDF)')
                     ->icon('heroicon-o-document-text')
                     ->color('success')
+                    ->modalHeading('Generate the letter')
+                    ->modalDescription('A PDF letter is made and shared with the employee, who can download it from this request.')
+                    ->modalSubmitActionLabel('Generate and share')
                     ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
                         && app(EmployeeRequestService::class)->canIssueLetter(Auth::user(), $record))
                     ->schema(fn (EmployeeRequest $record): array => [
@@ -1370,6 +1407,9 @@ class EmployeeRequestResource extends Resource
                     ->label('Attach letter')
                     ->icon('heroicon-o-paper-clip')
                     ->color('success')
+                    ->modalHeading('Attach the signed letter')
+                    ->modalDescription('Upload the signed letter (PDF or image). It is shared with the employee, who can download it from this request.')
+                    ->modalSubmitActionLabel('Attach and share')
                     ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User
                         && app(EmployeeRequestService::class)->canIssueLetter(Auth::user(), $record))
                     ->schema([
@@ -1399,6 +1439,7 @@ class EmployeeRequestResource extends Resource
                 Action::make('refresh_approval')
                     ->label('Refresh approval')
                     ->icon('heroicon-o-arrow-path')
+                    ->tooltip('Re-read the approval status if it looks out of date')
                     ->visible(fn (EmployeeRequest $record): bool => $record->approval_request_id !== null && $record->status === 'pending_approval')
                     ->action(function (EmployeeRequest $record): void {
                         app(EmployeeRequestService::class)->synchronize($record);
@@ -1417,14 +1458,22 @@ class EmployeeRequestResource extends Resource
                             ]);
                         }
                     }),
-                DeleteAction::make()->visible(fn (EmployeeRequest $record): bool => $record->status === 'draft'),
+                DeleteAction::make()
+                    ->modalHeading('Delete this draft?')
+                    ->modalDescription('The draft was never submitted, so nobody is waiting on it. It is removed for good.')
+                    ->visible(fn (EmployeeRequest $record): bool => $record->status === 'draft'),
             ])->headerActions([
                 CreateAction::make()
                     ->label('Save Draft')
+                    ->modalHeading('New request (draft)')
+                    ->modalDescription('Saved as a draft. Press Submit on it in the list when it is ready.')
                     ->mutateFormDataUsing(fn (array $data): array => static::formatAttendancePayload($data)),
                 Action::make('submit_new')
                     ->label('Submit')
                     ->icon('heroicon-o-paper-airplane')->color('primary')
+                    ->modalHeading('New request')
+                    ->modalDescription('Fill it in and press Submit: it goes straight to the first approver, usually your line manager. Use Save Draft instead to finish it later.')
+                    ->modalSubmitActionLabel('Submit for approval')
                     ->schema(fn (): array => static::formComponents())
                     ->action(function (array $data): void {
                         $data = static::formatAttendancePayload($data);

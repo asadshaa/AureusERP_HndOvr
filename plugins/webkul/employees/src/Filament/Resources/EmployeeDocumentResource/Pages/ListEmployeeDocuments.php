@@ -11,6 +11,7 @@ use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 class ListEmployeeDocuments extends ListRecords
 {
@@ -19,6 +20,7 @@ class ListEmployeeDocuments extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('documents'),
             Action::make('missingRequired')
                 ->label(fn (): string => 'Missing required documents ('.$this->missingRequiredCount().')')
                 ->icon('heroicon-o-exclamation-triangle')

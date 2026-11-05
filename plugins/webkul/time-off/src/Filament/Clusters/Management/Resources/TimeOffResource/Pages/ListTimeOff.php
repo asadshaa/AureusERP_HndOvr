@@ -6,6 +6,7 @@ use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 use Webkul\TimeOff\Enums\State;
@@ -81,6 +82,7 @@ class ListTimeOff extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('leave-requests'),
             CreateAction::make(),
         ];
     }

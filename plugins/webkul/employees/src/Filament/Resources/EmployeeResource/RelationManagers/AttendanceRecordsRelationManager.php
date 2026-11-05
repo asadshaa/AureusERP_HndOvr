@@ -132,6 +132,8 @@ class AttendanceRecordsRelationManager extends RelationManager
 
         return $table
             ->defaultSort('attendance_date', 'desc')
+            ->emptyStateHeading('No attendance recorded')
+            ->emptyStateDescription('Days appear when this employee checks in, when a device file is imported, or when HR adds a day.')
             ->columns([
                 TextColumn::make('attendance_date')->date()->sortable(),
                 TextColumn::make('status')->badge(),

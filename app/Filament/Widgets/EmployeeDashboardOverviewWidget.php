@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -183,7 +184,11 @@ class EmployeeDashboardOverviewWidget extends Widget
         ];
 
         // 25 days a year: Annual 12, Sick 8, Casual 5 (LeaveAllocationPolicy).
-        $leaveData = self::calculateCanonicalLeaves($employee, $companyId, $endOfYear);
+        // The Today box shows the same balance: reuse it when it is the same employee and company.
+        $context = app(HomeDashboardContext::class);
+        $leaveData = $context->employee()?->is($employee) && (int) $context->companyId() === $companyId
+            ? $context->leaveSummary()
+            : self::calculateCanonicalLeaves($employee, $companyId, $endOfYear);
 
         // Recent Leave Requests
         $recentLeaves = Leave::query()

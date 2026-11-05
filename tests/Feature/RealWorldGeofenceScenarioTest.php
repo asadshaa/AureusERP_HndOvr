@@ -40,7 +40,7 @@ it('handles an insecure context failure when browser accesses via insecure LAN I
         ->call('reportLocationFailure', 'check_in', 'insecure_context', $clientRequestId)
         ->assertSet('outcome.ok', false)
         ->assertSet('outcome.result', 'insecure_context')
-        ->assertSee('Location can only be used over a secure (https) connection');
+        ->assertSee('Location only works on the secure Aureus address');
 
     expect(AttendanceRecord::query()->where('employee_id', $f['employee']->id)->count())->toBe(0);
 

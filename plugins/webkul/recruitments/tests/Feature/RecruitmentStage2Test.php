@@ -79,7 +79,7 @@ it('refuses to publish, approve or mark pending directly, whoever saves the job'
 
     // Draft -> pending is a legal move, but only with a real pending approval request behind it.
     expect(fn () => $f['job']->refresh()->update(['posting_status' => 'pending_approval']))
-        ->toThrow(RuntimeException::class, 'approval request is pending');
+        ->toThrow(RuntimeException::class, 'approval request is still open');
 
     expect($f['job']->refresh()->postingStatus())->toBe(JobPostingStatus::DRAFT);
 });

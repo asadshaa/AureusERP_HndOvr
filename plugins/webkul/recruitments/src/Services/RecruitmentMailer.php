@@ -26,7 +26,7 @@ class RecruitmentMailer
     public function queue(string $mailClass, string $view, array $payload, Company|int|null $company, ?User $sender = null, array $attachments = []): void
     {
         if (blank($payload['to']['address'] ?? null)) {
-            throw new InvalidArgumentException('A recruitment email needs a recipient address.');
+            throw new InvalidArgumentException('This email has no recipient. Add an email address and try again.');
         }
 
         $company = $company instanceof Company ? $company : ($company ? Company::query()->find($company) : null);

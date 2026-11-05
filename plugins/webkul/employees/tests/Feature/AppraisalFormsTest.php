@@ -383,7 +383,7 @@ it('sends the manager review to HR when the employee has no line manager who can
         ->and($noLoginReview->self_skipped_at)->not->toBeNull();
 
     $service->saveSelfReview($review, $f['orphanUser'], aprAnswers(aprAllFours()), true);
-    expect(aprNotifications($f['hrUser'], 'Routed to HR'))->toBe(1);
+    expect(aprNotifications($f['hrUser'], 'Sent to HR because no line manager is set'))->toBe(1);
 
     expect($access->canEditManagerReview($f['hrUser'], $review->fresh()))->toBeTrue()
         ->and($access->canEditManagerReview($f['managerUser'], $review->fresh()))->toBeFalse()

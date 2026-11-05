@@ -4,6 +4,7 @@ namespace Webkul\Recruitment\Filament\Clusters\Applications\Resources\JobOfferRe
 
 use Filament\Resources\Pages\ListRecords;
 use Webkul\Recruitment\Filament\Clusters\Applications\Resources\JobOfferResource;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 class ListJobOffers extends ListRecords
 {
@@ -11,6 +12,8 @@ class ListJobOffers extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            HelpAction::make('job-offers'),
+        ];
     }
 }

@@ -58,7 +58,8 @@ class RecruitmentPipelineWidget extends Widget
             ->where('company_id', $companyId)
             ->where('created_at', '>=', $weekStartUtc);
 
-        $newCount = (clone $newQuery)->count();
+        // Shared with the Today box (same week, same company), counted once per request.
+        $newCount = $context->newApplicantsThisWeek();
 
         $applicantUrl = $context->resourceUrl(ApplicantResource::class);
 

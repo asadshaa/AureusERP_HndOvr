@@ -23,7 +23,7 @@ enum InterviewStatus: string implements HasColor, HasLabel
             self::SCHEDULED => __('Scheduled'),
             self::COMPLETED => __('Completed'),
             self::CANCELLED => __('Cancelled'),
-            self::NO_SHOW   => __('No-show'),
+            self::NO_SHOW   => __('Did not attend'),
         };
     }
 

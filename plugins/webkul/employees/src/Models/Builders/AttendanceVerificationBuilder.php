@@ -21,23 +21,23 @@ class AttendanceVerificationBuilder extends Builder
 
     public function delete()
     {
-        throw new LogicException('Attendance verification evidence cannot be deleted.');
+        throw new LogicException('Location check details are kept as a permanent record and cannot be deleted.');
     }
 
     public function forceDelete()
     {
-        throw new LogicException('Attendance verification evidence cannot be deleted.');
+        throw new LogicException('Location check details are kept as a permanent record and cannot be deleted.');
     }
 
     public function update(array $values)
     {
         foreach ($values as $column => $value) {
             if (! in_array($column, self::UPDATABLE, true)) {
-                throw new LogicException("Attendance verification evidence is append-only; [{$column}] cannot be changed.");
+                throw new LogicException("Location check details are kept as a permanent record, so {$column} cannot be changed.");
             }
 
             if (in_array($column, self::NULL_ONLY, true) && $value !== null) {
-                throw new LogicException("Attendance verification [{$column}] can only be cleared, never rewritten.");
+                throw new LogicException("The location check detail {$column} can only be cleared, not changed.");
             }
         }
 

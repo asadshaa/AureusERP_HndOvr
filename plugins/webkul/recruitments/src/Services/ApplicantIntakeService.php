@@ -34,7 +34,7 @@ class ApplicantIntakeService
 
         $companyId = (int) ($data['company_id'] ?? $actor->default_company_id);
         if (! CurrentCompany::canAccess($companyId, $actor)) {
-            throw new RuntimeException('The applicant import company is outside the user’s allowed companies.');
+            throw new RuntimeException('You do not have access to the company you are importing applicants into.');
         }
 
         // A re-import updates the existing application: the user must be allowed to change it.
@@ -64,11 +64,11 @@ class ApplicantIntakeService
         $data = $this->normalizeAndValidate($source, $payload);
 
         if (isset($data['company_id']) && (int) $data['company_id'] !== $companyId) {
-            throw new RuntimeException('The application names a different company than the integration it came through.');
+            throw new RuntimeException('This application is for a different company than the website or job board it came from.');
         }
 
         if (! Company::query()->whereKey($companyId)->where('is_active', true)->exists()) {
-            throw new RuntimeException('The company of this integration is archived or does not exist.');
+            throw new RuntimeException('The company linked to this website or job board is archived or was deleted.');
         }
 
         return $this->store($source, $data, $companyId, null);
@@ -112,13 +112,13 @@ class ApplicantIntakeService
                 ->whereKey($data['job_posting_id'])
                 ->where('company_id', $companyId)
                 ->where('job_id', $job->id)
-                ->first() ?? throw new RuntimeException('The posting does not belong to this job.')
+                ->first() ?? throw new RuntimeException('The selected job ad does not belong to this job.')
             : null;
         $stageId = $data['stage_id'] ?? Stage::defaultFor($companyId)?->id;
         if ($stageId && ! Stage::query()->whereKey($stageId)->where(function ($query) use ($companyId): void {
             $query->whereNull('company_id')->orWhere('company_id', $companyId);
         })->exists()) {
-            throw new RuntimeException('The applicant stage is outside the import company.');
+            throw new RuntimeException('The selected stage belongs to a different company.');
         }
 
         return DB::transaction(function () use ($actor, $companyId, $data, $job, $stageId, $source, $posting): Applicant {

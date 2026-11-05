@@ -141,7 +141,7 @@ class HrHierarchyService
     public function assertCanManage(User $user, Employee $employee): void
     {
         if (! $this->canManage($user, $employee)) {
-            throw new RuntimeException('The employee is outside this user’s HR hierarchy scope.');
+            throw new RuntimeException('You can only do this for employees you manage.');
         }
     }
 
@@ -194,7 +194,7 @@ class HrHierarchyService
     private function assertCompanyAccess(User $user, int $companyId): void
     {
         if (! CurrentCompany::canAccess($companyId, $user)) {
-            throw new RuntimeException('The user does not have access to this company.');
+            throw new RuntimeException('This user cannot use this company.');
         }
     }
 }

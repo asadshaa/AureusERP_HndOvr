@@ -3,6 +3,7 @@
 namespace Webkul\TimeOff\Filament\Clusters\MyTime\Resources;
 
 use BackedEnum;
+use Filament\Actions\CreateAction;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
@@ -53,7 +54,15 @@ class MyTimeOffResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table = TimeOffResource::table($table);
+        return TimeOffResource::table($table)
+            ->emptyStateHeading('No leave requests yet')
+            ->emptyStateDescription('Press New to ask for leave. After saving, press Submit for approval: your line manager reviews it first, then HR.')
+            ->emptyStateActions([
+                CreateAction::make()
+                    ->label('Ask for leave')
+                    ->icon('heroicon-o-plus-circle')
+                    ->url(fn (): string => static::getUrl('create')),
+            ]);
     }
 
     public static function getEloquentQuery(): Builder

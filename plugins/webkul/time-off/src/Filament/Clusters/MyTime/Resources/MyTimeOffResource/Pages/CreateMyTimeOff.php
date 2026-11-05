@@ -32,7 +32,7 @@ class CreateMyTimeOff extends CreateRecord
         return Notification::make()
             ->success()
             ->title(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.success.title'))
-            ->body(__('time-off::filament/clusters/my-time/resources/my-time-off/pages/create-time-off.notification.success.body'));
+            ->body('Saved. Press Submit for approval on the request to send it to your line manager.');
     }
 
     protected function mutateFormDataBeforeCreate(array $data): array

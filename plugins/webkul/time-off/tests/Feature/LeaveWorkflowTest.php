@@ -219,7 +219,7 @@ it('refuses to submit leave on behalf of another employee without hr_approve_lea
     ]);
 
     expect(fn () => app(LeaveApprovalService::class)->submit($leave, $bystander))
-        ->toThrow(RuntimeException::class, 'A user can only submit leave for their own HR hierarchy');
+        ->toThrow(RuntimeException::class, 'You can only request leave for yourself or for employees you manage.');
 });
 
 it('refuses to let an unrelated user approve a leave request that is not theirs to act on', function () {
@@ -299,7 +299,7 @@ it('the deeper company guard (updateEmployeeAndCompanyData) itself throws if a c
         'holiday_status_id' => $f['leaveType']->id,
         'request_date_from' => now()->addDays(1)->toDateString(),
         'request_date_to'   => now()->addDays(2)->toDateString(),
-    ]))->toThrow(RuntimeException::class, 'outside the active company');
+    ]))->toThrow(RuntimeException::class, 'not in the company you are working in');
 });
 
 it('halts creation when the requested dates overlap an existing leave for the same employee', function () {

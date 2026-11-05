@@ -35,6 +35,7 @@ use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\GeofencedAttendanceService;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Partner\Models\BankAccount;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Filament\Clusters\Settings;
 use Webkul\Support\Services\ApprovalEngine;
 
@@ -536,6 +537,7 @@ class Profile extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('my-profile'),
             Action::make('updatePassword')
                 ->label(__('support::filament/pages/profile.password.section'))
                 ->icon('heroicon-o-lock-closed')

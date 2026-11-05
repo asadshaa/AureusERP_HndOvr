@@ -130,6 +130,7 @@ class AttendanceRecordResource extends Resource
                 ->default('manual')
                 ->required(),
             TextInput::make('source_reference')->maxLength(255)
+                ->placeholder('e.g. ZKTeco export 2026-10.xlsx, or a ticket number')
                 ->disabled(fn (?AttendanceRecord $record): bool => self::isEvidenceBacked($record))
                 ->dehydrated(fn (?AttendanceRecord $record): bool => ! self::isEvidenceBacked($record)),
             Textarea::make('correction_reason')
@@ -289,10 +290,15 @@ class AttendanceRecordResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $table
+            ->emptyStateIcon('heroicon-o-finger-print')
+            ->emptyStateHeading('No attendance records')
+            ->emptyStateDescription('Records appear when employees check in from Check in / My Attendance, when a device file is imported, or when HR adds a day with New. Clear the filters if you expected some.');
+
         return $table->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['employee', 'intervals' => fn ($intervals) => $intervals->whereNull('voided_at')]))->columns([
-            TextColumn::make('attendance_date')->date()->sortable(),
-            TextColumn::make('employee.name')->searchable()->sortable(),
-            TextColumn::make('status')->badge(),
+            TextColumn::make('attendance_date')->label('Date')->date()->sortable(),
+            TextColumn::make('employee.name')->label('Employee')->searchable()->sortable(),
+            TextColumn::make('status')->label('Status')->badge(),
             TextColumn::make('check_in')->dateTime()->placeholder('—'),
             TextColumn::make('check_out')->dateTime()->placeholder('—'),
             TextColumn::make('check_ins')
@@ -303,11 +309,11 @@ class AttendanceRecordResource extends Resource
                     $record->intervals->whereNull('voided_at'),
                     self::employeeTimezone($record),
                 )),
-            TextColumn::make('worked_hours')->numeric(decimalPlaces: 2),
+            TextColumn::make('worked_hours')->label('Hours worked')->numeric(decimalPlaces: 2),
             TextColumn::make('late_minutes')->label('Late (minutes)')->sortable(),
             TextColumn::make('early_departure_minutes')->label('Early (minutes)')->sortable(),
-            TextColumn::make('overtime_hours')->numeric(decimalPlaces: 2),
-            TextColumn::make('source')->badge()
+            TextColumn::make('overtime_hours')->label('Overtime (hours)')->numeric(decimalPlaces: 2),
+            TextColumn::make('source')->label('Recorded by')->badge()
                 ->formatStateUsing(fn (?string $state): string => AttendanceSource::tryFrom((string) $state)?->label() ?? (string) $state),
             TextColumn::make('verification_status')
                 ->label('Verification')
@@ -351,7 +357,10 @@ class AttendanceRecordResource extends Resource
                 ->icon('heroicon-o-check-circle')
                 ->color('success')
                 ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record) && static::isActiveCompanyRecord($record))
-                ->schema([Textarea::make('note')->label('Review note')->required()])
+                ->modalHeading('Approve this check-in?')
+                ->modalDescription('The location check needed a review. Approving accepts this attendance as valid; your note is kept in the audit trail.')
+                ->modalSubmitActionLabel('Approve')
+                ->schema([Textarea::make('note')->label('Review note')->placeholder('e.g. Confirmed with the line manager: was at the client site')->required()])
                 ->action(fn (AttendanceRecord $record, array $data) => self::attempt(
                     fn () => app(GeofencedAttendanceService::class)->reviewVerification($record, Auth::user(), true, (string) $data['note']),
                     'Verification approved',
@@ -361,7 +370,10 @@ class AttendanceRecordResource extends Resource
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (AttendanceRecord $record): bool => self::canReviewRecord($record) && static::isActiveCompanyRecord($record))
-                ->schema([Textarea::make('note')->label('Review note')->required()])
+                ->modalHeading('Reject this check-in?')
+                ->modalDescription('The check-in is marked as not verified. The recorded times are not changed; your note is kept in the audit trail.')
+                ->modalSubmitActionLabel('Reject')
+                ->schema([Textarea::make('note')->label('Review note')->placeholder('e.g. Location was far from the workplace with no reason given')->required()])
                 ->action(fn (AttendanceRecord $record, array $data) => self::attempt(
                     fn () => app(GeofencedAttendanceService::class)->reviewVerification($record, Auth::user(), false, (string) $data['note']),
                     'Verification rejected. The recorded times were not changed.',
@@ -373,7 +385,9 @@ class AttendanceRecordResource extends Resource
                 ->visible(fn (AttendanceRecord $record): bool => static::isActiveCompanyRecord($record)
                     && ((int) $record->employee?->user_id === (int) Auth::id()
                         || (bool) Auth::user()?->can(HrPermissions::ManageAttendance)))
-                ->modalDescription('A new check-in moves the start of the first check-in of the day; a new check-out moves the end of the last one. Breaks between check-ins stay breaks.')
+                ->modalHeading('Request a time change')
+                ->modalDescription('Sent to the line manager for approval; the times change only once it is approved. A new check-in moves the start of the first check-in of the day; a new check-out moves the end of the last one. Breaks between check-ins stay breaks.')
+                ->modalSubmitActionLabel('Send for approval')
                 ->schema([
                     // Shown and typed in the employee's own timezone; Filament hands the service the app-timezone moment.
                     DateTimePicker::make('requested_check_in')->seconds(false)
@@ -416,6 +430,8 @@ class AttendanceRecordResource extends Resource
                 }),
             // Plain delete for manual/imported days (unchanged behaviour).
             DeleteAction::make()
+                ->modalHeading('Delete this attendance day?')
+                ->modalDescription('The day is removed from attendance and from the monthly report. Use Edit instead if only the times are wrong.')
                 ->visible(fn (AttendanceRecord $record): bool => ! self::isEvidenceBacked($record)),
             // GPS / self-service days: a reason is required and the deletion is
             // audited (the verification evidence itself is kept).

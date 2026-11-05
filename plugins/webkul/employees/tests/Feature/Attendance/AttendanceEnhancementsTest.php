@@ -56,7 +56,7 @@ it('notifies employees when they have reached 8 hours of work without checking o
 
     // Verify database notification received by the employee user
     $notification = $f['user']->notifications()->sole();
-    expect($notification->data['title'])->toContain('Working Hours Complete')
+    expect($notification->data['title'])->toContain('Working hours complete')
         ->and($notification->data['body'])->toContain('complete');
 
     // Run again - verify idempotency via cache
@@ -306,7 +306,7 @@ it('sends complete notification with employee, what, day of week, date, times, a
         // Reason
         ->and($body)->toContain('Traffic delayed checkout correction')
         // Routing note
-        ->and($body)->toContain('[Forwarded to HR: no line manager assigned]');
+        ->and($body)->toContain('(Sent to HR because no line manager is set.)');
 
     // 2. Test ManageEmployeeRequests Livewire table renders all details
     $this->actingAs($hrUser);

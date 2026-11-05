@@ -117,7 +117,7 @@ class OvertimeService
             ->where('company_id', $employee->company_id)
             ->where('code', self::RequestCode)
             ->where('is_active', true)
-            ->first() ?? throw new RuntimeException('No active "Overtime" request type is configured for this company.');
+            ->first() ?? throw new RuntimeException('Overtime requests are not set up for this company yet. Ask HR to add an "Overtime" request type.');
 
         $date = $this->normaliseDate($date);
 

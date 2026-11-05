@@ -217,7 +217,7 @@ class JobPosition extends BaseJobPosition
         }
 
         $target = JobPostingStatus::tryFrom((string) $this->posting_status)
-            ?? throw new InvalidArgumentException("Unknown job posting status [{$this->posting_status}].");
+            ?? throw new InvalidArgumentException("This job has an unknown status ({$this->posting_status}).");
 
         if (! $this->exists) {
             if ($target !== JobPostingStatus::DRAFT) {
@@ -239,11 +239,11 @@ class JobPosition extends BaseJobPosition
         $latestApprovalStatus = $this->approvalRequests()->latest('id')->value('status');
 
         if ($target === JobPostingStatus::PENDING_APPROVAL && $latestApprovalStatus !== 'pending') {
-            throw new RuntimeException('A job opening is pending approval only while its approval request is pending.');
+            throw new RuntimeException('A job opening can only be waiting for approval while its approval request is still open.');
         }
 
         if ($target === JobPostingStatus::APPROVED && $latestApprovalStatus !== 'approved') {
-            throw new RuntimeException('A job opening can only be marked approved by its approval request.');
+            throw new RuntimeException('A job opening is approved through its approval request. Approve the request instead.');
         }
     }
 

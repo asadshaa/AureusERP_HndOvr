@@ -129,9 +129,11 @@ class MyAllocationResource extends Resource
                                     ->minValue(0)
                                     ->maxValue(99999999999)
                                     ->required()
-                                    ->suffix(__('time-off::filament/clusters/my-time/resources/my-allocation.form.fields.allocation-suffix')),
+                                    ->suffix(__('time-off::filament/clusters/my-time/resources/my-allocation.form.fields.allocation-suffix'))
+                                    ->helperText('Only for extra days, for example after working on a holiday. Your yearly leave is added automatically.'),
                                 RichEditor::make('notes')
-                                    ->label(__('time-off::filament/clusters/my-time/resources/my-allocation.form.fields.reason')),
+                                    ->label(__('time-off::filament/clusters/my-time/resources/my-allocation.form.fields.reason'))
+                                    ->helperText('Tell your approver why you need the extra days.'),
                             ]),
                     ])->columns(2)->columnSpanFull(),
             ]);
@@ -161,6 +163,9 @@ class MyAllocationResource extends Resource
                     ->sortable()
                     ->searchable(),
             ])
+            ->emptyStateIcon('heroicon-o-calendar')
+            ->emptyStateHeading('No leave allocated to you yet')
+            ->emptyStateDescription('Your yearly leave (Annual 12, Sick 8, Casual 5 days) is added automatically when you join and every 1 January. If it is missing, ask HR.')
             ->groups([
                 Tables\Grouping\Group::make('employee.name')
                     ->label(__('time-off::filament/clusters/my-time/resources/my-allocation.table.groups.employee-name'))
@@ -183,6 +188,8 @@ class MyAllocationResource extends Resource
                     ViewAction::make(),
                     EditAction::make(),
                     DeleteAction::make()
+                        ->modalHeading('Delete this allocation?')
+                        ->modalDescription('Its days are taken off your leave balance.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -200,6 +207,8 @@ class MyAllocationResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->modalHeading('Delete the selected allocations?')
+                        ->modalDescription('Their days are taken off your leave balance.')
                         ->successNotification(
                             Notification::make()
                                 ->success()

@@ -98,7 +98,7 @@ class AppraisalNotifier
                 ->warning()
                 ->icon('heroicon-o-star')
                 ->title("Appraisal to review: {$name}")
-                ->body("{$reason} Please complete the manager review for cycle '{$review->cycle?->name}'.".($this->access->hasManager($review) ? '' : ' [Routed to HR: no line manager]'))
+                ->body("{$reason} Please complete the manager review for cycle '{$review->cycle?->name}'.".($this->access->hasManager($review) ? '' : ' (Sent to HR because no line manager is set.)'))
                 ->actions([$this->button('Open', $this->appraisalUrl($review))]), "perf_mgr_open_{$review->getKey()}_{$review->reviewer_id}_{$recipient->getKey()}", $review->cycle);
         }
     }

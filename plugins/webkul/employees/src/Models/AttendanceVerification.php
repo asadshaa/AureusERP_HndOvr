@@ -109,12 +109,12 @@ class AttendanceVerification extends Model
                     continue;
                 }
 
-                throw new LogicException("Attendance verification evidence is append-only; [{$column}] cannot be changed.");
+                throw new LogicException("Location check details are kept as a permanent record, so {$column} cannot be changed.");
             }
         });
 
         static::deleting(function (): void {
-            throw new LogicException('Attendance verification evidence cannot be deleted.');
+            throw new LogicException('Location check details are kept as a permanent record and cannot be deleted.');
         });
     }
 }

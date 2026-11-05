@@ -146,7 +146,7 @@ class ShiftRoster extends Model
     protected function validatePattern(): void
     {
         if (! $this->company_id) {
-            throw ValidationException::withMessages(['company_id' => 'A roster pattern belongs to a company.']);
+            throw ValidationException::withMessages(['company_id' => 'Choose the company for this roster pattern.']);
         }
 
         $this->name = trim((string) $this->name);

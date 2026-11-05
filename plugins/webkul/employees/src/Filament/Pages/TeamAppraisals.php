@@ -18,6 +18,7 @@ use Webkul\Employee\Support\AppraisalKinds;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 /**
  * Team appraisals: the appraisals the signed-in line manager reviews (and
@@ -120,5 +121,12 @@ class TeamAppraisals extends Page implements HasTable
         $user = CurrentCompany::user();
 
         return $user;
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            HelpAction::make('appraisals'),
+        ];
     }
 }

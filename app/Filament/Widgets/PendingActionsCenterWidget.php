@@ -2,11 +2,17 @@
 
 namespace App\Filament\Widgets;
 
-use App\Services\Dashboard\RoleActionCenterService;
+use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Facades\Auth;
-use Webkul\Security\Services\CurrentCompany;
 
+/**
+ * The "Today" box at the top of home: a short list of today's work with a
+ * count and one link each (HomeDashboardContext::todayTasks(), only pages
+ * the user may open, active company only), followed by the remaining
+ * action center items (onboarding tasks, appraisals, attendance flags…)
+ * that the short list does not already show.
+ */
 class PendingActionsCenterWidget extends Widget
 {
     protected string $view = 'filament.widgets.pending-actions-center';
@@ -27,15 +33,20 @@ class PendingActionsCenterWidget extends Widget
      */
     protected function getViewData(): array
     {
-        $user = Auth::user();
-        if (! $user) {
-            return ['data' => ['pending_count' => 0, 'items' => []]];
+        $context = app(HomeDashboardContext::class);
+
+        if (! $context->user()) {
+            return ['data' => ['pending_count' => 0, 'items' => []], 'today' => ['mine' => [], 'team' => [], 'team_label' => ''], 'dateLabel' => ''];
         }
 
-        $companyId = (int) CurrentCompany::id($user);
+        $data = $context->pendingActions();
+        $replaced = $context->todayReplacedActionIds();
+        $items = array_values(array_filter($data['items'], fn (array $item): bool => ! in_array($item['id'], $replaced, true)));
 
         return [
-            'data' => app(RoleActionCenterService::class)->getPendingActionsFor($user, $companyId),
+            'data'      => ['pending_count' => count($items), 'items' => $items],
+            'today'     => $context->todayTasks(),
+            'dateLabel' => $context->now()->format('l j M'),
         ];
     }
 }

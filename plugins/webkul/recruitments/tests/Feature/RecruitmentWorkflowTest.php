@@ -266,7 +266,7 @@ it('refuses conversion when the candidate is already an employee in a different 
         ->toThrow(RuntimeException::class, 'another company');
 });
 
-it('refuses conversion when the application\'s department does not belong to the application\'s company', function () {
+it('refuses conversion when the application\'s department on this application belongs to a different company to the application\'s company', function () {
     $f = recruitmentFixture();
     $otherCompany = Company::factory()->create(['is_active' => true]);
     $otherDepartment = Department::factory()->create(['company_id' => $otherCompany->id, 'manager_id' => null]);
@@ -282,7 +282,7 @@ it('refuses conversion when the application\'s department does not belong to the
     DB::table('recruitments_applicants')->where('id', $application->id)->update(['department_id' => $otherDepartment->id]);
 
     expect(fn () => app(CandidateConversionService::class)->convert($application->fresh()))
-        ->toThrow(RuntimeException::class, 'department does not belong');
+        ->toThrow(RuntimeException::class, 'department on this application belongs to a different company');
 });
 
 // ---------------------------------------------------------------------

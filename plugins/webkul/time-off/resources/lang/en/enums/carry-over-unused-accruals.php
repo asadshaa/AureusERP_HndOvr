@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'lost'    => 'Accrued time reset to zero',
-    'all'     => 'All accrued time carried over',
-    'maximum' => 'Carry over with the maximum',
+    'lost'    => 'Unused days are lost',
+    'all'     => 'All unused days carry over',
+    'maximum' => 'Unused days carry over, up to a limit',
 ];

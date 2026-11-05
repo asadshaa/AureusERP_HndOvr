@@ -31,6 +31,7 @@ use Webkul\Employee\Services\Attendance\TodayAttendanceExcel;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Models\Company;
 
 /**
@@ -279,6 +280,7 @@ class TodayAttendance extends Page implements HasForms, HasTable
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('today-attendance'),
             Action::make('downloadExcel')
                 ->label('Download (Excel)')
                 ->icon('heroicon-o-arrow-down-tray')

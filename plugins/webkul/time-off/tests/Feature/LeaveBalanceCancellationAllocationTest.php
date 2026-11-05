@@ -373,7 +373,7 @@ it('lets only HR of the leave company cancel an approved leave, with a reason', 
     // The line manager (who approved it) may not cancel it.
     expect($cancellation->canCancel($leave, $f['managerUser']))->toBeFalse()
         ->and(fn () => $cancellation->cancel($leave, $f['managerUser'], 'Not needed'))
-        ->toThrow(RuntimeException::class, 'Only HR of the leave company can cancel an approved leave.')
+        ->toThrow(RuntimeException::class, 'Only HR of this employee\'s company can cancel an approved leave.')
         ->and($leave->fresh()->state)->toBe(State::VALIDATE_TWO)
         ->and($cancellation->canCancel($leave, $f['employeeUser']))->toBeFalse()
         ->and($cancellation->canCancel($leave, $other['hrUser']))->toBeFalse()
@@ -687,7 +687,7 @@ it('tells the company HR, not managers holding hr_approve_leave, about a leave w
     $notices = fn (User $user) => $user->notifications()->get()->filter(fn ($notification): bool => ($notification->data['title'] ?? null) === $title);
 
     expect($notices($hr))->toHaveCount(1)
-        ->and((string) $notices($hr)->first()->data['body'])->toContain('[Forwarded to HR: no line manager assigned]')
+        ->and((string) $notices($hr)->first()->data['body'])->toContain('(Sent to HR because no line manager is set.)')
         ->and($notices($plainManager))->toHaveCount(0)
         ->and($notices($f['hrUser']))->toHaveCount(1) // the fixture's HR (company-wide view + leave approval) is real HR
         ->and($notices($otherHr))->toHaveCount(0)

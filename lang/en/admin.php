@@ -2,7 +2,7 @@
 
 return [
     'navigation' => [
-        'dashboard'       => 'Dashboard',
+        'dashboard'       => 'My work',
         'contact'         => 'Contact',
         'sale'            => 'Sales',
         'purchase'        => 'Purchase',
@@ -15,7 +15,7 @@ return [
         'employee'        => 'Employees',
         'time-off'        => 'Time Off',
         'attendance'      => 'Attendance',
-        'recruitment'     => 'Recruitments',
+        'recruitment'     => 'Recruitment',
         'website'         => 'Website',
         'plugin'          => 'Plugins',
         'setting'         => 'Settings',

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Webkul\Employee\Filament\Resources\EmployeeResource;
 use Webkul\Employee\Services\EmployeeDirectoryExport;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\TableViews\Filament\Components\PresetView;
 use Webkul\TableViews\Filament\Concerns\HasTableViews;
 
@@ -24,6 +25,7 @@ class ListEmployees extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('employees'),
             Action::make('exportExcel')
                 ->label('Export to Excel')
                 ->icon('heroicon-o-arrow-down-tray')

@@ -31,6 +31,7 @@ use Webkul\Employee\Services\Attendance\ShiftRosterService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Models\CalendarLeave;
 use Webkul\TimeOff\Models\Leave;
 
@@ -664,5 +665,12 @@ class MyAttendance extends Page
             ->where('employee_id', $employee->id)
             ->whereKey((int) $id)
             ->first();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            HelpAction::make('check-in'),
+        ];
     }
 }

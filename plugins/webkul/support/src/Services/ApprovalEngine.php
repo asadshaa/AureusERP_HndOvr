@@ -125,18 +125,18 @@ final class ApprovalEngine
     {
         $companyId = (int) ($context['company_id'] ?? $subject->getAttribute('company_id') ?? $requester->default_company_id);
         if ($companyId <= 0 || ! $this->userCanAccessCompany($requester, $companyId)) {
-            throw new RuntimeException('The requester does not have access to the approval company.');
+            throw new RuntimeException('The person making this request does not have access to this company.');
         }
 
         $workflow = $this->matchingWorkflow($companyId, $requestType, $amount, $context);
         if (! $workflow || $workflow->steps->isEmpty()) {
-            throw new RuntimeException("No active approval workflow is configured for [{$requestType}] in this company.");
+            throw new RuntimeException("No approval steps are set up for {$requestType} in this company. Ask an administrator to set up the approval workflow.");
         }
 
         $firstStep = $workflow->steps
             ->first(fn (ApprovalStep $step): bool => $this->conditionsMatch((array) $step->conditions, $context + ['amount' => $amount]));
         if (! $firstStep) {
-            throw new RuntimeException('The approval workflow has no applicable approval step.');
+            throw new RuntimeException('None of the approval steps apply to this request. Ask an administrator to check the approval workflow.');
         }
 
         return DB::transaction(function () use ($subject, $requester, $requestType, $amount, $context, $companyId, $workflow, $firstStep): ApprovalRequest {
@@ -221,13 +221,13 @@ final class ApprovalEngine
 
             $workflow = $this->matchingWorkflow((int) $locked->company_id, (string) $locked->request_type, $amount, $context);
             if (! $workflow || $workflow->steps->isEmpty()) {
-                throw new RuntimeException("No active approval workflow is configured for [{$locked->request_type}] in this company.");
+                throw new RuntimeException("No approval steps are set up for {$locked->request_type} in this company. Ask an administrator to set up the approval workflow.");
             }
 
             $firstStep = $workflow->steps
                 ->first(fn (ApprovalStep $step): bool => $this->conditionsMatch((array) $step->conditions, $context + ['amount' => $amount]));
             if (! $firstStep) {
-                throw new RuntimeException('The approval workflow has no applicable approval step.');
+                throw new RuntimeException('None of the approval steps apply to this request. Ask an administrator to check the approval workflow.');
             }
 
             $round = (int) ($locked->submission_round ?: 1) + 1;
@@ -315,7 +315,7 @@ final class ApprovalEngine
             $locked = ApprovalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
             $locked->loadMissing(['workflow.steps', 'subject']);
             if (! $this->canWithdraw($locked, $actor)) {
-                throw new RuntimeException('Only the requester can withdraw a request, and only while it is pending or returned for changes.');
+                throw new RuntimeException('Only the person who made this request can withdraw it, and only while it is waiting for approval or returned for changes.');
             }
 
             $step = $locked->currentStep() ?? $locked->workflow?->steps?->first();
@@ -828,7 +828,7 @@ final class ApprovalEngine
         array $newValues = [],
     ): ApprovalRequest {
         if (trim($reason) === '') {
-            throw new RuntimeException('A rejection reason is required.');
+            throw new RuntimeException('Give a reason for rejecting.');
         }
 
         return $this->decide($request, $actor, 'rejected', $reason, $previousValues, $newValues);
@@ -871,10 +871,10 @@ final class ApprovalEngine
             $request = ApprovalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
             $request->loadMissing('workflow.steps');
             if (! $this->canAct($request, $actor)) {
-                throw new RuntimeException('This user is not an approver for the current approval step.');
+                throw new RuntimeException('You are not an approver for this step.');
             }
 
-            $step = $request->currentStep() ?? throw new RuntimeException('The approval request has no current step.');
+            $step = $request->currentStep() ?? throw new RuntimeException('This request is not waiting for anyone\'s approval.');
             // Only this submission round counts: after a return and resubmit the
             // same approver decides the restarted step again.
             $round = (int) ($request->submission_round ?: 1);
@@ -884,7 +884,7 @@ final class ApprovalEngine
                 ->where('actor_id', $actor->id)
                 ->whereIn('decision', ['approved', 'rejected', 'returned'])
                 ->exists()) {
-                throw new RuntimeException('This user has already decided the current approval step.');
+                throw new RuntimeException('You have already approved or rejected this step.');
             }
 
             $request->decisions()->create([

@@ -238,16 +238,16 @@ class JobPosting extends Model
         if ($this->exists) {
             foreach (['token', 'company_id', 'job_id', 'channel', 'placement', 'placement_key'] as $column) {
                 if ($this->isDirty($column)) {
-                    throw new RuntimeException("A job posting's {$column} cannot be changed.");
+                    throw new RuntimeException("This job ad's {$column} cannot be changed. Remove the ad and add a new one instead.");
                 }
             }
         } elseif (! $known) {
-            throw new InvalidArgumentException("Unknown job posting channel [{$this->channel}].");
+            throw new InvalidArgumentException("Unknown job ad channel ({$this->channel}).");
         }
 
         $jobCompany = JobPosition::withTrashed()->whereKey($this->job_id)->value('company_id');
         if ($jobCompany === null || (int) $jobCompany !== (int) $this->company_id) {
-            throw new RuntimeException('A job posting must belong to the same company as its job.');
+            throw new RuntimeException('A job ad must be in the same company as its job.');
         }
 
         $to = $this->status;
@@ -287,7 +287,7 @@ class JobPosting extends Model
         }
 
         if ($to === ChannelPostingStatus::FAILED && blank($this->last_error)) {
-            throw new RuntimeException('A job posting with a problem needs a description of the problem.');
+            throw new RuntimeException('Describe the problem with this ad.');
         }
 
         if ($to === ChannelPostingStatus::CLOSED
@@ -328,7 +328,7 @@ class JobPosting extends Model
         $this->company_id = (int) $jobCompany;
 
         if ($this->status !== ChannelPostingStatus::PLANNED) {
-            throw new RuntimeException('A new job posting starts as planned.');
+            throw new RuntimeException('A new job ad must start as Planned.');
         }
     }
 }

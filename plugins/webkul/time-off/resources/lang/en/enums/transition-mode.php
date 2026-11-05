@@ -2,5 +2,5 @@
 
 return [
     'immediately'    => 'Immediately',
-    'end-of-accrual' => 'After this accrual period',
+    'end-of-accrual' => 'After the current period',
 ];

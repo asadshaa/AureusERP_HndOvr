@@ -196,7 +196,7 @@ it('6. PASS: assertCompanyAccess throws when a Company A user is scoped against 
     $service = app(HrHierarchyService::class);
 
     expect(fn () => $service->visibleEmployeeIds($f['managerUser'], $f['companyB']->id))
-        ->toThrow(RuntimeException::class, 'does not have access to this company');
+        ->toThrow(RuntimeException::class, 'cannot use this company');
 });
 
 it('6. PASS: Company A user gets a denial opening a Company B employee record by direct URL', function () {

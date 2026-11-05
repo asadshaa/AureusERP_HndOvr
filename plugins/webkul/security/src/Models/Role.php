@@ -30,13 +30,13 @@ class Role extends BaseRole
             }
 
             if ($role->isDirty(['name', 'guard_name'])) {
-                throw new AuthorizationException(__('You are not allowed to modify this system role.'));
+                throw new AuthorizationException(__('This is a built-in role, so its name cannot be changed. Create a new role instead.'));
             }
         });
 
         static::deleting(function (self $role): void {
             if ($role->isSystemRole()) {
-                throw new AuthorizationException(__('You are not allowed to delete this system role.'));
+                throw new AuthorizationException(__('This is a built-in role and cannot be deleted.'));
             }
         });
     }

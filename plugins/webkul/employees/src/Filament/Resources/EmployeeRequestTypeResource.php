@@ -126,6 +126,16 @@ class EmployeeRequestTypeResource extends Resource
         return $user !== null && ($user->can(HrPermissions::ManageEmployeeRequests) || $user->can(HrPermissions::ViewEmployeeRequestTypes));
     }
 
+    /**
+     * Request types are HR setup: line managers may still open the page
+     * (they handle requests), but only people who look after the types get
+     * it in the menu.
+     */
+    public static function shouldRegisterNavigation(): bool
+    {
+        return (Auth::user()?->can(HrPermissions::ViewEmployeeRequestTypes) ?? false) && static::canViewAny();
+    }
+
     public static function getPages(): array
     {
         return ['index' => ManageEmployeeRequestTypes::route('/')];

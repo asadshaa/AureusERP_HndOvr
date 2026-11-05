@@ -94,6 +94,7 @@ class RoleActionCenterService
             if ($pendingLeaves > 0) {
                 $items[] = [
                     'id'           => 'hr_leaves_pending',
+                    'count'        => $pendingLeaves,
                     'title'        => "{$pendingLeaves} Leave Request(s) Awaiting Approval",
                     'urgency'      => 'warning',
                     'icon'         => 'heroicon-o-calendar-days',
@@ -303,6 +304,7 @@ class RoleActionCenterService
             if ($myPendingRequests > 0) {
                 $items[] = [
                     'id'           => 'emp_my_requests_pending',
+                    'count'        => $myPendingRequests,
                     'title'        => "Your {$myPendingRequests} Request(s) Are Under Review",
                     'urgency'      => 'info',
                     'icon'         => 'heroicon-o-clock',

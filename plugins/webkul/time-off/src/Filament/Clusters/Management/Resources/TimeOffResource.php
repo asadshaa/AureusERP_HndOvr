@@ -156,6 +156,9 @@ class TimeOffResource extends Resource
                     ->searchable(),
             ])
             ->defaultSort('date_from', 'asc')
+            ->emptyStateIcon('heroicon-o-calendar-days')
+            ->emptyStateHeading('No leave requests yet')
+            ->emptyStateDescription('Employees ask for leave from My Time Off. Requests of the people you manage appear here; the ones waiting for you show Approve in the row menu.')
             ->groups([
                 Tables\Grouping\Group::make('employee.name')
                     ->label(__('time-off::filament/clusters/management/resources/time-off.table.groups.employee-name'))
@@ -184,6 +187,10 @@ class TimeOffResource extends Resource
                         ->label(fn (Leave $record): string => LeaveApprovalService::isReturned($record) ? 'Resubmit' : 'Submit for approval')
                         ->icon('heroicon-o-paper-airplane')
                         ->color('primary')
+                        ->requiresConfirmation()
+                        ->modalHeading(fn (Leave $record): string => LeaveApprovalService::isReturned($record) ? 'Resubmit this leave request?' : 'Send this leave request for approval?')
+                        ->modalDescription('The line manager reviews it first, then HR. While it waits, the days already count against the leave balance.')
+                        ->modalSubmitActionLabel(fn (Leave $record): string => LeaveApprovalService::isReturned($record) ? 'Resubmit' : 'Submit for approval')
                         ->visible(function (Leave $record): bool {
                             if (! static::isActiveCompanyRecord($record)) {
                                 return false;
@@ -212,6 +219,10 @@ class TimeOffResource extends Resource
                     Action::make('approve')
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
+                        ->requiresConfirmation()
+                        ->modalHeading(fn (Leave $record): string => 'Approve '.($record->employee?->name ? $record->employee->name.'\'s' : 'this').' leave request?')
+                        ->modalDescription(fn (Leave $record): string => ($record->holidayStatus?->name ? $record->holidayStatus->name.', ' : '').($record->duration_display ?: (float) $record->number_of_days.' day(s)').'. If this is the last approval step, the leave becomes final and the days come off the balance; otherwise it moves to the next approver. The employee is notified.')
+                        ->modalSubmitActionLabel('Approve')
                         ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)
                             && $record->approvalRequest?->status === 'pending'
                             && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
@@ -237,9 +248,13 @@ class TimeOffResource extends Resource
                             && $record->approvalRequest?->status === 'pending'
                             && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
                         ->color('danger')
+                        ->modalHeading('Refuse this leave request?')
+                        ->modalDescription('The employee is told the reason, and the days go back to their leave balance.')
+                        ->modalSubmitActionLabel('Refuse')
                         ->schema([
                             Textarea::make('reason')
                                 ->label('Rejection reason')
+                                ->placeholder('e.g. Two people from the team are already off that week')
                                 ->required()
                                 ->maxLength(2000),
                         ])
@@ -257,13 +272,16 @@ class TimeOffResource extends Resource
                         ->label('Return to requester')
                         ->icon('heroicon-o-arrow-uturn-left')
                         ->color('info')
+                        ->modalHeading('Return this leave request for changes?')
                         ->modalDescription('The employee is asked to change the request and resubmit it. Until then it does not count against the balance; approval then starts again from the first step.')
+                        ->modalSubmitActionLabel('Return to employee')
                         ->visible(fn (Leave $record): bool => static::isActiveCompanyRecord($record)
                             && $record->approvalRequest?->status === 'pending'
                             && app(ApprovalEngine::class)->canAct($record->approvalRequest, Auth::user()))
                         ->schema([
                             Textarea::make('comment')
                                 ->label('What needs to change')
+                                ->placeholder('e.g. Please move it one day later; we have a client visit on Monday')
                                 ->required()
                                 ->maxLength(2000),
                         ])
@@ -281,6 +299,8 @@ class TimeOffResource extends Resource
                         ->visible(fn (Leave $record): bool => $record->approvalRequest?->status !== 'pending'
                             && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true)),
                     DeleteAction::make()
+                        ->modalHeading('Delete this leave request?')
+                        ->modalDescription('It is removed for good and its days are no longer counted. Approved leave cannot be deleted; cancel it instead.')
                         ->visible(fn (Leave $record): bool => $record->approvalRequest?->status !== 'pending'
                             && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true))
                         ->successNotification(
@@ -294,6 +314,8 @@ class TimeOffResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->modalHeading(fn (?Collection $records): string => 'Delete '.($records?->count() ?? 0).' leave request(s)?')
+                        ->modalDescription('Draft, refused and returned requests are removed for good. Approved and pending requests, and requests of another company, are skipped.')
                         ->action(function (Collection $records) {
                             $deletable = $records->filter(fn (Leave $record) => static::isActiveCompanyRecord($record) && $record->approvalRequest?->status !== 'pending' && ! in_array($record->state, [State::VALIDATE_TWO, State::CANCEL], true));
                             $skipped = $records->count() - $deletable->count();

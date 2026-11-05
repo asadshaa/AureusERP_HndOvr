@@ -460,7 +460,7 @@ class AttendanceMonthLockService
         return DB::transaction(function () use ($user, $companyId, $month, $label, $reason): AttendanceMonthLock {
             $lock = AttendanceMonthLock::query()->where('company_id', $companyId)->where('month', $month)->lockForUpdate()->first();
             if (! $lock || ! $lock->isFinalised()) {
-                throw new RuntimeException("{$label} is not finalised.");
+                throw new RuntimeException("{$label} is not finalised, so there is nothing to re-open.");
             }
 
             $lock->fill([

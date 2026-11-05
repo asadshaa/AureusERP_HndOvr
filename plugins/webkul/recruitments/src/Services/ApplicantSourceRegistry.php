@@ -30,7 +30,7 @@ class ApplicantSourceRegistry
     public function resolve(string $key): ApplicantSourceAdapter
     {
         return $this->adapters[$key]
-            ?? throw new InvalidArgumentException("Unknown applicant source adapter [{$key}].");
+            ?? throw new InvalidArgumentException("Unknown applicant source ({$key}).");
     }
 
     /** @return array<int, string> */

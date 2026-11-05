@@ -74,19 +74,19 @@ class CandidateConversionService
                 throw new RuntimeException('This application was rejected and cannot be converted to an employee.');
             }
             if ((int) $candidate->company_id !== (int) $application->company_id) {
-                throw new RuntimeException('Candidate and application companies do not match.');
+                throw new RuntimeException('The candidate and the application are in different companies.');
             }
             if ($application->department_id && ! DB::table('employees_departments')
                 ->where('id', $application->department_id)
                 ->where('company_id', $application->company_id)
                 ->exists()) {
-                throw new RuntimeException('The application department does not belong to the application company.');
+                throw new RuntimeException('The department on this application belongs to a different company. Choose a department of this company.');
             }
             if ($application->job_id && ! DB::table('employees_job_positions')
                 ->where('id', $application->job_id)
                 ->where('company_id', $application->company_id)
                 ->exists()) {
-                throw new RuntimeException('The application job does not belong to the application company.');
+                throw new RuntimeException('The job on this application belongs to a different company. Choose a job of this company.');
             }
 
             // Creating an employee is a hiring decision (hiring manager / HR), not a

@@ -359,7 +359,7 @@ class DeviceAttendanceImportService
             return DB::transaction(fn (): array => $this->undoLocked($user, $batch));
         } catch (Throwable $exception) {
             if ($this->isMonthLock($exception)) {
-                throw new RuntimeException('Undo refused, nothing was changed: part of this import is in a locked month. '.$exception->getMessage(), 0, $exception);
+                throw new RuntimeException('Nothing was undone, because part of this import falls in a finalised month. '.$exception->getMessage(), 0, $exception);
             }
 
             throw $exception;

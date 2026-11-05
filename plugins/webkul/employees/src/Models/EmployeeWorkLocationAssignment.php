@@ -85,11 +85,11 @@ class EmployeeWorkLocationAssignment extends Model
             if ($employeeCompany === null || $locationCompany === null
                 || (int) $employeeCompany !== (int) $assignment->company_id
                 || (int) $locationCompany !== (int) $assignment->company_id) {
-                throw new InvalidArgumentException('The employee and work location must belong to the same company as the assignment.');
+                throw new InvalidArgumentException('The employee and the work location must be in the same company. Choose a work location from the employee\'s company.');
             }
 
             if ($assignment->valid_from && $assignment->valid_until && $assignment->valid_until->lt($assignment->valid_from)) {
-                throw new InvalidArgumentException('The assignment end date cannot be before its start date.');
+                throw new InvalidArgumentException('The end date cannot be before the start date.');
             }
         });
     }

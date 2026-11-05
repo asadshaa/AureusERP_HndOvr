@@ -116,7 +116,7 @@ it('refuses a department from a different company than the employee', function (
         'company_id'    => $f['company']->id,
         'department_id' => $wrongDepartment->id,
         'name'          => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Department belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Department: the one you chose belongs to a different company');
 
     expect(Employee::query()->where('name', 'Bad Hire')->exists())->toBeFalse();
 });
@@ -129,7 +129,7 @@ it('refuses a team from a different company than the employee', function () {
         'company_id' => $f['company']->id,
         'team_id'    => $wrongTeam->id,
         'name'       => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Team belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Team: the one you chose belongs to a different company');
 });
 
 it('refuses a job position from a different company than the employee', function () {
@@ -140,7 +140,7 @@ it('refuses a job position from a different company than the employee', function
         'company_id' => $f['company']->id,
         'job_id'     => $wrongJob->id,
         'name'       => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Job position belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Job position: the one you chose belongs to a different company');
 });
 
 it('refuses a work location from a different company than the employee', function () {
@@ -151,7 +151,7 @@ it('refuses a work location from a different company than the employee', functio
         'company_id'       => $f['company']->id,
         'work_location_id' => $wrongLocation->id,
         'name'             => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Work location belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Work location: the one you chose belongs to a different company');
 });
 
 it('refuses a manager from a different company than the employee', function () {
@@ -165,7 +165,7 @@ it('refuses a manager from a different company than the employee', function () {
         'company_id' => $f['company']->id,
         'parent_id'  => $wrongManager->id,
         'name'       => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Manager belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Manager: the one you chose belongs to a different company');
 });
 
 it('refuses a coach from a different company than the employee', function () {
@@ -179,7 +179,7 @@ it('refuses a coach from a different company than the employee', function () {
         'company_id' => $f['company']->id,
         'coach_id'   => $wrongCoach->id,
         'name'       => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Coach belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Coach: the one you chose belongs to a different company');
 });
 
 it('refuses linking a user with no access to the employee\'s company', function () {
@@ -190,7 +190,7 @@ it('refuses linking a user with no access to the employee\'s company', function 
         'company_id' => $f['company']->id,
         'user_id'    => $outsiderUser->id,
         'name'       => 'Bad Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'linked user does not have access');
+    ]))->toThrow(InvalidArgumentException::class, 'linked user account cannot use this company');
 });
 
 it('allows linking a user via a secondary allowed company, not only the default one', function () {
@@ -219,7 +219,7 @@ it('enforces the same rule on update, not only on create', function () {
     $wrongDepartment = Department::factory()->create(['company_id' => $f['otherCompany']->id, 'manager_id' => null]);
 
     expect(fn () => $employee->update(['department_id' => $wrongDepartment->id]))
-        ->toThrow(InvalidArgumentException::class, 'Department belongs to a different company');
+        ->toThrow(InvalidArgumentException::class, 'Department: the one you chose belongs to a different company');
 
     expect($employee->fresh()->department_id)->toBeNull();
 });

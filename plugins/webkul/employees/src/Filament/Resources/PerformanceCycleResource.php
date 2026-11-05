@@ -90,16 +90,19 @@ class PerformanceCycleResource extends Resource
                 ->helperText('The template is copied when the cycle is launched.'),
             Select::make('results_visibility')
                 ->label('The employee sees the manager review')
+                ->helperText('When the employee can read what their manager wrote.')
                 ->options(AppraisalKinds::visibilityOptions())
                 ->default(fn (): string => AppraisalTemplate::preferredFor((int) CurrentCompany::id())?->results_visibility ?? AppraisalKinds::VisibleAfterClose)
                 ->required()
                 ->disabled(fn (?PerformanceCycle $record): bool => $record?->isClosed() ?? false),
             DatePicker::make('self_review_due_on')
                 ->label('Self reviews due')
+                ->helperText('Employees fill in their self review by this date.')
                 ->required()
                 ->native(false),
             DatePicker::make('manager_review_due_on')
                 ->label('Manager reviews due')
+                ->helperText('Line managers write their review by this date.')
                 ->required()
                 ->afterOrEqual('self_review_due_on')
                 ->native(false),
@@ -168,6 +171,7 @@ class PerformanceCycleResource extends Resource
                     ->requiresConfirmation()
                     ->modalHeading('Launch this cycle?')
                     ->modalDescription(fn (PerformanceCycle $record): string => static::launchSummary($record))
+                    ->modalSubmitActionLabel('Launch')
                     ->visible(fn (PerformanceCycle $record): bool => (bool) Auth::user()?->can('launch', $record))
                     ->action(function (PerformanceCycle $record): void {
                         try {
@@ -184,13 +188,20 @@ class PerformanceCycleResource extends Resource
                     ->icon('heroicon-o-lock-closed')
                     ->color('warning')
                     ->requiresConfirmation()
+                    ->modalHeading('Close the cycle and share the results?')
                     ->modalDescription(fn (PerformanceCycle $record): string => static::closeSummary($record))
+                    ->modalSubmitActionLabel('Close & share')
                     ->visible(fn (PerformanceCycle $record): bool => (bool) Auth::user()?->can('close', $record))
                     ->action(fn (PerformanceCycle $record) => static::closeCycle($record)),
                 EditAction::make()->visible(fn (PerformanceCycle $record): bool => ! $record->isClosed() && (bool) Auth::user()?->can('update', $record)),
-                DeleteAction::make(),
+                DeleteAction::make()
+                    ->modalHeading('Delete this cycle?')
+                    ->modalDescription('The cycle is removed for good. This cannot be undone.'),
             ])
             ->defaultSort('created_at', 'desc')
+            ->emptyStateIcon('heroicon-o-star')
+            ->emptyStateHeading('No appraisal cycles yet')
+            ->emptyStateDescription('Press New cycle to start a review round: choose the template, the period, who takes part and the deadlines, then Launch it.')
             ->headerActions([
                 Action::make('templates')
                     ->label('Appraisal templates')

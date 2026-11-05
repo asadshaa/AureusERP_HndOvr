@@ -40,16 +40,17 @@ class ApprovalRequestResource extends Resource
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-check-badge';
 
-    protected static ?int $navigationSort = 81;
+    protected static ?int $navigationSort = 5;
 
+    /** The approvals inbox sits with the user's own work, not with system settings. */
     public static function getNavigationGroup(): string|\UnitEnum
     {
-        return NavigationGroup::Setting;
+        return NavigationGroup::Dashboard;
     }
 
     public static function getNavigationLabel(): string
     {
-        return 'Approval Queue';
+        return 'Approvals';
     }
 
     /**
@@ -649,6 +650,9 @@ class ApprovalRequestResource extends Resource
             // likely to be blocking someone else's downstream work, so it
             // belongs at the top, not a freshly-submitted one.
             ->defaultSort('submitted_at', 'asc')
+            ->emptyStateIcon('heroicon-o-check-badge')
+            ->emptyStateHeading('Nothing waiting for approval')
+            ->emptyStateDescription('Leave, attendance corrections and employee requests that need your decision appear here as soon as they are submitted. You are also notified.')
             ->filters([
                 SelectFilter::make('status')->options(ApprovalRequestStatus::options()),
             ])
@@ -657,7 +661,10 @@ class ApprovalRequestResource extends Resource
                 Action::make('approve')
                     ->color('success')
                     ->icon('heroicon-o-check')
-                    ->schema([Textarea::make('reason')->label('Approval note')])
+                    ->modalHeading(fn (ApprovalRequest $record): string => 'Approve '.($record->workflow?->name ?? 'this request').'?')
+                    ->modalDescription('If this is the last step, the request becomes final and takes effect (for example, leave is booked or the attendance time changes). Otherwise it moves to the next approver. The requester is notified.')
+                    ->modalSubmitActionLabel('Approve')
+                    ->schema([Textarea::make('reason')->label('Approval note')->placeholder('Optional, e.g. Approved; please hand over your work to Sana')])
                     ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record, Auth::user()))
                     ->action(function (ApprovalRequest $record, array $data): void {
@@ -675,7 +682,10 @@ class ApprovalRequestResource extends Resource
                     ->color('danger')
                     ->icon('heroicon-o-x-mark')
                     ->requiresConfirmation()
-                    ->schema([Textarea::make('reason')->required()])
+                    ->modalHeading('Reject this request?')
+                    ->modalDescription('The request is closed and nothing changes. The requester is told your reason.')
+                    ->modalSubmitActionLabel('Reject')
+                    ->schema([Textarea::make('reason')->label('Reason')->placeholder('e.g. The dates clash with the stock count')->required()])
                     ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
                         && app(ApprovalEngine::class)->canAct($record, Auth::user()))
                     ->action(function (ApprovalRequest $record, array $data): void {
@@ -690,7 +700,9 @@ class ApprovalRequestResource extends Resource
                     ->label('Return to requester')
                     ->color('info')
                     ->icon('heroicon-o-arrow-uturn-left')
+                    ->modalHeading('Return this request for changes?')
                     ->modalDescription('The requester is asked to change the request and resubmit it. It then starts again from the first approval step.')
+                    ->modalSubmitActionLabel('Return to requester')
                     ->schema([Textarea::make('comment')->label('What needs to change')->required()->maxLength(2000)])
                     ->visible(fn (ApprovalRequest $record): bool => Auth::user() !== null
                         && app(ApprovalEngine::class)->canReturn($record, Auth::user()))

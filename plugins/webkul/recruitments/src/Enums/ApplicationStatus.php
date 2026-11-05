@@ -18,7 +18,7 @@ enum ApplicationStatus: string implements HasColor, HasIcon, HasLabel
         return match ($this) {
             self::ONGOING   => __('Ongoing'),
             self::HIRED     => __('Hired'),
-            self::REFUSED   => __('Refused'),
+            self::REFUSED   => __('Rejected'),
             self::ARCHIVED  => __('Archived'),
         };
     }

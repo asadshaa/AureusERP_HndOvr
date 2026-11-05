@@ -61,6 +61,8 @@ class TimeOffRelationManager extends RelationManager
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['holidayStatus', 'approvalRequest']))
             ->description($balanceDescription)
             ->defaultSort('request_date_from', 'desc')
+            ->emptyStateHeading('No leave taken or requested')
+            ->emptyStateDescription('Leave requests of this employee appear here. Employees ask for leave from My Time Off.')
             ->columns([
                 TextColumn::make('holidayStatus.name')
                     ->label('Leave Type')
@@ -92,9 +94,9 @@ class TimeOffRelationManager extends RelationManager
 
                         return match ($val) {
                             'validate_two' => 'Approved',
-                            'validate_one' => 'Partially Approved',
-                            'confirm'      => 'Pending',
-                            'refuse'       => 'Refused',
+                            'validate_one' => 'Waiting for final approval',
+                            'confirm'      => 'Waiting for approval',
+                            'refuse'       => 'Rejected',
                             default        => ucfirst($val),
                         };
                     })
@@ -122,10 +124,10 @@ class TimeOffRelationManager extends RelationManager
                 SelectFilter::make('state')
                     ->label('Status')
                     ->options([
-                        'confirm'      => 'Pending',
-                        'validate_one' => 'Partially Approved',
+                        'confirm'      => 'Waiting for approval',
+                        'validate_one' => 'Waiting for final approval',
                         'validate_two' => 'Approved',
-                        'refuse'       => 'Refused',
+                        'refuse'       => 'Rejected',
                     ]),
             ])
             ->headerActions([

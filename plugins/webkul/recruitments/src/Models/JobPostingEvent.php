@@ -57,7 +57,7 @@ class JobPostingEvent extends Model
     {
         parent::boot();
 
-        static::updating(fn () => throw new LogicException('Job posting history is append-only.'));
-        static::deleting(fn () => throw new LogicException('Job posting history is append-only.'));
+        static::updating(fn () => throw new LogicException('Job ad history is a permanent record and cannot be changed or deleted.'));
+        static::deleting(fn () => throw new LogicException('Job ad history is a permanent record and cannot be changed or deleted.'));
     }
 }

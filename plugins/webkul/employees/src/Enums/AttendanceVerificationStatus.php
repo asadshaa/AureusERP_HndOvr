@@ -23,11 +23,11 @@ enum AttendanceVerificationStatus: string implements HasColor, HasLabel
     public function getLabel(): string
     {
         return match ($this) {
-            self::Verified       => 'Verified',
-            self::Remote         => 'Remote',
-            self::NeedsReview    => 'Needs review',
-            self::Reviewed       => 'Reviewed',
-            self::ReviewRejected => 'Review rejected',
+            self::Verified       => 'Location confirmed',
+            self::Remote         => 'Working remotely',
+            self::NeedsReview    => 'Needs checking',
+            self::Reviewed       => 'Checked and accepted',
+            self::ReviewRejected => 'Checked and rejected',
             self::Overridden     => 'Corrected by HR',
         };
     }

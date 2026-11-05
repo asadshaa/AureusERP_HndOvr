@@ -4,7 +4,6 @@ namespace App\Filament\Widgets;
 
 use App\Services\Dashboard\HomeDashboardContext;
 use Filament\Widgets\Widget;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Webkul\Employee\Filament\Pages\TodayAttendance as TodayAttendancePage;
@@ -49,15 +48,13 @@ class TeamTodayWidget extends Widget
         $groups = null;
         $offDay = null;
 
-        if ($user && $companyId !== null && MonthlyAttendanceReport::canView($user)) {
-            try {
-                $report = app(TodayAttendance::class)->forCompany($user, $companyId);
-                $rows = collect($report['rows'])->only($teamIds);
-                $offDay = $report['off_day'];
-                $groups = $this->groups($rows->all());
-            } catch (AuthorizationException) {
-                $groups = null;
-            }
+        // Shared with the Today box: worked out once per request (null when the user may not see it).
+        $report = $user && $companyId !== null && MonthlyAttendanceReport::canView($user) ? $context->todayAttendance() : null;
+
+        if ($report !== null) {
+            $rows = collect($report['rows'])->only($teamIds);
+            $offDay = $report['off_day'];
+            $groups = $this->groups($rows->all());
         }
 
         $weekStart = $now->startOfWeek();

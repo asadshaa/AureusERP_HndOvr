@@ -152,7 +152,7 @@ class Shift extends Model
     protected function validateShift(): void
     {
         if (! $this->company_id) {
-            throw ValidationException::withMessages(['company_id' => 'A shift belongs to a company.']);
+            throw ValidationException::withMessages(['company_id' => 'Choose the company for this shift.']);
         }
 
         $this->name = trim((string) $this->name);
@@ -162,7 +162,7 @@ class Shift extends Model
 
         $this->code = strtoupper(trim((string) $this->code));
         if (! preg_match('/^[A-Z0-9]{1,10}$/', $this->code)) {
-            throw ValidationException::withMessages(['code' => 'The code is 1 to 10 letters or digits (e.g. N for Night).']);
+            throw ValidationException::withMessages(['code' => 'The short code must be 1 to 10 letters or digits (for example N for Night).']);
         }
 
         $duplicate = static::query()
@@ -177,10 +177,10 @@ class Shift extends Model
         $start = self::toMinutes($this->start_time);
         $end = self::toMinutes($this->end_time);
         if ($start === null || $end === null) {
-            throw ValidationException::withMessages(['start_time' => 'Give the start and end time as HH:MM.']);
+            throw ValidationException::withMessages(['start_time' => 'Enter the start and end time like 09:00 or 17:30.']);
         }
         if ($start === $end) {
-            throw ValidationException::withMessages(['end_time' => 'The end time must differ from the start time (an earlier end time is an overnight shift).']);
+            throw ValidationException::withMessages(['end_time' => 'The end time cannot be the same as the start time. (An end time earlier than the start time means the work runs past midnight.)']);
         }
         $this->start_time = sprintf('%02d:%02d:00', intdiv($start, 60), $start % 60);
         $this->end_time = sprintf('%02d:%02d:00', intdiv($end, 60), $end % 60);
@@ -189,7 +189,7 @@ class Shift extends Model
 
         $required = (int) $this->required_minutes;
         if ($required < 1 || $required > 1440) {
-            throw ValidationException::withMessages(['required_minutes' => 'Required minutes must be between 1 and 1440.']);
+            throw ValidationException::withMessages(['required_minutes' => 'Required working minutes must be between 1 and 1440 (24 hours).']);
         }
 
         $break = (int) ($this->break_minutes ?? 0);
@@ -206,7 +206,7 @@ class Shift extends Model
 
         $color = strtolower(trim((string) ($this->color ?: '#64748b')));
         if (! preg_match('/^#[0-9a-f]{6}$/', $color)) {
-            throw ValidationException::withMessages(['color' => 'Choose a colour (#RRGGBB).']);
+            throw ValidationException::withMessages(['color' => 'Choose a colour from the colour picker.']);
         }
         $this->color = $color;
         $this->is_active ??= true;

@@ -37,7 +37,7 @@ class WebsiteDerivedChannelPublisher implements JobPostingPublisher
         }
 
         if ($channel !== self::GOOGLE && blank($this->feedBoard)) {
-            throw new InvalidArgumentException("No website-derived channel [{$channel}].");
+            throw new InvalidArgumentException("Unknown website channel ({$channel}).");
         }
     }
 

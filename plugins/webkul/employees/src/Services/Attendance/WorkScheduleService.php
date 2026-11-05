@@ -108,7 +108,7 @@ class WorkScheduleService
                 $this->assign($user, $employee, $data);
                 $assigned++;
             } catch (AuthorizationException $e) {
-                $skipped[(string) $employee->name] = 'not in your HR scope';
+                $skipped[(string) $employee->name] = 'you are not HR for this employee';
             } catch (ValidationException $e) {
                 $skipped[(string) $employee->name] = (string) collect($e->errors())->flatten()->first();
             } catch (\RuntimeException $e) {

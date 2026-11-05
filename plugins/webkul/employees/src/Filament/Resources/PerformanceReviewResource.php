@@ -104,9 +104,13 @@ class PerformanceReviewResource extends Resource
                     ->color('success')
                     ->visible(fn (PerformanceReview $record): bool => $user instanceof User && app(AppraisalAccess::class)->canEditManagerReview($user, $record))
                     ->url(fn (PerformanceReview $record): string => static::getUrl('view', ['record' => $record])),
-                EditAction::make(),
+                EditAction::make()
+                    ->tooltip('HR correction of the appraisal record'),
             ])
-            ->defaultSort('id', 'desc');
+            ->defaultSort('id', 'desc')
+            ->emptyStateIcon('heroicon-o-star')
+            ->emptyStateHeading('No appraisals yet')
+            ->emptyStateDescription('Appraisals are created when HR launches a performance cycle. Open one to fill in the self review or the manager review.');
     }
 
     /**

@@ -178,7 +178,8 @@ class AllocationResource extends Resource
                                     ->minValue(0)
                                     ->maxValue(99999999999)
                                     ->required()
-                                    ->suffix(__('time-off::filament/clusters/management/resources/allocation.form.fields.allocation-suffix')),
+                                    ->suffix(__('time-off::filament/clusters/management/resources/allocation.form.fields.allocation-suffix'))
+                                    ->helperText('Days the employee may take of this type in the period. The yearly 12 / 8 / 5 days are added automatically; use this for extra days only.'),
                                 RichEditor::make('notes')
                                     ->label(__('time-off::filament/clusters/management/resources/allocation.form.fields.reason')),
                             ]),
@@ -230,6 +231,9 @@ class AllocationResource extends Resource
                     ->searchable(),
             ])
             ->defaultSort('date_from', 'desc')
+            ->emptyStateIcon('heroicon-o-calendar')
+            ->emptyStateHeading('No leave allocations yet')
+            ->emptyStateDescription('Each employee gets Annual 12, Sick 8 and Casual 5 days automatically when they join and every 1 January. Add extra days with New.')
             ->groups([
                 Tables\Grouping\Group::make('employee.name')
                     ->label(__('time-off::filament/clusters/management/resources/allocation.table.groups.employee-name'))
@@ -253,6 +257,8 @@ class AllocationResource extends Resource
                     ViewAction::make(),
                     EditAction::make(),
                     DeleteAction::make()
+                        ->modalHeading('Delete this allocation?')
+                        ->modalDescription('The employee loses these days from their balance. Leave they already took stays recorded.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -263,6 +269,10 @@ class AllocationResource extends Resource
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
                         ->authorize(HrPermissions::ApproveLeave)
+                        ->requiresConfirmation()
+                        ->modalHeading(fn ($record): string => 'Approve '.(float) $record->number_of_days.' day(s) of '.($record->holidayStatus?->name ?? 'leave').' for '.($record->employee?->name ?? 'this employee').'?')
+                        ->modalDescription('The days are added to the employee\'s balance and can be used straight away.')
+                        ->modalSubmitActionLabel('Approve')
                         ->hidden(fn ($record) => $record->state === State::VALIDATE_TWO->value)
                         ->action(function ($record) {
                             // getEloquentQuery() includes the viewer's own employee id
@@ -301,6 +311,10 @@ class AllocationResource extends Resource
                         ->hidden(fn ($record) => $record->state === State::REFUSE->value)
                         ->color('danger')
                         ->authorize(HrPermissions::ApproveLeave)
+                        ->requiresConfirmation()
+                        ->modalHeading('Refuse this allocation?')
+                        ->modalDescription('Its days are not added to the employee\'s balance (or are taken off again if it was approved).')
+                        ->modalSubmitActionLabel('Refuse')
                         ->action(function ($record) {
                             if ((int) $record->employee?->user_id === (int) Auth::id()) {
                                 Notification::make()->danger()->title('You cannot refuse your own leave allocation.')->send();
@@ -322,6 +336,8 @@ class AllocationResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->modalHeading('Delete the selected allocations?')
+                        ->modalDescription('The employees lose these days from their balances. Leave already taken stays recorded.')
                         ->successNotification(
                             Notification::make()
                                 ->success()

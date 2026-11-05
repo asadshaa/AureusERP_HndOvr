@@ -7,7 +7,10 @@ use Filament\Resources\Resource;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Webkul\Accounting\Filament\Clusters\Configuration;
+use Webkul\Accounting\Filament\Clusters\Configuration\Pages\ImportChartOfAccounts;
+use Webkul\Accounting\Filament\Clusters\Configuration\Pages\ImportedChartOfAccounts;
 use Webkul\Accounting\Filament\Clusters\Configuration\Resources\CoaImportHistoryResource\Pages\ListCoaImportBatches;
 use Webkul\Accounting\Models\CoaImportBatch;
 use Webkul\Security\Filament\Concerns\ScopedToActiveCompany;
@@ -86,6 +89,22 @@ class CoaImportHistoryResource extends Resource
                     }),
             ])
             ->defaultSort('created_at', 'desc');
+    }
+
+    /**
+     * The import history has no policy, so without this every signed-in user
+     * could open it and the Accounting > Configurations menu showed for
+     * everyone. Users who may import or review the Chart of Accounts, or who
+     * hold the history's own Shield permission, keep access.
+     */
+    public static function canViewAny(): bool
+    {
+        $user = Auth::user();
+
+        return $user !== null
+            && ($user->can('view_any_accounting_coa::import::history')
+                || ImportChartOfAccounts::canAccess()
+                || ImportedChartOfAccounts::canAccess());
     }
 
     public static function canCreate(): bool

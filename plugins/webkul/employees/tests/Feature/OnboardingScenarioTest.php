@@ -162,7 +162,7 @@ it('3. refuses assigning a manager from a different company', function () {
         'company_id' => $companyA->id,
         'parent_id'  => $managerInB->id,
         'name'       => 'Cross-Company Hire',
-    ]))->toThrow(InvalidArgumentException::class, 'Manager belongs to a different company');
+    ]))->toThrow(InvalidArgumentException::class, 'Manager: the one you chose belongs to a different company');
 
     expect(Employee::query()->where('name', 'Cross-Company Hire')->exists())->toBeFalse();
 });
@@ -323,7 +323,7 @@ it('7c. refuses linking a user with no access to the employee\'s company', funct
         'company_id' => $company->id,
         'user_id'    => $outsiderUser->id,
         'name'       => 'Bad Link',
-    ]))->toThrow(InvalidArgumentException::class, 'linked user does not have access');
+    ]))->toThrow(InvalidArgumentException::class, 'linked user account cannot use this company');
 });
 
 // ---------------------------------------------------------------------

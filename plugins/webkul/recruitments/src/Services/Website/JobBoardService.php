@@ -96,7 +96,7 @@ class JobBoardService
         }
 
         if (! array_key_exists($channel, $this->channels->freeJobBoards())) {
-            throw new RuntimeException("Unknown job board [{$channel}].");
+            throw new RuntimeException("Unknown job board ({$channel}).");
         }
 
         $input = [

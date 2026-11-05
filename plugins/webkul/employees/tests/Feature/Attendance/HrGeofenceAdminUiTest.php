@@ -141,7 +141,7 @@ it('shows the verification status and filters on it', function () {
 
     Livewire::test(ManageAttendanceRecords::class)
         ->assertCanSeeTableRecords([$f['record'], $manual])
-        ->assertSee('Needs review')
+        ->assertSee('Needs checking')
         ->filterTable('verification_status', 'needs_review')
         ->assertCanSeeTableRecords([$f['record']])
         ->assertCanNotSeeTableRecords([$manual]);

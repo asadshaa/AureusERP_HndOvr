@@ -155,6 +155,8 @@ class RequestInstalmentsRelationManager extends RelationManager
                     )),
             ])
             ->defaultSort('number')
+            ->emptyStateHeading('No loans or advances')
+            ->emptyStateDescription('When a loan or salary advance request of this employee is approved, its monthly deductions appear here.')
             ->paginated([25, 50, 100]);
     }
 

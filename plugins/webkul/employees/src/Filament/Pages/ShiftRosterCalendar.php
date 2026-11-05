@@ -37,6 +37,7 @@ use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Models\Company;
 
 /**
@@ -235,6 +236,7 @@ class ShiftRosterCalendar extends Page implements HasForms
                     ->helperText('Each takes the other\'s shift (or day off) on this date.'),
                 Textarea::make('reason')
                     ->label('Reason')
+                    ->placeholder('e.g. Covering for Ali, who is on sick leave')
                     ->rows(2)
                     ->maxLength(255)
                     ->visible(fn (Get $get): bool => $get('mode') !== 'reset')
@@ -280,6 +282,7 @@ class ShiftRosterCalendar extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('shift-roster'),
             Action::make('assignRoster')
                 ->label('Assign roster')
                 ->icon('heroicon-o-arrow-path-rounded-square')

@@ -29,7 +29,7 @@ enum JobOfferStatus: string implements HasColor, HasIcon, HasLabel
     {
         return match ($this) {
             self::DRAFT            => __('Draft'),
-            self::PENDING_APPROVAL => __('Pending approval'),
+            self::PENDING_APPROVAL => __('Waiting for approval'),
             self::RETURNED         => __('Returned for changes'),
             self::APPROVED         => __('Approved'),
             self::REJECTED         => __('Rejected'),

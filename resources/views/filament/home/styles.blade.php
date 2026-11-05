@@ -100,4 +100,8 @@
     .ah-heading { margin: 0 0 .75rem; font-size: .875rem; font-weight: 600; color: var(--gray-950); display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
     :where(.dark) .ah-heading { color: #fff; }
     .ah-button-reset { appearance: none; background: none; border: 0; padding: 0; margin: 0; width: 100%; text-align: inherit; font: inherit; color: inherit; cursor: pointer; }
+
+    .ah-today-count { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; height: 1.5rem; padding: 0 .375rem; margin-right: .25rem;
+        border-radius: 999px; background: var(--primary-50); color: var(--primary-700); font-size: .8125rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    :where(.dark) .ah-today-count { background: color-mix(in oklab, var(--primary-500) 20%, transparent); color: var(--primary-300); }
 </style>

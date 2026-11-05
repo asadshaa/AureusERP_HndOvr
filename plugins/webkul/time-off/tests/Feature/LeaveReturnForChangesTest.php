@@ -250,5 +250,5 @@ it('shows a returned leave as "Returned for changes", not refused, on the employ
 
     Livewire::test(TimeOffRelationManager::class, ['ownerRecord' => $f['employee'], 'pageClass' => ViewEmployee::class])
         ->assertTableColumnFormattedStateSet('state', 'Returned for changes', $returned)
-        ->assertTableColumnFormattedStateSet('state', 'Refused', $refused);
+        ->assertTableColumnFormattedStateSet('state', 'Rejected', $refused);
 });

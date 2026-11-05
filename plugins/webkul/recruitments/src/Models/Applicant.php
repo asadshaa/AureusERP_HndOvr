@@ -394,7 +394,7 @@ class Applicant extends Model
             }
 
             if ((int) $relatedCompany !== $companyId) {
-                throw new InvalidArgumentException("The selected {$label} belongs to a different company than this application.");
+                throw new InvalidArgumentException("The selected {$label} belongs to a different company. Choose one from this application's company.");
             }
         }
     }
@@ -412,7 +412,7 @@ class Applicant extends Model
         $posting = JobPosting::query()->whereKey($this->job_posting_id)->first(['id', 'company_id', 'job_id']);
 
         if (! $posting || (int) $posting->company_id !== (int) $this->company_id || (int) $posting->job_id !== (int) $this->job_id) {
-            throw new InvalidArgumentException('The selected posting belongs to a different job or company than this application.');
+            throw new InvalidArgumentException('The selected job ad belongs to a different job or company. Choose an ad of this job.');
         }
     }
 }

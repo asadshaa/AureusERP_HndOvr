@@ -26,6 +26,7 @@ use Webkul\Employee\Services\Attendance\MonthlyAttendanceReport;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 use Webkul\Support\Models\Company;
 
 /**
@@ -155,6 +156,7 @@ class AttendanceReport extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            HelpAction::make('attendance-report'),
             Action::make('finaliseMonth')
                 ->label('Finalise month')
                 ->icon('heroicon-o-lock-closed')

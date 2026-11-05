@@ -166,7 +166,8 @@ it('gives an employee their day, leave and pending actions only', function () {
         ->assertSee('Home Employee Co')
         ->assertSee('My day')
         ->assertSee('Grace balance')
-        ->assertSee('Pending actions')
+        ->assertSee('Today')
+        ->assertSee('days of leave left')
         ->assertDontSee('Your companies')
         ->assertDontSee('My team today')
         ->assertDontSee('Best new applicants');

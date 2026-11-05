@@ -159,16 +159,16 @@ class WorkSchedule extends Model
 
         $this->company_id ??= $employee->company_id;
         if ((int) $employee->company_id !== (int) $this->company_id) {
-            throw ValidationException::withMessages(['employee_id' => 'A work schedule must belong to the employee\'s own company.']);
+            throw ValidationException::withMessages(['employee_id' => 'A work schedule must be in the employee\'s own company. Switch to that company and try again.']);
         }
 
         $start = $this->toMinutes($this->start_time);
         $end = $this->toMinutes($this->end_time);
         if ($start === null || $end === null) {
-            throw ValidationException::withMessages(['start_time' => 'Give the start and end time as HH:MM.']);
+            throw ValidationException::withMessages(['start_time' => 'Enter the start and end time like 09:00 or 17:30.']);
         }
         if ($end === $start) {
-            throw ValidationException::withMessages(['end_time' => 'The end time must differ from the start time (an earlier end time is an overnight shift).']);
+            throw ValidationException::withMessages(['end_time' => 'The end time cannot be the same as the start time. (An end time earlier than the start time means the work runs past midnight.)']);
         }
         $this->start_time = sprintf('%02d:%02d:00', intdiv($start, 60), $start % 60);
         $this->end_time = sprintf('%02d:%02d:00', intdiv($end, 60), $end % 60);
@@ -183,7 +183,7 @@ class WorkSchedule extends Model
 
         $required = (int) $this->required_minutes;
         if ($required < 1 || $required > 1440) {
-            throw ValidationException::withMessages(['required_minutes' => 'Required minutes must be between 1 and 1440.']);
+            throw ValidationException::withMessages(['required_minutes' => 'Required working minutes must be between 1 and 1440 (24 hours).']);
         }
 
         $flexible = (int) ($this->flexible_minutes ?? 0);

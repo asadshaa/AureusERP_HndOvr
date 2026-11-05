@@ -15,6 +15,7 @@ use Webkul\Employee\Support\ChecklistKinds;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
+use Webkul\Support\Filament\Actions\HelpAction;
 
 /**
  * My tasks: the onboarding and exit checklist tasks waiting for the
@@ -103,5 +104,12 @@ class MyChecklistTasks extends Page implements HasTable
         $user = CurrentCompany::user();
 
         return $user;
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            HelpAction::make('my-tasks'),
+        ];
     }
 }

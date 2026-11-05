@@ -126,7 +126,7 @@ class ShiftRosterService
                 $this->assign($user, $roster, $employee, $start, $end, $notes);
                 $assigned++;
             } catch (AuthorizationException) {
-                $skipped[(string) $employee->name] = 'not in your scope';
+                $skipped[(string) $employee->name] = 'you do not manage this employee';
             } catch (ValidationException $e) {
                 $skipped[(string) $employee->name] = (string) collect($e->errors())->flatten()->first();
             } catch (RuntimeException $e) {

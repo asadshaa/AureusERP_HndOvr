@@ -543,7 +543,7 @@ it('AUDIT: verifies recordHrCorrection service enforces minimum 10 char reason a
         $f['hrUserA'],
         ['check_in' => "$date 09:15:00"],
         'Short'
-    ))->toThrow(InvalidArgumentException::class, 'A correction reason of at least 10 characters is required.');
+    ))->toThrow(InvalidArgumentException::class, 'Write a reason for the correction (at least 10 characters).');
 
     // check_out <= check_in fails
     expect(fn () => $service->recordHrCorrection(
@@ -551,5 +551,5 @@ it('AUDIT: verifies recordHrCorrection service enforces minimum 10 char reason a
         $f['hrUserA'],
         ['check_in' => "$date 17:00:00", 'check_out' => "$date 09:00:00"],
         'Valid reason exceeding ten characters'
-    ))->toThrow(InvalidArgumentException::class, 'Check-out must be after check-in.');
+    ))->toThrow(InvalidArgumentException::class, 'Check-out time must be later than check-in time.');
 });

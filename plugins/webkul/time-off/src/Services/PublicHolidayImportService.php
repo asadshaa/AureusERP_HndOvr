@@ -118,7 +118,7 @@ class PublicHolidayImportService
         $company = Company::query()->find($companyId);
 
         if (! $company) {
-            throw new InvalidArgumentException("Company {$companyId} does not exist.");
+            throw new InvalidArgumentException("Company {$companyId} was not found. Check the company number and try again.");
         }
 
         $work = function () use ($company, $holidays, $actor, $dryRun): array {
@@ -275,7 +275,7 @@ class PublicHolidayImportService
         $to = filled($row['date_to'] ?? null) ? $this->date($row['date_to'], 'date_to') : $from;
 
         if ($to < $from) {
-            throw new InvalidArgumentException("{$name}: date_to is before date_from");
+            throw new InvalidArgumentException("{$name}: the end date (date_to) is before the start date (date_from)");
         }
         if ((int) substr($from, 0, 4) !== $year || (int) substr($to, 0, 4) !== $year) {
             throw new InvalidArgumentException("{$name}: the dates are not in {$year}");

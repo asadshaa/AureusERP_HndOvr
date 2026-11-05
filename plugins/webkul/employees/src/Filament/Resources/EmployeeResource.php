@@ -207,6 +207,7 @@ class EmployeeResource extends Resource
                                             })
                                             ->url(fn (?string $state) => $state ? "mailto:{$state}" : '#')
                                     )
+                                    ->placeholder('e.g. ali.khan@company.com')
                                     ->email(),
                                 Select::make('department_id')
                                     ->label(__('employees::filament/resources/employee.form.sections.fields.department'))
@@ -246,6 +247,7 @@ class EmployeeResource extends Resource
                                             })
                                             ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                     )
+                                    ->placeholder('+92 300 1234567')
                                     ->tel(),
                                 Select::make('job_id')
                                     ->relationship(
@@ -302,13 +304,15 @@ class EmployeeResource extends Resource
                                             })
                                             ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                     )
+                                    ->placeholder('+92 42 35123456')
                                     ->tel(),
                                 Select::make('parent_id')
                                     ->relationship('parent', 'name', modifyQueryUsing: fn (Builder $query) => $query->where('company_id', Auth::user()?->default_company_id))
                                     ->searchable()
                                     ->preload()
                                     ->suffixIcon('heroicon-o-user')
-                                    ->label(__('employees::filament/resources/employee.form.sections.fields.manager')),
+                                    ->label(__('employees::filament/resources/employee.form.sections.fields.manager'))
+                                    ->helperText('Their line manager: the first approver of their leave, attendance corrections and requests. Leave empty and HR approves instead.'),
                                 Select::make('employees_employee_categories')
                                     ->multiple()
                                     ->relationship('categories', 'name')
@@ -318,6 +322,7 @@ class EmployeeResource extends Resource
                                     ->createOptionForm(fn (Schema $schema) => EmployeeCategoryResource::form($schema)),
                                 DatePicker::make('joining_date')
                                     ->label('Joining date')
+                                    ->helperText('First leave year is prorated from this date (months left in the year).')
                                     ->native(false),
                                 DatePicker::make('probation_end_date')
                                     ->label('Probation end date')
@@ -325,10 +330,12 @@ class EmployeeResource extends Resource
                                     ->afterOrEqual('joining_date'),
                                 DatePicker::make('confirmation_date')
                                     ->label('Confirmation date')
+                                    ->helperText('The day the employee was confirmed after probation.')
                                     ->native(false)
                                     ->afterOrEqual('joining_date'),
                                 DatePicker::make('leaving_date')
                                     ->label('Leaving date')
+                                    ->helperText('Last working day. Leave empty while they still work here.')
                                     ->native(false)
                                     ->afterOrEqual('joining_date'),
                                 Select::make('employment_status')
@@ -350,10 +357,14 @@ class EmployeeResource extends Resource
                                     ->disabled(fn (?Employee $record): bool => $record !== null),
                                 TextInput::make('base_salary')
                                     ->label('Base salary')
+                                    ->placeholder('e.g. 85000')
                                     ->numeric()
                                     ->minValue(0)
                                     ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
-                                    ->disabled(fn (?Employee $record): bool => $record !== null),
+                                    ->disabled(fn (?Employee $record): bool => $record !== null)
+                                    ->helperText(fn (?Employee $record): string => $record !== null
+                                        ? 'Monthly. Only people allowed to see salaries see this. Change it with "Request sensitive change".'
+                                        : 'Monthly. Only people allowed to see salaries see this. Used for salary advance limits and salary letters.'),
                                 Select::make('salary_currency_id')
                                     ->label('Salary currency')
                                     ->relationship('salaryCurrency', 'name')
@@ -538,6 +549,7 @@ class EmployeeResource extends Resource
                                                                             })
                                                                             ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                                                     )
+                                                                    ->placeholder('+92 300 1234567')
                                                                     ->tel(),
                                                                 Select::make('bank_account_id')
                                                                     ->relationship(
@@ -552,6 +564,8 @@ class EmployeeResource extends Resource
                                                                             ->schema([
                                                                                 TextInput::make('account_number')
                                                                                     ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.bank-account-number'))
+                                                                                    ->placeholder('PK36 SCBL 0000 0011 2345 6702')
+                                                                                    ->helperText('IBAN or account number the salary is paid into.')
                                                                                     ->required(),
                                                                                 Hidden::make('account_holder_name')
                                                                                     ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.bank-account-holder-name'))
@@ -607,6 +621,7 @@ class EmployeeResource extends Resource
                                                                             })
                                                                             ->url(fn (?string $state) => $state ? "mailto:{$state}" : '#')
                                                                     )
+                                                                    ->placeholder('e.g. ali.khan@gmail.com')
                                                                     ->email(),
                                                                 TextInput::make('private_car_plate')
                                                                     ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.private-car-plate')),
@@ -633,7 +648,8 @@ class EmployeeResource extends Resource
                                                                 Fieldset::make(__('employees::filament/resources/employee.form.tabs.private-information.fields.emergency-contact'))
                                                                     ->schema([
                                                                         TextInput::make('emergency_contact')
-                                                                            ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.contact-name')),
+                                                                            ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.contact-name'))
+                                                                            ->placeholder('e.g. Ayesha Khan'),
                                                                         TextInput::make('emergency_phone')
                                                                             ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.contact-phone'))
                                                                             ->suffixAction(
@@ -645,9 +661,11 @@ class EmployeeResource extends Resource
                                                                                     })
                                                                                     ->url(fn (?string $state) => $state ? "tel:{$state}" : '#')
                                                                             )
+                                                                            ->placeholder('+92 321 7654321')
                                                                             ->tel(),
                                                                         TextInput::make('emergency_relationship')
                                                                             ->label('Relation')
+                                                                            ->placeholder('e.g. Wife, Father')
                                                                             ->maxLength(100),
                                                                     ])->columns(2),
                                                             ])
@@ -775,11 +793,15 @@ class EmployeeResource extends Resource
                                                             ->helperText(fn (?Employee $record): ?string => $record !== null ? 'Change it with "Request sensitive change".' : null),
                                                         TextInput::make('ntn')
                                                             ->label('NTN')
+                                                            ->placeholder('e.g. 1234567-8')
+                                                            ->helperText('National Tax Number, if the employee has one.')
                                                             ->maxLength(30)
                                                             ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
                                                             ->disabled(fn (?Employee $record): bool => $record !== null),
                                                         TextInput::make('eobi_number')
                                                             ->label('EOBI no.')
+                                                            ->placeholder('e.g. ABC1234567')
+                                                            ->helperText('Old-age benefits (EOBI) registration number.')
                                                             ->maxLength(40),
                                                         Select::make('blood_group')
                                                             ->label('Blood group')
@@ -794,6 +816,7 @@ class EmployeeResource extends Resource
                                                             ->disabled(fn (?Employee $record): bool => $record !== null),
                                                         TextInput::make('passport_id')
                                                             ->label(__('employees::filament/resources/employee.form.tabs.private-information.fields.passport-id'))
+                                                            ->placeholder('e.g. AB1234567')
                                                             ->visible(fn (): bool => Auth::user()?->can('hr_view_sensitive_employee_data') ?? false)
                                                             ->disabled(fn (?Employee $record): bool => $record !== null),
                                                         Select::make('gender')
@@ -993,6 +1016,7 @@ class EmployeeResource extends Resource
                                                             ),
                                                         TextInput::make('biometric_id')
                                                             ->label('Biometric / device ID')
+                                                            ->placeholder('e.g. 1024')
                                                             ->helperText('User number on the attendance device (ZKTeco "AC-No." / "User ID"). Device file imports match punches on it.')
                                                             ->prefixIcon('heroicon-o-finger-print')
                                                             ->maxLength(32)
@@ -1104,6 +1128,9 @@ class EmployeeResource extends Resource
                 72,
                 'all',
             ])
+            ->emptyStateIcon('heroicon-o-users')
+            ->emptyStateHeading('No employees found')
+            ->emptyStateDescription('Add people with New employee, or hire them from Recruitment. If you expected someone here, clear the search and filters, or check the company switcher at the top.')
             ->filtersFormColumns(3)
             ->filters([
                 static::companyFilter(),
@@ -1546,6 +1573,9 @@ class EmployeeResource extends Resource
                     Action::make('request_sensitive_change')
                         ->label('Request sensitive change')
                         ->icon('heroicon-o-shield-check')
+                        ->modalHeading(fn (Employee $record): string => 'Request a sensitive change for '.$record->name)
+                        ->modalDescription('Identity numbers, bank account and salary change only after approval. Until then the current values stay. Change only the fields that need it.')
+                        ->modalSubmitActionLabel('Send for approval')
                         ->visible(fn (Employee $record): bool => static::isActiveCompanyRecord($record)
                             && (Auth::user()?->can('hr_manage_sensitive_employee_data') ?? false))
                         ->fillForm(fn (Employee $record): array => [
@@ -1566,14 +1596,14 @@ class EmployeeResource extends Resource
                                 ->placeholder('12345-1234567-1')
                                 ->rule(fn (Employee $record): Closure => static::cnicRule($record))
                                 ->dehydrateStateUsing(fn (?string $state): ?string => Cnic::normalize($state) ?? (blank($state) ? null : $state)),
-                            TextInput::make('ntn')->label('NTN')->maxLength(30),
+                            TextInput::make('ntn')->label('NTN')->placeholder('e.g. 1234567-8')->maxLength(30),
                             TextInput::make('identification_id')->label('Other identification'),
-                            TextInput::make('passport_id')->label('Passport'),
+                            TextInput::make('passport_id')->label('Passport')->placeholder('e.g. AB1234567'),
                             TextInput::make('ssnid')->label('SSN'),
                             TextInput::make('sinid')->label('SIN'),
                             Select::make('bank_account_id')->relationship('bankAccount', 'account_number', modifyQueryUsing: fn (Builder $query, ?Employee $record) => $query->where('partner_id', $record?->partner_id ?? 0))->searchable()->preload(),
                             TextInput::make('salary_grade'),
-                            TextInput::make('base_salary')->numeric()->minValue(0),
+                            TextInput::make('base_salary')->label('Base salary (monthly)')->placeholder('e.g. 85000')->numeric()->minValue(0),
                             Select::make('salary_currency_id')->relationship('salaryCurrency', 'name')->searchable()->preload(),
                         ])
                         ->action(function (Employee $record, array $data): void {
@@ -1591,6 +1621,8 @@ class EmployeeResource extends Resource
                                 ->body(__('employees::filament/resources/employee.table.actions.restore.notification.body'))
                         ),
                     DeleteAction::make()
+                        ->modalHeading(fn (Employee $record): string => 'Archive '.$record->name.'?')
+                        ->modalDescription('The employee moves to the Archived view and leaves the normal lists. Their history (attendance, leave, requests) is kept, and you can restore them from Archived.')
                         ->successNotification(
                             Notification::make()
                                 ->success()
@@ -1603,6 +1635,8 @@ class EmployeeResource extends Resource
                 BulkActionGroup::make([
                     WorkScheduleActions::bulkAssign(),
                     DeleteBulkAction::make()
+                        ->modalHeading('Archive the selected employees?')
+                        ->modalDescription('They move to the Archived view; their history is kept and they can be restored. Employees you may not delete one by one are skipped.')
                         ->action(function (Collection $records) {
                             // deleteAny() (which gates whether this bulk action even renders)
                             // has no per-record hierarchy/ownership check, unlike the single-row
@@ -1636,6 +1670,8 @@ class EmployeeResource extends Resource
                                 ->send();
                         }),
                     ForceDeleteBulkAction::make()
+                        ->modalHeading('Permanently delete the selected employees?')
+                        ->modalDescription('This cannot be undone: the employee and their records are removed for good. Employees with linked records may be refused.')
                         ->action(function (Collection $records) {
                             // Same per-record re-check as DeleteBulkAction above, for forceDelete().
                             $selectedCount = $records->count();
