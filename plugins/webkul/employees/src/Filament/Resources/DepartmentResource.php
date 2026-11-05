@@ -31,11 +31,6 @@ use Filament\Tables;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\QueryBuilder;
-use Filament\Tables\Filters\QueryBuilder\Constraints\DateConstraint;
-use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint;
-use Filament\Tables\Filters\QueryBuilder\Constraints\RelationshipConstraint\Operators\IsRelatedToOperator;
-use Filament\Tables\Filters\QueryBuilder\Constraints\TextConstraint;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -48,7 +43,6 @@ use Webkul\Employee\Filament\Resources\DepartmentResource\Pages\ViewDepartment;
 use Webkul\Employee\Models\Department;
 use Webkul\Field\Filament\Traits\HasCustomFields;
 use Webkul\Security\Filament\Concerns\ScopedToMemberCompanies;
-use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 
 class DepartmentResource extends Resource
@@ -217,42 +211,6 @@ class DepartmentResource extends Resource
             ->filtersFormColumns(2)
             ->filters(static::mergeCustomTableFilters([
                 static::companyFilter(),
-                QueryBuilder::make()
-                    ->constraintPickerColumns(2)
-                    ->constraints([
-                        TextConstraint::make('name')
-                            ->label(__('employees::filament/resources/department.table.filters.name'))
-                            ->icon('heroicon-o-building-office-2'),
-                        RelationshipConstraint::make('manager')
-                            ->label(__('employees::filament/resources/department.table.filters.manager-name'))
-                            ->icon('heroicon-o-user')
-                            ->multiple()
-                            ->selectable(
-                                IsRelatedToOperator::make()
-                                    ->titleAttribute('name')
-                                    ->label(__('employees::filament/resources/department.table.filters.manager-name'))
-                                    ->searchable()
-                                    ->multiple()
-                                    ->preload(),
-                            ),
-                        RelationshipConstraint::make('company')
-                            ->label(__('employees::filament/resources/department.table.filters.company-name'))
-                            ->icon('heroicon-o-building-office-2')
-                            ->multiple()
-                            ->selectable(
-                                IsRelatedToOperator::make()
-                                    ->titleAttribute('name')
-                                    ->modifyRelationshipQueryUsing(fn (Builder $query): Builder => $query->whereKey(CurrentCompany::membershipIds()))
-                                    ->label(__('employees::filament/resources/department.table.filters.company-name'))
-                                    ->searchable()
-                                    ->multiple()
-                                    ->preload(),
-                            ),
-                        DateConstraint::make('created_at')
-                            ->label(__('employees::filament/resources/department.table.filters.created-at')),
-                        DateConstraint::make('updated_at')
-                            ->label(__('employees::filament/resources/department.table.filters.updated-at')),
-                    ]),
             ]))
             ->recordActions([
                 ViewAction::make(),

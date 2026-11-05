@@ -63,6 +63,12 @@ class AdminPanelProvider extends PanelProvider
                 'primary' => Color::Blue,
             ])
             ->unsavedChangesAlerts()
+            // Single-page navigation: links swap the page body instead of reloading
+            // the whole document, so CSS/JS are parsed once per session. The org
+            // chart boots a third-party library from an inline script, so it keeps
+            // full page loads.
+            ->spa()
+            ->spaUrlExceptions(fn (): array => [url('admin/employees/org-chart')])
             ->topNavigation()
             ->maxContentWidth(Width::Full)
             ->databaseNotifications()

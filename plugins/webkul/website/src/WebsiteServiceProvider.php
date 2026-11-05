@@ -65,8 +65,11 @@ class WebsiteServiceProvider extends PackageServiceProvider
 
     public function registerCustomCss()
     {
-        FilamentAsset::register([
-            Css::make('website', __DIR__.'/../resources/dist/website.css'),
-        ], 'website');
+        // Every panel page loads each registered stylesheet: skip ours while the plugin is not installed.
+        if (Package::isPluginInstalled('website')) {
+            FilamentAsset::register([
+                Css::make('website', __DIR__.'/../resources/dist/website.css'),
+            ], 'website');
+        }
     }
 }

@@ -176,9 +176,12 @@ class ManufacturingServiceProvider extends PackageServiceProvider
 
     public function registerCustomCss(): void
     {
-        FilamentAsset::register([
-            Css::make('manufacturing', __DIR__.'/../resources/dist/manufacturing.css'),
-        ], 'manufacturing');
+        // Every panel page loads each registered stylesheet: skip ours while the plugin is not installed.
+        if (Package::isPluginInstalled('manufacturing')) {
+            FilamentAsset::register([
+                Css::make('manufacturing', __DIR__.'/../resources/dist/manufacturing.css'),
+            ], 'manufacturing');
+        }
     }
 
     protected function registerModelObservers(): void

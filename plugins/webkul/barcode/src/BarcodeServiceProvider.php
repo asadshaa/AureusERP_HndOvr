@@ -6,7 +6,6 @@ use Filament\Panel;
 use Filament\Support\Assets\Css;
 use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
-use Illuminate\Support\Facades\Vite;
 use Livewire\Livewire;
 use Webkul\Barcode\Livewire\Adjustments;
 use Webkul\Barcode\Livewire\Dashboard;
@@ -46,12 +45,15 @@ class BarcodeServiceProvider extends PackageServiceProvider
         Livewire::component('barcode-transfers', Transfers::class);
         Livewire::component('barcode-operation', Operation::class);
 
-        FilamentAsset::register(assets: [
-            Css::make('barcode', __DIR__.'/../resources/dist/barcode.css'),
-            // Only the scanner screens need these (the camera library is ~375 KB): they load them with @assets.
-            Js::make('barcode', __DIR__.'/../resources/dist/barcode.js')->loadedOnRequest(),
-            Js::make('html5-qrcode', __DIR__.'/../resources/dist/html5-qrcode.min.js')->loadedOnRequest(),
-        ], package: 'barcode');
+        // Every panel page loads each registered stylesheet: skip ours while the plugin is not installed.
+        if (Package::isPluginInstalled('barcode')) {
+            FilamentAsset::register(assets: [
+                Css::make('barcode', __DIR__.'/../resources/dist/barcode.css'),
+                // Only the scanner screens need these (the camera library is ~375 KB): they load them with @assets.
+                Js::make('barcode', __DIR__.'/../resources/dist/barcode.js')->loadedOnRequest(),
+                Js::make('html5-qrcode', __DIR__.'/../resources/dist/html5-qrcode.min.js')->loadedOnRequest(),
+            ], package: 'barcode');
+        }
     }
 
     public function packageRegistered(): void

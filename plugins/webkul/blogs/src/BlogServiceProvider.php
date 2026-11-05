@@ -46,9 +46,12 @@ class BlogServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
-        FilamentAsset::register([
-            Css::make('blogs', __DIR__.'/../resources/dist/blogs.css'),
-        ], 'blogs');
+        // Every panel page loads each registered stylesheet: skip ours while the plugin is not installed.
+        if (Package::isPluginInstalled('blogs')) {
+            FilamentAsset::register([
+                Css::make('blogs', __DIR__.'/../resources/dist/blogs.css'),
+            ], 'blogs');
+        }
     }
 
     public function packageRegistered(): void
