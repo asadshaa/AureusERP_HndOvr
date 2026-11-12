@@ -113,6 +113,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_11_12_100001_give_each_company_its_own_working_schedule',
                 '2026_11_12_200001_use_generic_expense_natures_for_other_companies',
                 '2026_11_13_100001_create_employees_advance_tables',
+                '2026_11_14_100001_create_employees_reporting_tables',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')

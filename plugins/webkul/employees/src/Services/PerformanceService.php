@@ -15,7 +15,9 @@ use Webkul\Employee\Models\PerformanceReview;
 use Webkul\Employee\Services\Appraisals\AppraisalAccess;
 use Webkul\Employee\Services\Appraisals\AppraisalNotifier;
 use Webkul\Employee\Services\Appraisals\AppraisalScoring;
+use Webkul\Employee\Services\Reporting\ReportingLineService;
 use Webkul\Employee\Support\AppraisalKinds;
+use Webkul\Employee\Support\ReportingPurposes;
 use Webkul\Security\Models\User;
 
 /**
@@ -69,8 +71,10 @@ class PerformanceService
 
             $reviews = $this->participants($cycle)->map(function (Employee $employee) use ($cycle, $created): PerformanceReview {
                 $hasLogin = $employee->user?->is_active === true;
-                $reviewerId = $employee->parent_id && (int) $employee->parent_id !== (int) $employee->getKey() && $employee->parent
-                    ? (int) $employee->parent_id
+                // The appraisal manager HR set for this person, else the line manager.
+                $appraisalManager = app(ReportingLineService::class)->managerFor($employee, ReportingPurposes::Appraisal);
+                $reviewerId = $appraisalManager && (int) $appraisalManager->getKey() !== (int) $employee->getKey()
+                    ? (int) $appraisalManager->getKey()
                     : null;
 
                 $review = PerformanceReview::query()->firstOrCreate(

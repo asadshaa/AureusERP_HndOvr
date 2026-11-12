@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Webkul\Chatter\Traits\HasChatter;
 use Webkul\Chatter\Traits\HasLogActivity;
@@ -17,6 +18,8 @@ use Webkul\Employee\Database\Factories\EmployeeFactory;
 use Webkul\Employee\Services\EmployeeCodeGenerator;
 use Webkul\Employee\Services\EmployeeSensitiveChangeService;
 use Webkul\Employee\Support\Cnic;
+use Webkul\Employee\Support\ReportingChain;
+use Webkul\Employee\Support\ReportingPurposes;
 use Webkul\Field\Traits\HasCustomFields;
 use Webkul\Partner\Models\BankAccount;
 use Webkul\Partner\Models\Partner;
@@ -431,13 +434,18 @@ class Employee extends Model
 
         static::saving(function (self $employee): void {
             static::assertHierarchyIsSameCompany($employee);
+            static::assertNoReportingLoop($employee);
             static::normalizeCnic($employee);
 
-            // Time-off approval always follows the reporting line: the line manager set in
-            // "Manager" is who approves this employee's leave, never a separately-picked person.
-            $employee->leave_manager_id = $employee->parent_id
-                ? static::query()->find($employee->parent_id)?->user_id
+            // Time-off approval follows the reporting line: the line manager set in "Manager" is
+            // who approves this employee's leave, unless HR gave the employee a manager for leave
+            // only (Reporting lines), which then approves it instead.
+            $leaveManagerEmployeeId = $employee->exists && static::hasReportingTable()
+                ? ReportingAssignment::query()->where('employee_id', $employee->getKey())->where('purpose', ReportingPurposes::Leave)->value('manager_employee_id')
                 : null;
+
+            $employee->leave_manager_id = ($leaveManagerEmployeeId ? static::query()->find($leaveManagerEmployeeId)?->user_id : null)
+                ?? ($employee->parent_id ? static::query()->find($employee->parent_id)?->user_id : null);
         });
 
         static::saved(function (self $employee) {
@@ -529,6 +537,39 @@ class Employee extends Model
                 && ! $user->allowedCompanies()->whereKey($companyId)->exists()) {
                 throw new InvalidArgumentException('The linked user account cannot use this company. Give that user access to this company first, or link a different user.');
             }
+        }
+    }
+
+    /** The purpose-manager table exists once the reporting-lines migration has run. */
+    private static function hasReportingTable(): bool
+    {
+        static $exists = null;
+
+        return $exists ??= Schema::hasTable('employees_reporting_assignments');
+    }
+
+    /**
+     * A person cannot be their own manager, and a manager cannot already
+     * report to the person: A under B while B is under A would leave their
+     * requests with nobody to decide them. Checked on every write path that
+     * changes the line manager.
+     */
+    private static function assertNoReportingLoop(self $employee): void
+    {
+        if (! $employee->parent_id || ! $employee->isDirty('parent_id')) {
+            return;
+        }
+
+        $name = $employee->name ?: 'This employee';
+
+        if ($employee->exists && (int) $employee->parent_id === (int) $employee->getKey()) {
+            throw new InvalidArgumentException("{$name} cannot be their own manager.");
+        }
+
+        if ($employee->exists && ReportingChain::wouldCreateLoop((int) $employee->getKey(), (int) $employee->parent_id)) {
+            $manager = static::query()->withTrashed()->whereKey($employee->parent_id)->value('name') ?? 'That person';
+
+            throw new InvalidArgumentException("{$manager} already reports to {$name} (directly or through others), so cannot also be their manager. Choose someone else.");
         }
     }
 

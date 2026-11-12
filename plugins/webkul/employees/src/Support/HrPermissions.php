@@ -97,10 +97,18 @@ final class HrPermissions
     /** Employees -> Reportings: joiners & leavers, headcount trend and leave balance reports (HR Parity 3.7). */
     public const ViewReports = 'hr_view_reports';
 
+    /** Reporting lines: who reports to whom and who approves what, per person; substitute approvers for anyone. */
+    public const ManageReportingLines = 'hr_manage_reporting_lines';
+
+    /** Approval flows: the steps of each approval workflow of the company. */
+    public const ManageApprovalFlows = 'hr_manage_approval_flows';
+
     /** @return array<int, string> */
     public static function all(): array
     {
         return [
+            self::ManageReportingLines,
+            self::ManageApprovalFlows,
             self::ManageChecklists,
             self::ManageAnnouncements,
             self::ExportPayroll,

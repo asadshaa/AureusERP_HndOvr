@@ -5,10 +5,15 @@ namespace Webkul\Support\Services;
 use Brick\Math\BigDecimal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use WeakMap;
+use Webkul\Employee\Models\Employee;
+use Webkul\Employee\Services\Reporting\ReportingLineService;
+use Webkul\Employee\Support\ReportingPurposes;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Contracts\NamesApprovalManager;
@@ -84,6 +89,11 @@ final class ApprovalEngine
      * @var WeakMap<ApprovalRequest, array<string, bool>>|null
      */
     private static ?WeakMap $canActMemo = null;
+
+    /** @var array<string, array<int, array{from: int, to: int}>> active substitute arrangements by company and day */
+    private static array $delegationMemo = [];
+
+    private static ?bool $delegationsTableExists = null;
 
     /** @var WeakMap<User, array<int, bool>>|null */
     private static ?WeakMap $hrApproverMemo = null;
@@ -362,6 +372,9 @@ final class ApprovalEngine
         $subjectEmployee = $this->resolveHierarchySubjectEmployee($request);
 
         foreach ($this->hierarchyManagerCandidates($request, $step, $subjectEmployee) as $candidate) {
+            // Candidates that cost a query to find are closures, so the next one is only loaded when this one is not eligible.
+            $candidate = $candidate instanceof \Closure ? $candidate() : $candidate;
+
             if ($this->isEligibleHierarchyManager($candidate, $request, $subjectEmployee)) {
                 return $candidate;
             }
@@ -373,14 +386,18 @@ final class ApprovalEngine
     /**
      * The managers a manager step may route to, in order of preference: a
      * "claim_tech" department step prefers the tech head over the employee's
-     * own department manager.
+     * own department manager. A "requester_manager" step goes to the manager HR
+     * set for this kind of request (Reporting lines), else the line manager,
+     * else the line manager's manager; with none of them eligible it is HR's.
      *
      * @return array<int, mixed>
      */
     private function hierarchyManagerCandidates(ApprovalRequest $request, ApprovalStep $step, mixed $subjectEmployee): array
     {
         return match ($step->hierarchy_route) {
-            'requester_manager'  => [$subjectEmployee?->parent?->user],
+            'requester_manager'  => $subjectEmployee instanceof Employee
+                ? app(ReportingLineService::class)->managerUserCandidates($subjectEmployee, ReportingPurposes::forRequestType($request->request_type))
+                : [$subjectEmployee?->parent?->user],
             'department_manager' => [
                 $request->request_type === 'claim_tech' ? $this->resolveTechHeadUser($request) : null,
                 $subjectEmployee?->department?->manager?->user,
@@ -423,7 +440,73 @@ final class ApprovalEngine
         return $userId !== null ? (int) $userId : null;
     }
 
+    /**
+     * Who may decide the request's current (or the given) step: the people
+     * its approver rules resolve to, plus anyone who is their substitute today
+     * (employees_approval_delegations).
+     */
     public function resolveAuthorizedApprovers(ApprovalRequest $request, ?ApprovalStep $step = null): Collection
+    {
+        return $this->withSubstitutes($this->resolveDirectApprovers($request, $step), $request);
+    }
+
+    /** The approvers plus the active substitutes of each, never the person the request is about. */
+    private function withSubstitutes(Collection $approvers, ApprovalRequest $request): Collection
+    {
+        if ($approvers->isEmpty() || $request->status !== 'pending') {
+            return $approvers;
+        }
+
+        $delegations = $this->activeDelegations((int) $request->company_id);
+        if ($delegations === []) {
+            return $approvers;
+        }
+
+        $fromIds = $approvers->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $substituteIds = collect($delegations)->filter(fn (array $row): bool => in_array($row['from'], $fromIds, true))->pluck('to')->unique()->all();
+        if ($substituteIds === []) {
+            return $approvers;
+        }
+
+        $subjectUserId = $this->subjectEmployeeUserId($request);
+        $substitutes = User::query()->whereIn('id', $substituteIds)->where('is_active', true)->get()
+            ->filter(fn (User $user): bool => (int) $user->id !== (int) $subjectUserId
+                && (int) $user->id !== (int) $request->requester_id
+                && $this->userCanAccessCompany($user, (int) $request->company_id));
+
+        return $approvers->concat($substitutes)->unique('id')->values();
+    }
+
+    /**
+     * Today's substitute arrangements of a company: [{from, to}] user ids.
+     * One query per company and day, per request.
+     *
+     * @return array<int, array{from: int, to: int}>
+     */
+    private function activeDelegations(int $companyId): array
+    {
+        $today = Carbon::now((string) config('attendance.monthly_report.timezone', 'Asia/Karachi'))->toDateString();
+        $key = $companyId.':'.$today;
+
+        if (array_key_exists($key, self::$delegationMemo)) {
+            return self::$delegationMemo[$key];
+        }
+
+        self::$delegationsTableExists ??= Schema::hasTable('employees_approval_delegations');
+
+        return self::$delegationMemo[$key] = self::$delegationsTableExists
+            ? DB::table('employees_approval_delegations')
+                ->where('company_id', $companyId)
+                ->whereNull('revoked_at')
+                ->whereDate('starts_on', '<=', $today)
+                ->whereDate('ends_on', '>=', $today)
+                ->get(['from_user_id', 'to_user_id'])
+                ->map(fn ($row): array => ['from' => (int) $row->from_user_id, 'to' => (int) $row->to_user_id])
+                ->all()
+            : [];
+    }
+
+    private function resolveDirectApprovers(ApprovalRequest $request, ?ApprovalStep $step = null): Collection
     {
         $request->loadMissing([
             'workflow.steps',
@@ -612,7 +695,44 @@ final class ApprovalEngine
         return $memo[$key];
     }
 
+    /** The actor's own right to decide, or the right of someone they are the substitute of today. */
     private function resolveCanAct(ApprovalRequest $request, User $actor): bool
+    {
+        return $this->resolveCanActDirect($request, $actor) || $this->canActAsSubstitute($request, $actor);
+    }
+
+    /**
+     * Whether the actor is today's substitute of somebody who could decide this
+     * step. The substitute never decides a request about themselves, and the
+     * person they stand in for is checked with exactly the same rules as ever.
+     */
+    private function canActAsSubstitute(ApprovalRequest $request, User $actor): bool
+    {
+        if ($request->status !== 'pending' || ! $this->userCanAccessCompany($actor, (int) $request->company_id)) {
+            return false;
+        }
+
+        $originals = collect($this->activeDelegations((int) $request->company_id))
+            ->where('to', (int) $actor->id)
+            ->pluck('from')
+            ->unique()
+            ->all();
+
+        // Never a request about themselves, nor one they submitted themselves.
+        if ($originals === [] || $this->subjectEmployeeUserId($request) === (int) $actor->id || (int) $request->requester_id === (int) $actor->id) {
+            return false;
+        }
+
+        foreach (User::query()->whereIn('id', $originals)->where('is_active', true)->get() as $original) {
+            if ($this->resolveCanActDirect($request, $original)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function resolveCanActDirect(ApprovalRequest $request, User $actor): bool
     {
         if ($request->status !== 'pending' || ! $this->userCanAccessCompany($actor, (int) $request->company_id)) {
             return false;
@@ -1024,6 +1144,7 @@ final class ApprovalEngine
         self::$hrApproverMemo = null;
         self::$companyAccessMemo = null;
         self::$actionableMemo = null;
+        self::$delegationMemo = [];
     }
 
     /** Forgets the memoised actionable requests (an approval request changed). */
