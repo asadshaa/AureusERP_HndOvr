@@ -310,6 +310,7 @@ class HomeDashboardContext
 
         $rows[] = match (true) {
             $state === null                                                                         => null,
+            ! empty($state['check_in_blocked'])                                                     => $row('check_in', ($state['check_in_blocked']['type'] ?? '') === 'holiday' ? 'Today is a holiday' : 'You are on approved leave today', $attendanceUrl, 'heroicon-o-sun', 'info', 'My attendance', null, $state['check_in_blocked']['name'] ?? null, $checkInIds),
             ($state['state'] ?? null) === 'not_checked_in' && ($state['mode'] ?? 'none') !== 'none' => $row('check_in', 'You have not checked in yet', $attendanceUrl, 'heroicon-o-finger-print', 'warning', 'Check in', null, 'Tap to record your arrival', $checkInIds),
             ($state['state'] ?? null) === 'checked_in'                                              => $row('check_in', 'Checked in at '.$state['check_in'], $attendanceUrl, 'heroicon-o-clock', 'success', 'Check out', null, ! empty($state['is_shift_complete']) ? 'Your shift is done' : 'On shift for '.($state['elapsed_formatted'] ?? ''), $checkInIds),
             ($state['state'] ?? null) === 'checked_out'                                             => $row('check_in', 'Checked out for today', $attendanceUrl, 'heroicon-o-check-circle', 'success', 'My attendance', null, 'In '.$state['check_in'].', out '.$state['check_out'], $checkInIds),

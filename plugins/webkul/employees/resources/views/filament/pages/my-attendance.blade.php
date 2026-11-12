@@ -5,6 +5,8 @@
         $remote = ($state['mode'] ?? null) === 'remote';
         $checkedIn = ($state['state'] ?? null) === 'checked_in';
         $checkedOut = ($state['state'] ?? null) === 'checked_out';
+        // Approved leave or a holiday: check-in is closed today, so the page says so instead of inviting a punch.
+        $blocked = $state['check_in_blocked'] ?? null;
     @endphp
 
     <style>
@@ -182,7 +184,7 @@
                     class="w-full lg:w-80 lg:shrink-0 space-y-4"
                 >
                     {{-- Alert notices if any --}}
-                    @if (! $checkedIn && ! $checkedOut && ! empty($state['is_past_start']))
+                    @if (! $checkedIn && ! $checkedOut && ! $blocked && ! empty($state['is_past_start']))
                         <div class="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2.5">
                             <x-filament::icon icon="heroicon-m-clock" class="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                             <div>
@@ -207,10 +209,10 @@
                             <div class="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-white/10">
                                 <span class="text-[11px] font-bold uppercase tracking-wider text-gray-400">Current Shift</span>
                                 <x-filament::badge
-                                    :color="$checkedIn ? 'success' : ($checkedOut ? 'gray' : 'warning')"
+                                    :color="$checkedIn ? 'success' : ($checkedOut ? 'gray' : ($blocked ? 'info' : 'warning'))"
                                     size="xs"
                                 >
-                                    {{ $checkedIn ? '● On Shift' : ($checkedOut ? 'Shift Done' : 'Not checked in') }}
+                                    {{ $checkedIn ? '● On Shift' : ($checkedOut ? 'Shift Done' : ($blocked ? ($blocked['type'] === 'holiday' ? 'Holiday' : 'On leave') : 'Not checked in')) }}
                                 </x-filament::badge>
                             </div>
 
@@ -236,6 +238,18 @@
                                     <div class="text-[11px] text-gray-500 dark:text-gray-400">
                                         Back in the office? Check in again; each check-in / check-out pair counts.
                                     </div>
+                                @elseif ($blocked)
+                                    <div class="text-base font-bold text-gray-950 dark:text-white" data-testid="check-in-blocked">
+                                        {{ $blocked['type'] === 'holiday' ? 'Today is a holiday' : 'You are on approved leave today' }}
+                                    </div>
+                                    @if ($blocked['type'] === 'leave' && ($blocked['name'] || $blocked['from']))
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">
+                                            <span class="font-medium text-gray-800 dark:text-gray-200">{{ $blocked['name'] ?? 'Leave' }}</span>
+                                            @if ($blocked['from'])
+                                                · {{ $blocked['from'] === $blocked['to'] ? $blocked['from'] : $blocked['from'].' – '.$blocked['to'] }}
+                                            @endif
+                                        </div>
+                                    @endif
                                 @else
                                     <div class="text-base font-bold text-gray-950 dark:text-white">
                                         Ready to Check In
@@ -298,7 +312,9 @@
                             @endif
 
                             {{-- Punch Button --}}
-                            @if (($state['mode'] ?? null) === 'none' && ! $checkedIn)
+                            @if ($blocked)
+                                <p class="text-xs text-center text-gray-500">{{ __('employees::attendance.results.on_leave_or_holiday') }}</p>
+                            @elseif (($state['mode'] ?? null) === 'none' && ! $checkedIn)
                                 <p class="text-xs text-center text-gray-500">{{ __('employees::attendance.results.no_location_configured') }}</p>
                             @else
                                 <button

@@ -7,7 +7,6 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
 use Webkul\Support\Filament\Resources\CalendarResource;
-use Webkul\Support\Models\Calendar;
 
 class ListCalendars extends ListRecords
 {
@@ -32,9 +31,9 @@ class ListCalendars extends ListRecords
     {
         return [
             'all' => Tab::make(__('support::filament/resources/calendar/pages/list-calendar.tabs.all'))
-                ->badge(Calendar::count()),
+                ->badge(CalendarResource::getEloquentQuery()->count()),
             'archived' => Tab::make(__('support::filament/resources/calendar/pages/list-calendar.tabs.archived'))
-                ->badge(Calendar::onlyTrashed()->count())
+                ->badge(CalendarResource::getEloquentQuery()->onlyTrashed()->count())
                 ->modifyQueryUsing(function ($query) {
                     return $query->onlyTrashed();
                 }),

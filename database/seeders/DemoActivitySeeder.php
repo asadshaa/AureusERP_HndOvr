@@ -58,6 +58,7 @@ use Webkul\Security\Enums\PermissionType;
 use Webkul\Security\Models\Role;
 use Webkul\Security\Models\User;
 use Webkul\Support\Models\ApprovalRequest;
+use Webkul\Support\Models\Calendar;
 use Webkul\Support\Models\CalendarLeave;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Services\ApprovalEngine;
@@ -366,6 +367,39 @@ class DemoActivitySeeder extends Seeder
     // Staff
     // ---------------------------------------------------------------------
 
+    /**
+     * The company's own working schedule. A company without one gets a copy of
+     * the schedule Truck It In works on (with its working-hour lines), so the
+     * demo staff never share a schedule HR of their own company cannot see.
+     * Recorded by the demo recorder, so demo:purge removes the copy.
+     */
+    public function ensureCompanyCalendar(Company $company): ?int
+    {
+        $own = Calendar::query()->where('company_id', $company->id)->orderBy('id')->value('id');
+
+        if ($own) {
+            return (int) $own;
+        }
+
+        $source = Calendar::query()->find(
+            Employee::query()->where('company_id', 1)->whereNotNull('calendar_id')->value('calendar_id')
+        );
+
+        if (! $source) {
+            return null;
+        }
+
+        $copy = $source->replicate();
+        $copy->company_id = $company->id;
+        $copy->save();
+
+        foreach ($source->attendance as $line) {
+            $line->replicate()->fill(['calendar_id' => $copy->id])->save();
+        }
+
+        return (int) $copy->id;
+    }
+
     private function seedStaff(): void
     {
         $domain = $this->setup['domain'];
@@ -386,8 +420,7 @@ class DemoActivitySeeder extends Seeder
             }
         }
 
-        $calendarId = Employee::query()->where('company_id', $this->company->id)->whereNotNull('calendar_id')->value('calendar_id')
-            ?? Employee::query()->where('company_id', 1)->whereNotNull('calendar_id')->value('calendar_id');
+        $calendarId = $this->ensureCompanyCalendar($this->company);
         // The code sequence moves past the new employees' codes; purge puts it back.
         $sequence = EmployeeCodeSequence::query()->where('company_id', $this->company->id)->first();
         $nextNumber = $sequence?->next_number;

@@ -340,8 +340,7 @@ class GeofencedAttendanceService
             return $this->reject($employee, $user, $request, Action::CheckIn, Result::AlreadyCheckedIn, $requestId, $timezone, $this->localTime($today->check_in, $timezone), $today, $mode);
         }
 
-        if (($today && in_array($today->status, ['leave', 'holiday'], true))
-            || $this->hasApprovedFullDayLeave($employee, $attendanceDate)) {
+        if ($this->checkInBlocker($employee, $attendanceDate, $today) !== null) {
             return $this->reject($employee, $user, $request, Action::CheckIn, Result::OnLeaveOrHoliday, $requestId, $timezone, null, $today, $mode);
         }
 
@@ -1004,6 +1003,9 @@ class GeofencedAttendanceService
             $isPastStart = $nowUtc > $schedStartUtc;
         }
 
+        // The same rule that refuses the check-in, so the page never invites a punch that will be refused.
+        $checkInBlocked = ! $open && ! ($record?->check_in) ? $this->checkInBlocker($employee, $attendanceDate, $record) : null;
+
         $minIntervalMinutes = (int) config('hr_attendance_geofence.min_checkout_interval_minutes', 60);
         $lockoutRemainingMinutes = 0;
         if ($open && $currentStart) {
@@ -1034,6 +1036,7 @@ class GeofencedAttendanceService
             'interval_count'             => $dayIntervals->count(),
             'current_check_in'           => $currentStart ? $this->localTime($currentStart, $timezone) : null,
             'can_check_in_again'         => $state === 'checked_out',
+            'check_in_blocked'           => $checkInBlocked,
         ];
     }
 
@@ -1116,20 +1119,50 @@ class GeofencedAttendanceService
      * HrAnalyticsService uses. Read through the table so the Employees plugin
      * keeps working when Time Off is not installed.
      */
-    private function hasApprovedFullDayLeave(Employee $employee, string $attendanceDate): bool
+    private function approvedFullDayLeave(Employee $employee, string $attendanceDate): ?object
     {
         if (! Schema::hasTable('time_off_leaves')) {
-            return false;
+            return null;
         }
 
-        return DB::table('time_off_leaves')
-            ->where('employee_id', $employee->id)
-            ->where('state', 'validate_two')
-            ->where(fn ($query) => $query->whereNull('request_unit_half')->orWhere('request_unit_half', false))
-            ->where(fn ($query) => $query->whereNull('request_unit_hours')->orWhere('request_unit_hours', false))
-            ->whereDate('request_date_from', '<=', $attendanceDate)
-            ->whereDate('request_date_to', '>=', $attendanceDate)
-            ->exists();
+        return DB::table('time_off_leaves as leave')
+            ->leftJoin('time_off_leave_types as leave_type', 'leave_type.id', '=', 'leave.holiday_status_id')
+            ->where('leave.employee_id', $employee->id)
+            ->where('leave.state', 'validate_two')
+            ->where(fn ($query) => $query->whereNull('leave.request_unit_half')->orWhere('leave.request_unit_half', false))
+            ->where(fn ($query) => $query->whereNull('leave.request_unit_hours')->orWhere('leave.request_unit_hours', false))
+            ->whereDate('leave.request_date_from', '<=', $attendanceDate)
+            ->whereDate('leave.request_date_to', '>=', $attendanceDate)
+            ->orderBy('leave.id')
+            ->first(['leave_type.name as name', 'leave.request_date_from as from', 'leave.request_date_to as to']);
+    }
+
+    /**
+     * Why a check-in is refused on this day, or null when it is open: the day
+     * is already recorded as leave or holiday, or the employee has approved
+     * full-day leave. The refusal and the page state both read this, so the
+     * page can say so before the employee presses the button.
+     *
+     * @return array{type: string, name: ?string, from: ?string, to: ?string}|null
+     */
+    private function checkInBlocker(Employee $employee, string $attendanceDate, ?AttendanceRecord $record): ?array
+    {
+        $leave = $this->approvedFullDayLeave($employee, $attendanceDate);
+
+        if ($leave !== null) {
+            return [
+                'type' => 'leave',
+                'name' => $leave->name,
+                'from' => CarbonImmutable::parse($leave->from)->format('j M'),
+                'to'   => CarbonImmutable::parse($leave->to)->format('j M'),
+            ];
+        }
+
+        if ($record && in_array($record->status, ['leave', 'holiday'], true)) {
+            return ['type' => (string) $record->status, 'name' => null, 'from' => null, 'to' => null];
+        }
+
+        return null;
     }
 
     private function openRecord(Employee $employee, CarbonImmutable $nowUtc, bool $lock = false): ?AttendanceRecord

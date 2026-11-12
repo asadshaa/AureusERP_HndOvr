@@ -80,6 +80,20 @@ class MyDayWidget extends Widget
             return null;
         }
 
+        // Approved leave or a holiday: check-in is closed today, so there is nothing to nudge.
+        if (! empty($state['check_in_blocked'])) {
+            $blocked = $state['check_in_blocked'];
+            $dates = ($blocked['from'] ?? null) ? ($blocked['from'] === $blocked['to'] ? $blocked['from'] : $blocked['from'].' – '.$blocked['to']) : null;
+
+            return [
+                'state'  => 'check_in_blocked',
+                'label'  => $blocked['type'] === 'holiday' ? 'Holiday today' : 'On approved leave today',
+                'detail' => collect([$blocked['name'] ?? null, $dates])->filter()->join(' · ') ?: 'Nothing to record today.',
+                'tone'   => 'info',
+                'button' => 'Open My Attendance',
+            ];
+        }
+
         return match ($state['state'] ?? 'none') {
             'checked_in' => [
                 'state'  => 'checked_in',

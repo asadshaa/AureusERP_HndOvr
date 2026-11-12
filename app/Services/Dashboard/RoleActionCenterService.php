@@ -271,7 +271,7 @@ class RoleActionCenterService
         if ($employee) {
             // Check if employee hasn't checked in yet today or is active on shift
             $todayState = app(HomeDashboardContext::class)->todayState($user);
-            if (($todayState['state'] ?? 'none') === 'not_checked_in' && ($todayState['mode'] ?? 'none') !== 'none') {
+            if (($todayState['state'] ?? 'none') === 'not_checked_in' && ($todayState['mode'] ?? 'none') !== 'none' && empty($todayState['check_in_blocked'])) {
                 $items[] = [
                     'id'           => 'emp_missing_checkin',
                     'title'        => 'You Have Not Checked In Today',
