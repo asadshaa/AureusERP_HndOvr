@@ -4,6 +4,7 @@ namespace Webkul\Employee\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Webkul\Account\Models\Move;
@@ -23,7 +24,7 @@ class EmployeeRequest extends Model implements ReturnableApprovalSubject
     ];
 
     protected $fillable = [
-        'company_id', 'employee_id', 'request_type_id', 'requested_by', 'currency_id',
+        'company_id', 'employee_id', 'request_type_id', 'advance_request_id', 'requested_by', 'currency_id',
         'approval_request_id', 'accounting_move_id', 'reference', 'title', 'description',
         'amount', 'billed_amount', 'tax_deduction_rate', 'income_tax_deduction', 'sales_tax_deduction',
         'nature_of_expense', 'account_title', 'iban', 'bank_name',
@@ -92,6 +93,24 @@ class EmployeeRequest extends Model implements ReturnableApprovalSubject
     public function accountingMove(): BelongsTo
     {
         return $this->belongsTo(Move::class);
+    }
+
+    /** On an Advance Settlement request: the business advance it settles. */
+    public function advance(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'advance_request_id');
+    }
+
+    /** On a business advance: the settlement requests made against it. */
+    public function settlements(): HasMany
+    {
+        return $this->hasMany(self::class, 'advance_request_id');
+    }
+
+    /** On a business advance: what has been taken off it (settlements and cash handed back). */
+    public function advanceEntries(): HasMany
+    {
+        return $this->hasMany(AdvanceEntry::class, 'advance_request_id');
     }
 
     public function synchronizeApprovalState(ApprovalRequest $request): void

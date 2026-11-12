@@ -8,6 +8,7 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -96,7 +97,22 @@ class EmployeeRequestTypeResource extends Resource
                     ->postable()->where('deprecated', false)
                     ->whereHas('companies', fn (Builder $companies): Builder => $companies->where('companies.id', $companyId)))
                 ->visible(fn ($get): bool => (bool) $get('is_financial'))->searchable()->preload(),
-            KeyValue::make('configuration')->columnSpanFull(),
+            TagsInput::make('expense_natures_list')
+                ->label('Expense natures (choices shown on the claim form)')
+                ->helperText('Type a choice and press Enter. Leave empty to hide the question.')
+                ->placeholder('Add a choice')
+                ->visible(fn ($get): bool => (bool) $get('is_financial'))
+                ->afterStateHydrated(function (TagsInput $component, ?EmployeeRequestType $record): void {
+                    $component->state($record?->getExpenseNatures() ?? []);
+                })
+                ->columnSpanFull(),
+            KeyValue::make('configuration')
+                ->label('Other settings')
+                ->afterStateHydrated(function (KeyValue $component, ?array $state): void {
+                    unset($state['expense_natures']);
+                    $component->state($state ?? []);
+                })
+                ->columnSpanFull(),
         ])->columns(2);
     }
 
@@ -110,8 +126,40 @@ class EmployeeRequestTypeResource extends Resource
             IconColumn::make('is_financial')->boolean(),
             IconColumn::make('requires_document')->boolean(),
             IconColumn::make('is_active')->boolean(),
-        ])->recordActions([EditAction::make(), DeleteAction::make()->requiresConfirmation()])
-            ->headerActions([CreateAction::make()]);
+        ])->recordActions([
+            EditAction::make()->mutateDataUsing(fn (array $data, EmployeeRequestType $record): array => static::mergeExpenseNatures($data, $record)),
+            DeleteAction::make()->requiresConfirmation(),
+        ])
+            ->headerActions([CreateAction::make()->mutateDataUsing(fn (array $data): array => static::mergeExpenseNatures($data))]);
+    }
+
+    /**
+     * Folds the friendly expense-natures list back into `configuration` as
+     * the comma-separated string EmployeeRequestType::getExpenseNatures()
+     * reads. When the list field was not submitted (hidden for non-financial
+     * types) the stored value is kept; an empty list removes the key.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mergeExpenseNatures(array $data, ?EmployeeRequestType $record = null): array
+    {
+        $configuration = (array) ($data['configuration'] ?? []);
+        unset($configuration['expense_natures']);
+
+        if (array_key_exists('expense_natures_list', $data)) {
+            $natures = array_values(array_filter(array_map('trim', (array) $data['expense_natures_list']), fn (string $nature): bool => $nature !== ''));
+            if ($natures !== []) {
+                $configuration['expense_natures'] = implode(', ', $natures);
+            }
+        } elseif ($record !== null && filled(data_get($record->configuration, 'expense_natures'))) {
+            $configuration['expense_natures'] = data_get($record->configuration, 'expense_natures');
+        }
+
+        unset($data['expense_natures_list']);
+        $data['configuration'] = $configuration === [] ? null : $configuration;
+
+        return $data;
     }
 
     public static function getEloquentQuery(): Builder

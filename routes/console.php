@@ -276,6 +276,18 @@ Schedule::command('hr:checklist-disable-users')
     ->onOneServer();
 
 /*
+| hr:advance-reminders -- 09:45 Karachi, business advances still to be settled:
+| a heads-up two days before the settle-by date, then weekly once overdue (the
+| line manager too). In-app notifications only, at most once per advance and
+| day, so an overlap or a re-run never reminds twice.
+*/
+Schedule::command('hr:advance-reminders')
+    ->dailyAt('09:45')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
 | hr:appraisal-reminders -- 09:15 Karachi, appraisal self reviews to the
 | employee and manager reviews to the reviewer (or the company HR when there
 | is no line manager): a few days before the deadline, the day after it and

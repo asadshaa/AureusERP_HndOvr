@@ -10,6 +10,7 @@ use Webkul\Account\Enums\JournalType;
 use Webkul\Account\Models\Journal;
 use Webkul\Accounting\Services\CompanyAccountingProvisioningService;
 use Webkul\Employee\Database\Seeders\ClaimsWorkflowSeeder;
+use Webkul\Employee\Services\Advances\AdvanceProvisioner;
 use Webkul\Support\Models\Company;
 
 class ProvisionCompanyAccounting extends Command
@@ -21,7 +22,7 @@ class ProvisionCompanyAccounting extends Command
 
     protected $description = 'Set a company up for accounting and invoicing from a template company: shared chart of accounts, journal accounts, Exchange Difference journal, FX accounts, payment terms, fiscal positions and FS tags, plus its expense-claim types and company-local approval workflows (idempotent; never overwrites what is already set)';
 
-    public function handle(CompanyAccountingProvisioningService $accounting, ClaimsWorkflowSeeder $claims): int
+    public function handle(CompanyAccountingProvisioningService $accounting, ClaimsWorkflowSeeder $claims, AdvanceProvisioner $advances): int
     {
         $template = Company::query()->find((int) $this->option('template'));
 
@@ -86,6 +87,12 @@ class ProvisionCompanyAccounting extends Command
                     $summary['financial'] ? 'approved claims post a vendor bill' : 'non-financial (no Purchase journal / 600000 / 211000)',
                     $summary['finance_step'] ? ClaimsWorkflowSeeder::FinanceApproverRole : 'none yet (no active '.ClaimsWorkflowSeeder::FinanceApproverRole.' in this company)',
                 ));
+
+                $advance = DB::transaction(fn (): array => $advances->provisionForCompany($company->fresh()));
+
+                $this->line($advance['skipped'] !== null
+                    ? 'Business advances: skipped. '.$advance['skipped']
+                    : sprintf('Business advances: %d type(s) created, %d workflow(s) created, %d step(s) created.', $advance['types_created'], $advance['workflows_created'], $advance['steps_created']));
             }
 
             $this->reportUserActions($company->fresh());

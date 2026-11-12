@@ -24,12 +24,14 @@ use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Employee\Services\Advances\AdvanceService;
 use Webkul\Employee\Services\Attendance\ApprovedLeaveLookup;
 use Webkul\Employee\Services\Attendance\AttendanceIntervalService;
 use Webkul\Employee\Services\Attendance\AttendanceScheduleResolver;
 use Webkul\Employee\Services\Attendance\AttendanceStatusClassifier;
 use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\Payroll\RequestInstalmentService;
+use Webkul\Employee\Support\AdvanceKinds;
 use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Security\Models\User;
 use Webkul\Support\Enums\ApprovalRequestStatus;
@@ -58,6 +60,7 @@ class EmployeeRequestService
         }
         $this->assertClaimTaxConsistency($request);
         $this->prepareSelfServicePayload($request);
+        $this->prepareAdvancePayload($request);
         if (OvertimeService::isOvertime($request->requestType)) {
             app(OvertimeService::class)->prepareSubmission($request);
         }
@@ -417,6 +420,10 @@ class EmployeeRequestService
         }
         if (in_array($request->requestType->category, [EmployeeRequestKinds::LoanCategory, EmployeeRequestKinds::SalaryAdvanceCategory], true)) {
             $this->recordApprovedFinancialRequest($request->fresh(['requestType']));
+        }
+        // An approved advance settlement moves what was spent off the advance (idempotent).
+        if (AdvanceKinds::isSettlement($request->requestType)) {
+            app(AdvanceService::class)->applyApprovedSettlement($request->fresh(['requestType', 'advance.requestType', 'employee', 'company']));
         }
 
         $this->notifyDecision($request, 'approved');
@@ -810,6 +817,56 @@ class EmployeeRequestService
             $payload['needed_by'] = Carbon::parse($payload['needed_by'])->toDateString();
             unset($payload['letter_path'], $payload['letter_issued_at'], $payload['letter_issued_by']);
         }
+
+        $request->payload = $payload;
+        $request->save();
+    }
+
+    /**
+     * Business advance: what the money is for, the date it is needed by and the
+     * settle-by date (needed-by plus the type's settle window) are validated and
+     * kept in the payload. Runs on every submission, so an edited form cannot slip
+     * an incomplete advance, one over the type's limit, or a second advance while an
+     * earlier one is overdue for settlement into approval.
+     */
+    private function prepareAdvancePayload(EmployeeRequest $request): void
+    {
+        $type = $request->requestType;
+
+        if (! AdvanceKinds::isAdvance($type)) {
+            return;
+        }
+
+        $payload = (array) ($request->payload ?? []);
+
+        if (blank($payload['purpose'] ?? null)) {
+            throw new RuntimeException('Please say what the advance is for.');
+        }
+        if (blank($payload['needed_by'] ?? null) || strtotime((string) $payload['needed_by']) === false) {
+            throw new RuntimeException('Please give the date you need the money by.');
+        }
+
+        $neededBy = Carbon::parse((string) $payload['needed_by'])->toDateString();
+        if ($neededBy < AdvanceKinds::today()) {
+            throw new RuntimeException('The date you need the money by cannot be in the past.');
+        }
+
+        $max = data_get($type->configuration, AdvanceKinds::MaxAmountKey);
+        if (is_numeric($max) && (float) $max > 0 && BigDecimal::of((string) $request->amount)->isGreaterThan((string) $max)) {
+            throw new RuntimeException('A business advance cannot be more than '.number_format((float) $max, 2).'.');
+        }
+
+        if (AdvanceKinds::blocksWhenOverdue($type)) {
+            $overdue = app(AdvanceService::class)->overdueAdvances((int) $request->employee_id, (int) $request->getKey())->first();
+
+            if ($overdue) {
+                throw new RuntimeException('You still have an advance of '.number_format((float) $overdue->amount, 2).' that should have been settled by '.Carbon::parse((string) data_get($overdue->payload, 'settle_by'))->format('j M Y').'. Settle it first, then ask for a new one.');
+            }
+        }
+
+        $payload['kind'] = AdvanceKinds::AdvanceCategory;
+        $payload['needed_by'] = $neededBy;
+        $payload['settle_by'] = AdvanceKinds::settleBy($neededBy, $type);
 
         $request->payload = $payload;
         $request->save();

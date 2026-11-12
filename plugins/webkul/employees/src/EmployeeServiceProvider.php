@@ -111,6 +111,8 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_11_02_300001_backfill_attendance_overtime_hours_from_approved_overtime',
                 '2026_11_04_100001_merge_hr_ops_manager_into_hr_manager',
                 '2026_11_12_100001_give_each_company_its_own_working_schedule',
+                '2026_11_12_200001_use_generic_expense_natures_for_other_companies',
+                '2026_11_13_100001_create_employees_advance_tables',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')

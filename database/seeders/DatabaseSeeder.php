@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use Webkul\Employee\Database\Seeders\AdvanceRequestSeeder;
 use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
 use Webkul\Employee\Database\Seeders\ClaimsWorkflowSeeder;
 use Webkul\Employee\Database\Seeders\SensitiveChangeWorkflowSeeder;
@@ -38,6 +39,8 @@ class DatabaseSeeder extends Seeder
             ClaimsWorkflowSeeder::class,
             SensitiveChangeWorkflowSeeder::class,
             LogisticsCompanyAndProductSeeder::class,
+            // After the companies and their journals exist: advance types need a purchase and a general journal.
+            AdvanceRequestSeeder::class,
         ]);
     }
 }

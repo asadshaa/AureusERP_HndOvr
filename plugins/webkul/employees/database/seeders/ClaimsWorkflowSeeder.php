@@ -162,6 +162,27 @@ class ClaimsWorkflowSeeder extends Seeder
     ];
 
     /**
+     * Generic starter "nature of expense" lists for every company other than
+     * the one the named org-chart chain belongs to (Truck It In's lists carry
+     * its own vendor names). HR edits them per company afterwards. The data
+     * migration 2026_11_12_200001_use_generic_expense_natures_for_other_companies
+     * keeps its own copy of these lists.
+     *
+     * @var array<string, string>
+     */
+    public const GENERIC_NATURES = [
+        'travel_entertainment'  => 'Travel, Accommodation, Daily Allowance, Fuel, Food, Other',
+        'professional_services' => 'Legal, Audit, Consultancy, Other',
+        'tech'                  => 'Software and tools, Equipment repairs, Other',
+        'digital_marketing'     => 'Advertising, SEO, Other',
+        'returns_waivers'       => 'Detention, Returns, Waivers',
+        'financial_provisions'  => 'Bank charges, Service charges, Other',
+        'others'                => 'Miscellaneous, Other',
+        'people'                => 'Payroll, Insurance, Medical bills, Employee engagement, Training, Other',
+        'real_estate'           => 'Office rent, Utilities, Maintenance, Other',
+    ];
+
+    /**
      * Finance role whose members (in the claim's company) give the last
      * sign-off in a company-local claims chain.
      */
@@ -396,7 +417,7 @@ class ClaimsWorkflowSeeder extends Seeder
                     'requires_amount'       => true,
                     'requires_document'     => true,
                     'is_active'             => true,
-                    'configuration'         => ['expense_natures' => $config['natures']],
+                    'configuration'         => ['expense_natures' => self::GENERIC_NATURES[$category] ?? $config['natures']],
                     ...$accountingData,
                 ]);
                 $summary['types_created']++;

@@ -2,6 +2,7 @@
 
 namespace Webkul\Employee\Filament\Resources;
 
+use Brick\Math\BigDecimal;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -38,17 +39,21 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Webkul\Employee\Filament\Resources\EmployeeRequestResource\Pages\ManageEmployeeRequests;
+use Webkul\Employee\Models\AdvanceEntry;
 use Webkul\Employee\Models\AttendanceRecord;
 use Webkul\Employee\Models\Employee;
 use Webkul\Employee\Models\EmployeeRequest;
 use Webkul\Employee\Models\EmployeeRequestType;
+use Webkul\Employee\Services\Advances\AdvanceService;
 use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\EmployeeRequestService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Services\Payroll\RequestInstalmentService;
+use Webkul\Employee\Support\AdvanceKinds;
 use Webkul\Employee\Support\EmployeeRequestKinds;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
+use Webkul\Security\Services\CurrentCompany;
 use Webkul\Support\Enums\NavigationGroup;
 use Webkul\Support\Models\Company;
 use Webkul\Support\Services\ApprovalEngine;
@@ -222,8 +227,39 @@ class EmployeeRequestResource extends Resource
                                 ])
                                 ->columns(2),
 
+                            Section::make('Business Advance')
+                                ->visible(fn (EmployeeRequest $record): bool => AdvanceKinds::isAdvance($record->requestType))
+                                ->schema([
+                                    TextEntry::make('amount')->label('Amount asked for')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->weight(FontWeight::Bold),
+                                    TextEntry::make('nature_of_expense')->label('Nature of Expense')->placeholder('—'),
+                                    TextEntry::make('payload.purpose')->label('Purpose')->columnSpanFull(),
+                                    TextEntry::make('payload.needed_by')->label('Needed by')->date('d M Y')->placeholder('—'),
+                                    TextEntry::make('payload.settle_by')->label('Settle by')->date('d M Y')->placeholder('—')
+                                        ->color(fn (EmployeeRequest $record): ?string => (static::advanceFigures($record)['is_overdue'] ?? false) ? 'danger' : null),
+                                    TextEntry::make('advance_summary')->label('Where the money stands')->html()->columnSpanFull()
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => static::advanceSummaryHtml($record)),
+                                    TextEntry::make('advance_history')->label('Settled or handed back so far')->html()->columnSpanFull()
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => static::advanceHistoryHtml($record)),
+                                    TextEntry::make('advance_settlement_requests')->label('Settlement requests')->html()->columnSpanFull()
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => static::advanceSettlementsHtml($record)),
+                                ])
+                                ->columns(2),
+
+                            Section::make('Advance Settlement')
+                                ->visible(fn (EmployeeRequest $record): bool => AdvanceKinds::isSettlement($record->requestType))
+                                ->schema([
+                                    TextEntry::make('settled_advance')->label('Advance being settled')
+                                        ->getStateUsing(fn (EmployeeRequest $record): string => $record->advance
+                                            ? trim(($record->advance->reference ?: 'Advance #'.$record->advance->id).' - '.($record->advance->title ?? ''), ' -')
+                                            : '—'),
+                                    TextEntry::make('amount')->label('Amount spent')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->weight(FontWeight::Bold),
+                                    TextEntry::make('payload.spent_on')->label('Date spent')->date('d M Y')->placeholder('—'),
+                                    TextEntry::make('description')->label('What the money was spent on')->placeholder('—')->columnSpanFull(),
+                                ])
+                                ->columns(2),
+
                             Section::make('Financial Details')
-                                ->visible(fn (EmployeeRequest $record): bool => (bool) $record->requestType?->is_financial)
+                                ->visible(fn (EmployeeRequest $record): bool => (bool) $record->requestType?->is_financial && ! AdvanceKinds::isAdvance($record->requestType))
                                 ->schema([
                                     TextEntry::make('billed_amount')->label('Claim/Budget')->money(fn ($record) => $record->currency?->code ?? 'PKR'),
                                     TextEntry::make('tax_deduction_rate')->label('Tax Rate')->suffix('%')->placeholder('0%'),
@@ -439,6 +475,8 @@ class EmployeeRequestResource extends Resource
         $visibleEmployeeIds = $user ? app(HrHierarchyService::class)->visibleEmployeeIds($user, $companyId) : collect();
 
         $isFinancial = fn (Get $get): bool => (bool) static::selectedRequestType($get)?->is_financial;
+        $isBusinessAdvance = fn (Get $get): bool => AdvanceKinds::isAdvance(static::selectedRequestType($get));
+        $isClaim = fn (Get $get): bool => $isFinancial($get) && ! $isBusinessAdvance($get);
         $isAttendance = fn (Get $get): bool => static::selectedRequestType($get)?->category === 'attendance_correction';
         $isLoan = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::LoanCategory;
         $isAdvance = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::SalaryAdvanceCategory;
@@ -474,7 +512,14 @@ class EmployeeRequestResource extends Resource
                 Select::make('request_type_id')
                     ->label('Approval Type')
                     ->helperText('Loan, salary advance, HR letter, overtime, claim or attendance correction. The form then shows only what that type needs.')
-                    ->relationship('requestType', 'name', modifyQueryUsing: fn (Builder $query): Builder => $query->where('company_id', $companyId)->where('is_active', true))
+                    // Advance Settlements are created from the advance itself (Settle advance), never picked here.
+                    ->relationship('requestType', 'name', modifyQueryUsing: fn (Builder $query, ?EmployeeRequest $record = null): Builder => $query
+                        ->where('company_id', $companyId)
+                        ->where('is_active', true)
+                        ->where(fn (Builder $types): Builder => $types
+                            ->whereNull('category')
+                            ->orWhere('category', '!=', AdvanceKinds::SettlementCategory)
+                            ->when($record?->request_type_id, fn (Builder $types, int $own): Builder => $types->orWhere('id', $own))))
                     ->required()->searchable()->preload()->live()
                     ->afterStateUpdated(function (Set $set, $state, Get $get) {
                         $set('nature_of_expense', null);
@@ -482,6 +527,12 @@ class EmployeeRequestResource extends Resource
                             return;
                         }
                         $type = EmployeeRequestType::find($state);
+                        if (AdvanceKinds::isAdvance($type)) {
+                            $set('billed_amount', null);
+                            $set('tax_deduction_rate', null);
+                            $set('income_tax_deduction', null);
+                            $set('sales_tax_deduction', null);
+                        }
                         if ($type && $type->category === 'attendance_correction') {
                             $set('currency_id', null);
                             $set('amount', null);
@@ -519,6 +570,7 @@ class EmployeeRequestResource extends Resource
                 Placeholder::make('approval_type_display')
                     ->label('Approval Category')
                     ->content(fn (Get $get): string => match (true) {
+                        $isBusinessAdvance($get)        => 'Business advance: line manager, HR, then Finance. Settle it with receipts after you spend the money.',
                         $isFinancial($get)              => 'Claims Approval',
                         $isAttendance($get)             => 'Attendance Correction',
                         $isLoan($get)                   => 'Loan: line manager, then HR'.(static::loanHasFinanceStep($companyId) ? ', then finance' : ''),
@@ -719,6 +771,52 @@ class EmployeeRequestResource extends Resource
                         ->required($isAdvance),
                 ]),
 
+            Section::make('Business Advance')
+                ->description('Money you ask for before you spend it on company work.')
+                ->columns(2)
+                ->visible($isBusinessAdvance)
+                ->schema([
+                    TextInput::make('amount')
+                        ->label('How much do you need?')
+                        ->prefix($companyCurrency)
+                        ->placeholder('e.g. 25000')
+                        ->numeric()
+                        ->minValue(0.01)
+                        ->helperText(function (Get $get) use ($companyCurrency): string {
+                            $max = data_get(static::selectedRequestType($get)?->configuration, AdvanceKinds::MaxAmountKey);
+
+                            return is_numeric($max) && (float) $max > 0
+                                ? 'The most you can ask for is '.number_format((float) $max, 2).' '.$companyCurrency.'.'
+                                : 'In '.($companyCurrency ?? 'the company currency').'.';
+                        })
+                        ->required($isBusinessAdvance),
+                    DatePicker::make('payload.needed_by')
+                        ->label('Date you need the money by')
+                        ->native(false)
+                        ->minDate(fn (): string => AdvanceKinds::today())
+                        ->live()
+                        ->required($isBusinessAdvance),
+                    Textarea::make('payload.purpose')
+                        ->label('What is the money for? Say what will be spent and on what')
+                        ->placeholder('e.g. Hotel and fuel for the Lahore customer visit, 3 days')
+                        ->columnSpanFull()
+                        ->required($isBusinessAdvance),
+                    Placeholder::make('advance_settle_by_hint')
+                        ->label('When to settle')
+                        ->columnSpanFull()
+                        ->content(function (Get $get): string {
+                            $type = static::selectedRequestType($get);
+                            $days = AdvanceKinds::settleWithinDays($type);
+                            $neededBy = $get('payload.needed_by');
+                            $by = filled($neededBy) && strtotime((string) $neededBy) !== false
+                                ? Carbon::parse((string) $neededBy)->addDays($days)->format('j M Y')
+                                : null;
+
+                            return 'You will settle this advance with receipts after you spend the money: open this request and press Settle advance. You must settle '
+                                .($by ? "by {$by} (the date you need the money by, plus {$days} days)." : "within {$days} days after the date you need the money by.");
+                        }),
+                ]),
+
             Section::make('Letter Request')
                 ->columns(2)
                 ->visible($isLetter)
@@ -783,7 +881,7 @@ class EmployeeRequestResource extends Resource
                 ->visible(fn (Get $get): bool => ! $isAttendance($get) && ! $isLetter($get))
                 ->schema([
                     FileUpload::make('attachments')
-                        ->label('Supporting Documents / Receipts')
+                        ->label(fn (Get $get): string => $isBusinessAdvance($get) ? 'Quotation or estimate (optional)' : 'Supporting Documents / Receipts')
                         ->multiple()
                         ->disk('local')
                         ->directory('employees/requests')
@@ -799,7 +897,7 @@ class EmployeeRequestResource extends Resource
                 ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get) && ! $isOvertime($get)),
 
             Section::make('Financial Details')->columns(2)
-                ->visible($isFinancial)
+                ->visible($isClaim)
                 ->schema([
                     TextInput::make('billed_amount')
                         ->label('Claim/budget')
@@ -852,6 +950,185 @@ class EmployeeRequestResource extends Resource
             ->where('w.request_type', EmployeeRequestKinds::LoanCode)
             ->whereNotNull('s.approver_role_id')
             ->exists();
+    }
+
+    /**
+     * Where a business advance stands, or null for any other request. Uses the
+     * sums the list query already loaded (AdvanceService::withBalances) so a
+     * page of requests costs no query per row; falls back to the service when
+     * the record did not come from that query.
+     *
+     * @return array{advanced: string, settled: string, returned: string, outstanding: string, is_posted: bool, is_closed: bool, settle_by: ?string, is_overdue: bool}|null
+     */
+    public static function advanceFigures(EmployeeRequest $record): ?array
+    {
+        if (! AdvanceKinds::isAdvance($record->requestType)) {
+            return null;
+        }
+
+        if (! array_key_exists('advance_settled_sum', $record->getAttributes())) {
+            return app(AdvanceService::class)->summary($record);
+        }
+
+        $advanced = BigDecimal::of((string) ($record->amount ?? 0));
+        $settled = BigDecimal::of((string) ($record->getAttribute('advance_settled_sum') ?? 0));
+        $returned = BigDecimal::of((string) ($record->getAttribute('advance_returned_sum') ?? 0));
+        $outstanding = $advanced->minus($settled)->minus($returned);
+        $outstanding = $outstanding->isNegative() ? BigDecimal::zero() : $outstanding;
+        $isPosted = $record->status === 'approved' && $record->accounting_move_id !== null;
+        $settleBy = data_get($record->payload, 'settle_by');
+
+        return [
+            'advanced'    => (string) $advanced->toScale(2),
+            'settled'     => (string) $settled->toScale(2),
+            'returned'    => (string) $returned->toScale(2),
+            'outstanding' => (string) $outstanding->toScale(2),
+            'is_posted'   => $isPosted,
+            'is_closed'   => $isPosted && $outstanding->isZero(),
+            'settle_by'   => $settleBy,
+            'is_overdue'  => $isPosted && $outstanding->isPositive() && $settleBy !== null && $settleBy < AdvanceKinds::today(),
+        ];
+    }
+
+    /** Plain-language status of a business advance (the stored status is not changed), or null for other requests. */
+    public static function advanceStatusLabel(EmployeeRequest $record): ?string
+    {
+        $figures = static::advanceFigures($record);
+
+        if ($figures === null) {
+            return null;
+        }
+
+        return match (true) {
+            $record->status === 'pending_approval'                    => 'Waiting for approval',
+            $record->status === 'approved' && ! $figures['is_posted'] => 'Approved, not paid out yet',
+            $figures['is_closed']                                     => 'Settled',
+            $figures['is_overdue']                                    => 'Overdue',
+            $figures['is_posted']                                     => 'Paid out, to settle',
+            $record->status === 'returned'                            => 'Returned for changes',
+            default                                                   => ucfirst(str_replace('_', ' ', (string) $record->status)),
+        };
+    }
+
+    public static function canSettleAdvance(EmployeeRequest $record): bool
+    {
+        $user = Auth::user();
+        $figures = static::advanceFigures($record);
+
+        return $user instanceof User
+            && $figures !== null
+            && $figures['is_posted']
+            && (float) $figures['outstanding'] > 0
+            && app(AdvanceService::class)->canSettle($user, $record);
+    }
+
+    public static function canRecordAdvanceReturn(EmployeeRequest $record): bool
+    {
+        $user = Auth::user();
+        $figures = static::advanceFigures($record);
+
+        return $user instanceof User
+            && $figures !== null
+            && $figures['is_posted']
+            && (float) $figures['outstanding'] > 0
+            && app(AdvanceService::class)->canRecordReturn($user, $record);
+    }
+
+    /** An approved Advance Settlement whose accounting entry was never made, for Finance to post again. */
+    public static function canRetrySettlementPosting(EmployeeRequest $record): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User
+            && $record->status === 'approved'
+            && AdvanceKinds::isSettlement($record->requestType)
+            && $record->advance_request_id !== null
+            && $user->can(HrPermissions::ProcessFinancialRequests)
+            && CurrentCompany::canAccess((int) $record->company_id, $user)
+            && ! AdvanceEntry::query()->where('source_request_id', $record->id)->exists();
+    }
+
+    /**
+     * Narrows the list to paid-out business advances that are still to settle,
+     * overdue, or settled, using one subquery (no loop over rows).
+     *
+     * @param  Builder<EmployeeRequest>  $query
+     * @return Builder<EmployeeRequest>
+     */
+    protected static function applyAdvanceFilter(Builder $query, ?string $value): Builder
+    {
+        if (! in_array($value, ['outstanding', 'overdue', 'settled'], true)) {
+            return $query;
+        }
+
+        $taken = '(select coalesce(sum(advance_entries.amount), 0) from employees_advance_entries as advance_entries where advance_entries.advance_request_id = employees_requests.id)';
+
+        $query
+            ->where('employees_requests.status', 'approved')
+            ->whereNotNull('employees_requests.accounting_move_id')
+            ->whereHas('requestType', fn (Builder $types): Builder => $types->where('category', AdvanceKinds::AdvanceCategory));
+
+        return match ($value) {
+            'settled' => $query->whereRaw("employees_requests.amount - {$taken} <= 0"),
+            'overdue' => $query->whereRaw("employees_requests.amount - {$taken} > 0")->where('employees_requests.payload->settle_by', '<', AdvanceKinds::today()),
+            default   => $query->whereRaw("employees_requests.amount - {$taken} > 0"),
+        };
+    }
+
+    /** The four numbers of an advance: asked for, spent and settled, handed back, still to settle. */
+    public static function advanceSummaryHtml(EmployeeRequest $record): string
+    {
+        $figures = static::advanceFigures($record);
+        if ($figures === null) {
+            return '';
+        }
+
+        $currency = e($record->currency?->code ?? '');
+        $cell = fn (string $label, string $value): string => '<div><div class="text-xs text-gray-500">'.e($label).'</div>'
+            .'<div class="font-semibold">'.e(number_format((float) $value, 2)).' '.$currency.'</div></div>';
+
+        return '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .75rem;">'
+            .$cell('Advanced', $figures['advanced'])
+            .$cell('Spent and settled', $figures['settled'])
+            .$cell('Handed back', $figures['returned'])
+            .$cell('Still to settle', $figures['outstanding'])
+            .'</div>';
+    }
+
+    /** Settlements and cash handed back so far, oldest first. */
+    public static function advanceHistoryHtml(EmployeeRequest $record): string
+    {
+        $entries = app(AdvanceService::class)->entries($record);
+        if ($entries->isEmpty()) {
+            return '<span class="text-gray-500">Nothing settled or handed back yet.</span>';
+        }
+
+        $currency = e($record->currency?->code ?? '');
+        $rows = $entries->map(fn (AdvanceEntry $entry): string => '<tr>'
+            .'<td class="px-3 py-1">'.e($entry->type === AdvanceKinds::EntrySettlement ? 'Settlement' : 'Cash returned').'</td>'
+            .'<td class="px-3 py-1 text-end">'.e(number_format((float) $entry->amount, 2)).' '.$currency.'</td>'
+            .'<td class="px-3 py-1">'.e($entry->entry_date?->format('d M Y') ?? '').'</td>'
+            .'<td class="px-3 py-1">'.e((string) ($entry->reference ?: '—')).'</td>'
+            .'<td class="px-3 py-1">'.e((string) ($entry->accountingMove?->name ?: '—')).'</td>'
+            .'</tr>')->implode('');
+
+        return '<table class="text-sm"><thead><tr>'
+            .'<th class="px-3 py-1 text-start">What</th><th class="px-3 py-1 text-end">Amount</th><th class="px-3 py-1 text-start">Date</th>'
+            .'<th class="px-3 py-1 text-start">Reference</th><th class="px-3 py-1 text-start">Journal entry</th>'
+            .'</tr></thead><tbody>'.$rows.'</tbody></table>';
+    }
+
+    /** The settlement requests made against an advance, with where each one stands. */
+    public static function advanceSettlementsHtml(EmployeeRequest $record): string
+    {
+        $settlements = $record->settlements()->orderBy('id')->get(['id', 'reference', 'title', 'status']);
+        if ($settlements->isEmpty()) {
+            return '<span class="text-gray-500">None yet. Press Settle advance after you spend the money.</span>';
+        }
+
+        return '<ul class="space-y-1 text-sm">'.$settlements->map(fn (EmployeeRequest $settlement): string => '<li>'
+            .e((string) ($settlement->title ?: $settlement->reference ?: 'Settlement #'.$settlement->id))
+            .' &mdash; <strong>'.e(ucfirst(str_replace('_', ' ', (string) $settlement->status))).'</strong></li>')->implode('').'</ul>';
     }
 
     /** One-line summary of a Loan / Salary advance / HR letter request for the list. */
@@ -1017,6 +1294,13 @@ class EmployeeRequestResource extends Resource
             $data['payload'] = $payload;
         }
 
+        // A business advance is a plain amount: no billed amount, tax rate or tax deductions.
+        if (isset($data['request_type_id']) && AdvanceKinds::isAdvance(EmployeeRequestType::find($data['request_type_id']))) {
+            foreach (['billed_amount', 'tax_deduction_rate', 'income_tax_deduction', 'sales_tax_deduction'] as $claimField) {
+                $data[$claimField] = null;
+            }
+        }
+
         if (blank($data['title'] ?? null)) {
             $typeName = isset($data['request_type_id'])
                 ? EmployeeRequestType::find($data['request_type_id'])?->name
@@ -1105,6 +1389,33 @@ class EmployeeRequestResource extends Resource
             TextColumn::make('status')->badge()->color(fn (string $state): string => match ($state) {
                 'approved' => 'success', 'rejected' => 'danger', 'pending_approval' => 'warning', 'returned' => 'info', default => 'gray',
             }),
+            TextColumn::make('advance_status')
+                ->label('Advance')
+                ->getStateUsing(fn (EmployeeRequest $record): ?string => static::advanceStatusLabel($record))
+                ->placeholder('—')
+                ->badge()
+                ->color(fn (?string $state): string => match ($state) {
+                    'Settled'              => 'success',
+                    'Overdue'              => 'danger',
+                    'Paid out, to settle'  => 'info',
+                    'Waiting for approval' => 'warning',
+                    default                => 'gray',
+                }),
+            TextColumn::make('advance_settle_by')
+                ->label('Settle by')
+                ->getStateUsing(function (EmployeeRequest $record): ?string {
+                    $by = AdvanceKinds::isAdvance($record->requestType) ? data_get($record->payload, 'settle_by') : null;
+
+                    return filled($by) ? Carbon::parse((string) $by)->format('d M Y') : null;
+                })
+                ->placeholder('—')
+                ->color(fn (EmployeeRequest $record): ?string => (static::advanceFigures($record)['is_overdue'] ?? false) ? 'danger' : null)
+                ->tooltip(fn (EmployeeRequest $record): ?string => (static::advanceFigures($record)['is_overdue'] ?? false) ? 'Overdue' : null),
+            TextColumn::make('advance_outstanding')
+                ->label('Outstanding')
+                ->getStateUsing(fn (EmployeeRequest $record): ?string => static::advanceFigures($record)['outstanding'] ?? null)
+                ->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')
+                ->placeholder('—'),
             TextColumn::make('current_approver')
                 ->label('Current Approver')
                 ->getStateUsing(function (EmployeeRequest $record): string {
@@ -1139,7 +1450,17 @@ class EmployeeRequestResource extends Resource
                     'approved' => 'Approved', 'rejected' => 'Rejected',
                     'returned' => 'Returned for changes', 'withdrawn' => 'Withdrawn',
                 ]),
-            ])->recordActions([
+                SelectFilter::make('advances')
+                    ->label('Advances')
+                    ->placeholder('All requests')
+                    ->options([
+                        'outstanding' => 'Outstanding (money still to settle)',
+                        'overdue'     => 'Overdue (should already be settled)',
+                        'settled'     => 'Settled',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => static::applyAdvanceFilter($query, $data['value'] ?? null)),
+            ])->modifyQueryUsing(fn (Builder $query): Builder => app(AdvanceService::class)->withBalances($query))
+            ->recordActions([
                 ViewAction::make()->modalHeading('Employee Request Details'),
                 Action::make('manage_instalments')
                     ->label('Instalments')
@@ -1149,6 +1470,129 @@ class EmployeeRequestResource extends Resource
                         && RequestInstalmentService::kindFor($record) !== null
                         && app(RequestInstalmentService::class)->canManage(Auth::user(), $record))
                     ->url(fn (EmployeeRequest $record): string => EmployeeResource::getUrl('view', ['record' => $record->employee_id])),
+                Action::make('settle_advance')
+                    ->label('Settle advance')
+                    ->icon('heroicon-o-receipt-percent')
+                    ->color('primary')
+                    ->modalHeading('Settle this advance')
+                    ->modalDescription('Tell us what you spent and attach the receipts. It goes for approval like the advance did.')
+                    ->modalSubmitActionLabel('Send for approval')
+                    ->visible(fn (EmployeeRequest $record): bool => static::canSettleAdvance($record))
+                    ->fillForm(fn (EmployeeRequest $record): array => ['amount_spent' => static::advanceFigures($record)['outstanding'] ?? null])
+                    ->schema(fn (EmployeeRequest $record): array => [
+                        TextInput::make('amount_spent')
+                            ->label('Amount spent')
+                            ->prefix($record->currency?->code)
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->maxValue((float) (static::advanceFigures($record)['outstanding'] ?? 0))
+                            ->helperText('Most you can settle is '.number_format((float) (static::advanceFigures($record)['outstanding'] ?? 0), 2).'. If you spent more, settle that much here and file a normal claim for the extra.')
+                            ->required(),
+                        Textarea::make('note')
+                            ->label('What was the money spent on?')
+                            ->placeholder('e.g. Hotel for 2 nights and fuel for the Lahore visit')
+                            ->maxLength(2000)
+                            ->required(),
+                        DatePicker::make('spent_on')
+                            ->label('Date spent')
+                            ->native(false)
+                            ->maxDate(fn (): string => AdvanceKinds::today()),
+                        FileUpload::make('receipts')
+                            ->label('Receipts')
+                            ->helperText('Photos or scans of every receipt for what you spent.')
+                            ->multiple()
+                            ->disk('local')
+                            ->directory('employees/requests')
+                            ->visibility('private')
+                            ->required(),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(AdvanceService::class)->startSettlement(
+                                Auth::user(),
+                                $record,
+                                (string) $data['amount_spent'],
+                                array_values((array) ($data['receipts'] ?? [])),
+                                (string) $data['note'],
+                                filled($data['spent_on'] ?? null) ? Carbon::parse((string) $data['spent_on'])->toDateString() : null,
+                            );
+                            Notification::make()->success()->title('Settlement sent for approval')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not settle the advance')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('record_cash_returned')
+                    ->label('Record cash returned')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('gray')
+                    ->modalHeading('Record cash returned')
+                    ->modalDescription('Use this when the employee gives back money they did not spend.')
+                    ->modalSubmitActionLabel('Record')
+                    ->visible(fn (EmployeeRequest $record): bool => static::canRecordAdvanceReturn($record))
+                    ->fillForm(fn (EmployeeRequest $record): array => [
+                        'amount'      => static::advanceFigures($record)['outstanding'] ?? null,
+                        'returned_on' => AdvanceKinds::today(),
+                    ])
+                    ->schema(fn (EmployeeRequest $record): array => [
+                        TextInput::make('amount')
+                            ->label('Amount handed back')
+                            ->prefix($record->currency?->code)
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->maxValue((float) (static::advanceFigures($record)['outstanding'] ?? 0))
+                            ->helperText('Not more than what is still to settle: '.number_format((float) (static::advanceFigures($record)['outstanding'] ?? 0), 2).'.')
+                            ->required(),
+                        Select::make('journal_id')
+                            ->label('Bank or cash account')
+                            ->helperText('Where the money was received.')
+                            ->options(fn (): array => app(AdvanceService::class)->returnJournalOptions($record))
+                            ->required(),
+                        DatePicker::make('returned_on')
+                            ->label('Date')
+                            ->native(false)
+                            ->maxDate(fn (): string => AdvanceKinds::today())
+                            ->required(),
+                        TextInput::make('reference')->label('Reference (optional)')->placeholder('e.g. Deposit slip number')->maxLength(255),
+                        Textarea::make('note')->label('Note (optional)')->maxLength(2000),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data): void {
+                        try {
+                            app(AdvanceService::class)->recordReturnedCash(
+                                Auth::user(),
+                                $record,
+                                (string) $data['amount'],
+                                (int) $data['journal_id'],
+                                Carbon::parse((string) $data['returned_on'])->toDateString(),
+                                filled($data['reference'] ?? null) ? (string) $data['reference'] : null,
+                                filled($data['note'] ?? null) ? (string) $data['note'] : null,
+                            );
+                            Notification::make()->success()->title('Cash returned has been recorded')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not record the cash')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('post_settlement_again')
+                    ->label('Post settlement again')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading('Post this settlement again?')
+                    ->modalDescription('Use this if approval finished but the accounting entry is missing.')
+                    ->modalSubmitActionLabel('Post settlement')
+                    ->visible(fn (EmployeeRequest $record): bool => static::canRetrySettlementPosting($record))
+                    ->action(function (EmployeeRequest $record): void {
+                        if (! static::canRetrySettlementPosting($record)) {
+                            Notification::make()->danger()->title('You cannot post this settlement')->send();
+
+                            return;
+                        }
+                        try {
+                            app(AdvanceService::class)->applyApprovedSettlement($record);
+                            Notification::make()->success()->title('Settlement posted')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not post the settlement')->body($e->getMessage())->send();
+                        }
+                    }),
                 Action::make('submit')
                     ->icon('heroicon-o-paper-airplane')->color('primary')->requiresConfirmation()
                     ->modalHeading('Send this request for approval?')
