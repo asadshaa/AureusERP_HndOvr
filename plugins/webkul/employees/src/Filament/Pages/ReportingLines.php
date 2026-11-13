@@ -94,6 +94,11 @@ class ReportingLines extends Page implements HasForms, HasTable
     {
         return [
             HelpAction::make('reporting-lines'),
+            Action::make('teamBoard')
+                ->label('Drag & drop view')
+                ->icon('heroicon-o-user-group')
+                ->color('gray')
+                ->url(fn (): string => TeamBoard::getUrl()),
             Action::make('history')
                 ->label('History')
                 ->icon('heroicon-o-clock')
