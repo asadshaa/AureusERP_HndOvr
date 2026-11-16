@@ -182,7 +182,7 @@ class TodayAttendance
         $isToday = $date === $now->toDateString();
         $isYesterday = $date === $now->subDay()->toDateString();
         $day = CarbonImmutable::parse($date, $timezone)->startOfDay();
-        $secondsNow = $isToday ? $day->diffInSeconds($now, false) : null;
+        $secondsNow = $isToday ? (int) $day->diffInSeconds($now, false) : null;
         // Seconds since the date's midnight (above 86400 the next day): an overnight shift is still running before its end.
         $secondsSinceMidnight = (int) $day->diffInSeconds($now, false);
 
