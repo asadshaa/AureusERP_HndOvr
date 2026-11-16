@@ -47,10 +47,12 @@ use Webkul\Employee\Models\EmployeeRequestType;
 use Webkul\Employee\Services\Advances\AdvanceService;
 use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\EmployeeRequestService;
+use Webkul\Employee\Services\ExpenseHeadsUpService;
 use Webkul\Employee\Services\HrHierarchyService;
 use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Employee\Support\AdvanceKinds;
 use Webkul\Employee\Support\EmployeeRequestKinds;
+use Webkul\Employee\Support\ExpenseHeadsUp;
 use Webkul\Employee\Support\HrPermissions;
 use Webkul\Security\Models\User;
 use Webkul\Security\Services\CurrentCompany;
@@ -245,6 +247,32 @@ class EmployeeRequestResource extends Resource
                                 ])
                                 ->columns(2),
 
+                            Section::make('Expense Heads-up')
+                                ->description('A notice that this expense will be made. Nothing is paid from a heads-up.')
+                                ->visible(fn (EmployeeRequest $record): bool => ExpenseHeadsUp::isHeadsUp($record->requestType))
+                                ->schema([
+                                    TextEntry::make('payload.expected_on')->label('Expected on')->date('d M Y (l)')->placeholder('—'),
+                                    TextEntry::make('payload.estimated_amount')->label('Estimated amount')->money(fn (EmployeeRequest $record): string => $record->currency?->code ?? 'PKR')->weight(FontWeight::Bold),
+                                    TextEntry::make('nature_of_expense')->label('Nature of Expense')->placeholder('—'),
+                                    TextEntry::make('heads_up_outcome')->label('What happened')
+                                        ->getStateUsing(function (EmployeeRequest $record): string {
+                                            $claimId = data_get($record->payload, 'claim_request_id');
+                                            if ($claimId) {
+                                                $claim = EmployeeRequest::query()->find((int) $claimId);
+
+                                                return 'Turned into claim '.($claim?->reference ?: '#'.$claimId).' ('.str_replace('_', ' ', (string) $claim?->status).')';
+                                            }
+
+                                            return match (true) {
+                                                $record->status === 'withdrawn' => 'Cancelled by the employee',
+                                                $record->status === 'approved'  => 'Noted by HR. Not claimed yet.',
+                                                default                         => 'Waiting for approval',
+                                            };
+                                        }),
+                                    TextEntry::make('payload.what_for')->label('What it is for')->columnSpanFull(),
+                                ])
+                                ->columns(2),
+
                             Section::make('Advance Settlement')
                                 ->visible(fn (EmployeeRequest $record): bool => AdvanceKinds::isSettlement($record->requestType))
                                 ->schema([
@@ -261,6 +289,18 @@ class EmployeeRequestResource extends Resource
                             Section::make('Financial Details')
                                 ->visible(fn (EmployeeRequest $record): bool => (bool) $record->requestType?->is_financial && ! AdvanceKinds::isAdvance($record->requestType))
                                 ->schema([
+                                    TextEntry::make('payload.spent_on')->label('Date spent')->date('d M Y')->placeholder('—'),
+                                    TextEntry::make('heads_up_comparison')->label('Against the heads-up')->html()
+                                        ->visible(fn (EmployeeRequest $record): bool => app(ExpenseHeadsUpService::class)->comparison($record) !== null)
+                                        ->getStateUsing(function (EmployeeRequest $record): string {
+                                            $c = app(ExpenseHeadsUpService::class)->comparison($record);
+                                            $text = 'Estimated '.number_format((float) $c['estimated'], 2).', actual '.number_format((float) $c['actual'], 2)
+                                                .' ('.($c['over_by_percent'] > 0 ? '+' : '').$c['over_by_percent'].'%)';
+
+                                            return $c['flagged']
+                                                ? '<span class="font-semibold text-danger-600">'.e($text).'. More than '.(float) $c['allowed_percent'].'% over the estimate: Finance please check.</span>'
+                                                : e($text);
+                                        }),
                                     TextEntry::make('billed_amount')->label('Claim/Budget')->money(fn ($record) => $record->currency?->code ?? 'PKR'),
                                     TextEntry::make('tax_deduction_rate')->label('Tax Rate')->suffix('%')->placeholder('0%'),
                                     TextEntry::make('income_tax_deduction')->label('Income Tax Deduction')->money(fn ($record) => $record->currency?->code ?? 'PKR'),
@@ -477,6 +517,7 @@ class EmployeeRequestResource extends Resource
         $isFinancial = fn (Get $get): bool => (bool) static::selectedRequestType($get)?->is_financial;
         $isBusinessAdvance = fn (Get $get): bool => AdvanceKinds::isAdvance(static::selectedRequestType($get));
         $isClaim = fn (Get $get): bool => $isFinancial($get) && ! $isBusinessAdvance($get);
+        $isHeadsUp = fn (Get $get): bool => ExpenseHeadsUp::isHeadsUp(static::selectedRequestType($get));
         $isAttendance = fn (Get $get): bool => static::selectedRequestType($get)?->category === 'attendance_correction';
         $isLoan = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::LoanCategory;
         $isAdvance = fn (Get $get): bool => static::selectedRequestType($get)?->category === EmployeeRequestKinds::SalaryAdvanceCategory;
@@ -571,6 +612,7 @@ class EmployeeRequestResource extends Resource
                     ->label('Approval Category')
                     ->content(fn (Get $get): string => match (true) {
                         $isBusinessAdvance($get)        => 'Business advance: line manager, HR, then Finance. Settle it with receipts after you spend the money.',
+                        $isHeadsUp($get)                => 'Expense heads-up: line manager, then HR. It tells HR an expense is coming and pays nothing. After you spend the money, press Turn into claim.',
                         $isFinancial($get)              => 'Claims Approval',
                         $isAttendance($get)             => 'Attendance Correction',
                         $isLoan($get)                   => 'Loan: line manager, then HR'.(static::loanHasFinanceStep($companyId) ? ', then finance' : ''),
@@ -817,6 +859,29 @@ class EmployeeRequestResource extends Resource
                         }),
                 ]),
 
+            Section::make('Expense heads-up')
+                ->description('Tell HR about an expense you will make later. Nothing is paid from this. If the money is already spent, file a claim instead.')
+                ->columns(2)
+                ->visible($isHeadsUp)
+                ->schema([
+                    DatePicker::make('payload.expected_on')
+                        ->label('Date you will spend it')
+                        ->native(false)
+                        ->minDate(fn (): string => ExpenseHeadsUpService::today())
+                        ->required($isHeadsUp),
+                    TextInput::make('payload.estimated_amount')
+                        ->label('Estimated amount')
+                        ->numeric()->minValue(0.01)
+                        ->helperText('Your best guess. You will enter the real amount when you turn this into a claim.')
+                        ->required($isHeadsUp),
+                    Textarea::make('payload.what_for')
+                        ->label('What will you spend it on, and why?')
+                        ->placeholder('e.g. Hotel and fuel for the Lahore customer visit on 24 Nov')
+                        ->maxLength(2000)
+                        ->columnSpanFull()
+                        ->required($isHeadsUp),
+                ]),
+
             Section::make('Letter Request')
                 ->columns(2)
                 ->visible($isLetter)
@@ -875,13 +940,13 @@ class EmployeeRequestResource extends Resource
                 ->relationship('currency', 'name')
                 ->default(fn (): ?int => Auth::user()?->defaultCompany?->currency_id)
                 ->searchable()->preload()
-                ->visible($isFinancial)
-                ->required($isFinancial),
+                ->visible(fn (Get $get): bool => $isFinancial($get) || $isHeadsUp($get))
+                ->required(fn (Get $get): bool => $isFinancial($get) || $isHeadsUp($get)),
             Section::make('Attachments')
                 ->visible(fn (Get $get): bool => ! $isAttendance($get) && ! $isLetter($get))
                 ->schema([
                     FileUpload::make('attachments')
-                        ->label(fn (Get $get): string => $isBusinessAdvance($get) ? 'Quotation or estimate (optional)' : 'Supporting Documents / Receipts')
+                        ->label(fn (Get $get): string => ($isBusinessAdvance($get) || $isHeadsUp($get)) ? 'Quotation or estimate (optional)' : 'Supporting Documents / Receipts')
                         ->multiple()
                         ->disk('local')
                         ->directory('employees/requests')
@@ -894,11 +959,20 @@ class EmployeeRequestResource extends Resource
             KeyValue::make('payload_details')
                 ->label('Additional request details')->columnSpanFull()
                 ->formatStateUsing(fn ($state, ?EmployeeRequest $record): ?array => $state ?? (is_array($record?->payload) ? array_filter($record->payload, 'is_scalar') : null))
-                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get) && ! $isOvertime($get)),
+                ->visible(fn (Get $get): bool => ! $isFinancial($get) && ! $isAttendance($get) && ! $isSelfService($get) && ! $isOvertime($get) && ! $isHeadsUp($get)),
 
             Section::make('Financial Details')->columns(2)
                 ->visible($isClaim)
                 ->schema([
+                    DatePicker::make('payload.spent_on')
+                        ->label('Date spent')
+                        ->helperText('The day you paid for it.')
+                        ->native(false)
+                        ->maxDate(fn (): string => ExpenseHeadsUpService::today())
+                        ->required($isClaim),
+                    // Kept so editing a claim made from a heads-up does not drop the link or the estimate.
+                    Hidden::make('payload.heads_up_id')->visible($isClaim),
+                    Hidden::make('payload.heads_up_estimate')->visible($isClaim),
                     TextInput::make('billed_amount')
                         ->label('Claim/budget')
                         ->placeholder('e.g. 12500')
@@ -1450,6 +1524,25 @@ class EmployeeRequestResource extends Resource
                     'approved' => 'Approved', 'rejected' => 'Rejected',
                     'returned' => 'Returned for changes', 'withdrawn' => 'Withdrawn',
                 ]),
+                SelectFilter::make('heads_ups')
+                    ->label('Expense heads-ups')
+                    ->placeholder('All requests')
+                    ->options([
+                        'not_claimed' => 'Expected, not claimed yet',
+                        'late'        => 'Expected date passed, no claim',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $value = $data['value'] ?? null;
+                        if (! in_array($value, ['not_claimed', 'late'], true)) {
+                            return $query;
+                        }
+
+                        return $query
+                            ->where('status', 'approved')
+                            ->whereHas('requestType', fn (Builder $types) => $types->where('category', ExpenseHeadsUp::Category))
+                            ->whereNull('payload->claim_request_id')
+                            ->when($value === 'late', fn (Builder $q) => $q->where('payload->expected_on', '<', ExpenseHeadsUpService::today()));
+                    }),
                 SelectFilter::make('advances')
                     ->label('Advances')
                     ->placeholder('All requests')
@@ -1470,6 +1563,80 @@ class EmployeeRequestResource extends Resource
                         && RequestInstalmentService::kindFor($record) !== null
                         && app(RequestInstalmentService::class)->canManage(Auth::user(), $record))
                     ->url(fn (EmployeeRequest $record): string => EmployeeResource::getUrl('view', ['record' => $record->employee_id])),
+                Action::make('convert_heads_up')
+                    ->label('Turn into claim')
+                    ->icon('heroicon-o-arrow-right-circle')
+                    ->color('primary')
+                    ->modalHeading('Turn this heads-up into a claim')
+                    ->modalDescription('Tell us what you really spent. A draft claim is made for you: open it to add receipts and bank details, then submit it.')
+                    ->modalSubmitActionLabel('Create draft claim')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User && app(ExpenseHeadsUpService::class)->canConvert($record, Auth::user()))
+                    ->fillForm(fn (EmployeeRequest $record): array => [
+                        'amount_spent' => data_get($record->payload, 'estimated_amount'),
+                        'spent_on'     => ExpenseHeadsUpService::today(),
+                        'nature'       => $record->nature_of_expense,
+                    ])
+                    ->schema(fn (EmployeeRequest $record): array => [
+                        Select::make('claim_type_id')
+                            ->label('Claim type')
+                            ->options(app(ExpenseHeadsUpService::class)->claimTypeOptions($record))
+                            ->searchable()->live()->required(),
+                        Select::make('nature')
+                            ->label('Nature of expense')
+                            ->options(function (Get $get): array {
+                                $natures = EmployeeRequestType::query()->find($get('claim_type_id'))?->getExpenseNatures() ?? [];
+
+                                return array_combine($natures, $natures);
+                            })
+                            ->visible(fn (Get $get): bool => (EmployeeRequestType::query()->find($get('claim_type_id'))?->getExpenseNatures() ?? []) !== [])
+                            ->required(fn (Get $get): bool => (EmployeeRequestType::query()->find($get('claim_type_id'))?->getExpenseNatures() ?? []) !== [])
+                            ->searchable(),
+                        TextInput::make('amount_spent')
+                            ->label('Amount you actually spent')
+                            ->prefix($record->currency?->code)
+                            ->helperText('You estimated '.number_format((float) data_get($record->payload, 'estimated_amount', 0), 2).'.')
+                            ->numeric()->minValue(0.01)->required(),
+                        DatePicker::make('spent_on')
+                            ->label('Date spent')
+                            ->native(false)
+                            ->maxDate(fn (): string => ExpenseHeadsUpService::today())
+                            ->required(),
+                    ])
+                    ->action(function (EmployeeRequest $record, array $data) {
+                        try {
+                            $claim = app(ExpenseHeadsUpService::class)->convertToClaim(
+                                $record,
+                                Auth::user(),
+                                (int) $data['claim_type_id'],
+                                (string) $data['amount_spent'],
+                                Carbon::parse((string) $data['spent_on'])->toDateString(),
+                                $data['nature'] ?? null,
+                            );
+                            Notification::make()->success()
+                                ->title('Draft claim created')
+                                ->body('Open it from the list, add your receipts and bank details, then submit it.')
+                                ->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not turn it into a claim')->body($e->getMessage())->send();
+                        }
+                    }),
+                Action::make('cancel_heads_up')
+                    ->label('Cancel heads-up')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalHeading('Cancel this heads-up?')
+                    ->modalDescription('Use this when the expense is not going to happen. HR will no longer expect a claim for it.')
+                    ->modalSubmitActionLabel('Cancel heads-up')
+                    ->visible(fn (EmployeeRequest $record): bool => Auth::user() instanceof User && app(ExpenseHeadsUpService::class)->canCancel($record, Auth::user()))
+                    ->action(function (EmployeeRequest $record): void {
+                        try {
+                            app(ExpenseHeadsUpService::class)->cancel($record, Auth::user());
+                            Notification::make()->success()->title('Heads-up cancelled')->send();
+                        } catch (RuntimeException $e) {
+                            Notification::make()->danger()->title('Could not cancel')->body($e->getMessage())->send();
+                        }
+                    }),
                 Action::make('settle_advance')
                     ->label('Settle advance')
                     ->icon('heroicon-o-receipt-percent')

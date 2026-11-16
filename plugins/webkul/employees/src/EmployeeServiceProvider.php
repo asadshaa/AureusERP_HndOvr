@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Throwable;
 use Webkul\Employee\Console\Commands\AutoCompleteShiftsCommand;
 use Webkul\Employee\Database\Seeders\AttendanceWorkflowSeeder;
+use Webkul\Employee\Database\Seeders\ExpenseHeadsUpWorkflowSeeder;
 use Webkul\Employee\Database\Seeders\OvertimeWorkflowSeeder;
 use Webkul\Employee\Database\Seeders\SelfServiceRequestWorkflowSeeder;
 use Webkul\Employee\Exceptions\AttendanceMonthLockedException;
@@ -114,6 +115,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                 '2026_11_12_200001_use_generic_expense_natures_for_other_companies',
                 '2026_11_13_100001_create_employees_advance_tables',
                 '2026_11_14_100001_create_employees_reporting_tables',
+                '2026_11_16_100001_provision_expense_heads_up_workflows',
             ])
             ->runsMigrations()
             ->hasSeeder('Webkul\\Employee\\Database\Seeders\\DatabaseSeeder')
@@ -144,6 +146,7 @@ class EmployeeServiceProvider extends PackageServiceProvider
                     app(AttendanceWorkflowSeeder::class)->provisionForCompany($company);
                     app(SelfServiceRequestWorkflowSeeder::class)->provisionForCompany($company);
                     app(OvertimeWorkflowSeeder::class)->provisionForCompany($company);
+                    app(ExpenseHeadsUpWorkflowSeeder::class)->provisionForCompany($company);
                 }
             } catch (Throwable $e) {
                 report($e);

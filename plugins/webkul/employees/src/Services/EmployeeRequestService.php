@@ -33,6 +33,7 @@ use Webkul\Employee\Services\Attendance\OvertimeService;
 use Webkul\Employee\Services\Payroll\RequestInstalmentService;
 use Webkul\Employee\Support\AdvanceKinds;
 use Webkul\Employee\Support\EmployeeRequestKinds;
+use Webkul\Employee\Support\ExpenseHeadsUp;
 use Webkul\Security\Models\User;
 use Webkul\Support\Enums\ApprovalRequestStatus;
 use Webkul\Support\Models\ApprovalRequest;
@@ -61,6 +62,9 @@ class EmployeeRequestService
         $this->assertClaimTaxConsistency($request);
         $this->prepareSelfServicePayload($request);
         $this->prepareAdvancePayload($request);
+        if (ExpenseHeadsUp::isHeadsUp($request->requestType)) {
+            app(ExpenseHeadsUpService::class)->prepareSubmission($request);
+        }
         if (OvertimeService::isOvertime($request->requestType)) {
             app(OvertimeService::class)->prepareSubmission($request);
         }

@@ -69,14 +69,14 @@ final class ReportingPurposes
         }
 
         return match (true) {
-            $requestType === 'leave_request'                                           => self::Leave,
-            $requestType === 'attendance_time_change'                                  => self::Attendance,
-            str_starts_with($requestType, 'claim_')                                    => self::Claims,
-            in_array($requestType, ['business_advance', 'advance_settlement'], true)   => self::Advance,
-            in_array($requestType, ['loan_request', 'salary_advance'], true)           => self::Loan,
-            $requestType === 'overtime'                                                => self::Overtime,
-            in_array($requestType, ['recruitment_job_opening', 'job_offer'], true)     => self::Recruitment,
-            default                                                                    => null,
+            $requestType === 'leave_request'                                               => self::Leave,
+            $requestType === 'attendance_time_change'                                      => self::Attendance,
+            str_starts_with($requestType, 'claim_') || $requestType === 'expense_heads_up' => self::Claims,
+            in_array($requestType, ['business_advance', 'advance_settlement'], true)       => self::Advance,
+            in_array($requestType, ['loan_request', 'salary_advance'], true)               => self::Loan,
+            $requestType === 'overtime'                                                    => self::Overtime,
+            in_array($requestType, ['recruitment_job_opening', 'job_offer'], true)         => self::Recruitment,
+            default                                                                        => null,
         };
     }
 
@@ -92,6 +92,7 @@ final class ReportingPurposes
             $requestType === 'salary_advance'             => 'Salary advance',
             $requestType === 'hr_letter'                  => 'HR letter',
             $requestType === 'overtime'                   => 'Overtime',
+            $requestType === 'expense_heads_up'           => 'Expense heads-up',
             $requestType === 'recruitment_job_opening'    => 'Job opening',
             $requestType === 'job_offer'                  => 'Job offer',
             $requestType === 'employee_sensitive_change'  => 'Sensitive data change',

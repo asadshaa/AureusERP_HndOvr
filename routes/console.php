@@ -288,6 +288,17 @@ Schedule::command('hr:advance-reminders')
     ->onOneServer();
 
 /*
+| hr:heads-up-reminders -- 09:50 Karachi, approved expense heads-ups whose
+| expected date has passed without a claim: told the day after, then weekly.
+| In-app only, at most once per heads-up and day.
+*/
+Schedule::command('hr:heads-up-reminders')
+    ->dailyAt('09:50')
+    ->timezone(config('attendance.monthly_report.timezone', 'Asia/Karachi'))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+/*
 | hr:appraisal-reminders -- 09:15 Karachi, appraisal self reviews to the
 | employee and manager reviews to the reviewer (or the company HR when there
 | is no line manager): a few days before the deadline, the day after it and

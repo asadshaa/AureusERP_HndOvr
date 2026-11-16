@@ -60,7 +60,7 @@ class ApprovalFlowService
     /** Kinds of request that always exist for HR even before any flow was created. */
     private const KnownRequestTypes = [
         'leave_request', 'attendance_time_change', 'business_advance', 'advance_settlement',
-        'loan_request', 'salary_advance', 'hr_letter', 'overtime', 'recruitment_job_opening',
+        'loan_request', 'salary_advance', 'hr_letter', 'overtime', 'expense_heads_up', 'recruitment_job_opening',
         'job_offer', 'employee_sensitive_change',
     ];
 
