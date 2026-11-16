@@ -4,10 +4,15 @@ namespace App\Support;
 
 use App\Filament\Pages\Dashboard;
 use Filament\Facades\Filament;
+use Filament\Resources\Pages\CreateRecord;
+use Filament\Resources\Pages\EditRecord;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Resources\Pages\Page as ResourcePage;
+use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Contracts\HasLabel;
 use Throwable;
+use Webkul\Security\Services\CurrentCompany;
+use Webkul\Support\Models\Company;
 
 /**
  * The "Back" button and the "Home > Group > Page" trail shown above every page.
@@ -21,7 +26,7 @@ final class PageTrail
 {
     /**
      * @param  array<int, mixed>  $scopes  the render-hook scopes of the page: page class first, resource class second
-     * @return array{back: string, crumbs: array<int, array{label: string, url: ?string}>}|null null on the home page
+     * @return array{back: string, crumbs: array<int, array{label: string, url: ?string}>, companies: array<int, string>, active_company: ?int}|null null on the home page
      */
     public static function for(array $scopes): ?array
     {
@@ -33,6 +38,8 @@ final class PageTrail
         }
 
         $home = $panel->getUrl() ?? url('/');
+        $companies = self::companiesFor($pageClass);
+        $active = $companies === [] ? null : CurrentCompany::id();
 
         if (is_a($pageClass, ResourcePage::class, true)) {
             $resource = is_string($scopes[1] ?? null) ? $scopes[1] : null;
@@ -42,11 +49,11 @@ final class PageTrail
                 $back = $resource::getUrl('index');
             }
 
-            return ['back' => $back, 'crumbs' => []];
+            return ['back' => $back, 'crumbs' => [], 'companies' => $companies, 'active_company' => $active];
         }
 
         if (filled($pageClass::getCluster())) {
-            return ['back' => $home, 'crumbs' => []];
+            return ['back' => $home, 'crumbs' => [], 'companies' => $companies, 'active_company' => $active];
         }
 
         $crumbs = [['label' => 'Home', 'url' => $home]];
@@ -58,7 +65,29 @@ final class PageTrail
 
         $crumbs[] = ['label' => self::pageLabel($pageClass), 'url' => null];
 
-        return ['back' => $home, 'crumbs' => $crumbs];
+        return ['back' => $home, 'crumbs' => $crumbs, 'companies' => $companies, 'active_company' => $active];
+    }
+
+    /**
+     * The companies a person may switch between, offered on list and report pages
+     * (not on a form for one record) and only when they belong to more than one.
+     *
+     * @return array<int, string> company id => name
+     */
+    private static function companiesFor(string $pageClass): array
+    {
+        if (is_a($pageClass, CreateRecord::class, true) || is_a($pageClass, EditRecord::class, true) || is_a($pageClass, ViewRecord::class, true)) {
+            return [];
+        }
+
+        $user = CurrentCompany::user();
+        $ids = $user ? CurrentCompany::membershipIds($user) : [];
+
+        if (count($ids) < 2) {
+            return [];
+        }
+
+        return Company::query()->whereIn('id', $ids)->orderBy('name')->pluck('name', 'id')->all();
     }
 
     private static function groupLabel(string $pageClass): ?string
