@@ -134,6 +134,10 @@ class AdminPanelProvider extends PanelProvider
                 EnsureActiveCompany::class,
             ])
             ->renderHook(PanelsRenderHook::STYLES_AFTER, fn (): string => view('filament.home.styles')->render(), scopes: Dashboard::class)
+            ->renderHook(PanelsRenderHook::BODY_END, fn (): string => view('filament.navigation.trail-script')->render())
+            ->renderHook(PanelsRenderHook::PAGE_START, fn (array $scopes): string => view('filament.navigation.trail', ['scopes' => $scopes])->render())
+            // After saving an edit form, show the saved record instead of leaving people on the form.
+            ->resourceEditPageRedirect('view')
             ->renderHook(PanelsRenderHook::USER_MENU_BEFORE, fn (): string => view('security::components.company-switcher')->render())
             ->multiFactorAuthentication([
                 AppAuthentication::make()
